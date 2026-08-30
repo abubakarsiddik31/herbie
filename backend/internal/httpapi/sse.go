@@ -8,9 +8,8 @@ import (
 
 // sseSink writes the chat SSE protocol and implements chat.Sink.
 type sseSink struct {
-	w        http.ResponseWriter
-	flush    http.Flusher
-	requests int
+	w     http.ResponseWriter
+	flush http.Flusher
 }
 
 func newSSESink(w http.ResponseWriter) (*sseSink, bool) {
@@ -42,6 +41,5 @@ func (s *sseSink) event(name string, payload any) error {
 func (s *sseSink) Delta(text string) error { return s.event("delta", map[string]string{"text": text}) }
 func (s *sseSink) ModelStart()             { _ = s.event("meta", map[string]string{"type": "model_start"}) }
 func (s *sseSink) ModelEnd(in, out int) {
-	s.requests++
 	_ = s.event("meta", map[string]any{"type": "model_end", "inputTokens": in, "outputTokens": out})
 }

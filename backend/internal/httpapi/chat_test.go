@@ -69,10 +69,36 @@ func newFakeConvos(msgs *fakeMsgs) *fakeConvos {
 	return &fakeConvos{convs: map[string]storage.Conversation{}, msgs: msgs}
 }
 
-func (f *fakeConvos) mustCreate(userID, title string) storage.Conversation {
+var _ ConvoStore = (*fakeConvos)(nil)
+
+func (f *fakeConvos) Create(_ context.Context, userID, title string) (storage.Conversation, error) {
 	conv := storage.Conversation{ID: fmt.Sprintf("c-%d", len(f.convs)+1), UserID: userID, Title: title}
 	f.convs[conv.ID] = conv
+	return conv, nil
+}
+
+func (f *fakeConvos) List(_ context.Context, userID string) ([]storage.Conversation, error) {
+	var out []storage.Conversation
+	for _, c := range f.convs {
+		if c.UserID == userID {
+			out = append(out, c)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeConvos) mustCreate(userID, title string) storage.Conversation {
+	conv, _ := f.Create(context.Background(), userID, title)
 	return conv
+}
+
+func (f *fakeConvos) Delete(_ context.Context, id, userID string) error {
+	conv, ok := f.convs[id]
+	if !ok || conv.UserID != userID {
+		return storage.ErrNotFound
+	}
+	delete(f.convs, id)
+	return nil
 }
 
 func (f *fakeConvos) ByID(_ context.Context, id, userID string) (storage.Conversation, error) {
@@ -158,7 +184,9 @@ func TestSendMessageStreamsAndPersists(t *testing.T) {
 		t.Fatalf("messages persisted: %d", msgs.count())
 	}
 	// 12*0.3 + 7*2.5 = 21.1 micro-USD, rounded to 21.
-	if usage.events[0].InputTokens != 12 || usage.events[0].CostMicros != 21 {
+	e := usage.events[0]
+	if e.Kind != "chat" || e.Requests != 1 || e.ConversationID == nil || *e.ConversationID != conv.ID ||
+		e.InputTokens != 12 || e.CostMicros != 21 {
 		t.Fatalf("usage not recorded: %+v", usage.events)
 	}
 	if convs.convs[conv.ID].Title != "hello" {

@@ -17,12 +17,20 @@ import (
 // The handler depends on store interfaces, not concrete *storage.* types,
 // so its tests run offline with in-memory fakes; *storage.Conversations,
 // *storage.Messages, and *storage.Usage satisfy them implicitly.
+// ConvoStore is the full union the chat and CRUD routes need; the
+// var _ ConvoStore = (*storage.Conversations)(nil) below pins the
+// production wiring at compile time.
 type ConvoStore interface {
+	Create(ctx context.Context, userID, title string) (storage.Conversation, error)
+	List(ctx context.Context, userID string) ([]storage.Conversation, error)
 	ByID(ctx context.Context, id, userID string) (storage.Conversation, error)
 	SetTitle(ctx context.Context, id, userID, title string) error
 	Touch(ctx context.Context, id string) error
+	Delete(ctx context.Context, id, userID string) error
 	CountMessages(ctx context.Context, id, userID string) (int, error)
 }
+
+var _ ConvoStore = (*storage.Conversations)(nil)
 
 type MsgStore interface {
 	Add(ctx context.Context, msg storage.Message) error
@@ -90,7 +98,7 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 
 	outcome, err := s.deps.Agent.Run(ctx, chat.Deps{UserID: userID, ConversationID: convID}, history, req.Content, sink)
 	if err != nil {
-		s.persistFailure(ctx, userID, convID, err, sink, r)
+		s.persistFailure(ctx, userID, convID, err, sink)
 		return
 	}
 	s.finishRun(ctx, userID, convID, outcome, sink)
@@ -98,7 +106,7 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 
 // persistFailure uses golem v0.7.1 partial evidence: whatever completed is
 // kept, marked truncated.
-func (s *Server) persistFailure(ctx context.Context, userID, convID string, runErr error, sink *sseSink, r *http.Request) {
+func (s *Server) persistFailure(ctx context.Context, userID, convID string, runErr error, sink *sseSink) {
 	clientGone := errors.Is(runErr, context.Canceled) || errors.Is(runErr, context.DeadlineExceeded)
 	var runError *golem.RunError
 	_ = errors.As(runErr, &runError)
@@ -122,11 +130,8 @@ func (s *Server) persistFailure(ctx context.Context, userID, convID string, runE
 		}
 	}
 	_ = s.deps.Convos.Touch(ctx, convID)
-	if clientGone && r.Context().Err() != nil {
-		return // client is gone; writing would fail anyway
-	}
 	if clientGone {
-		return // quiet stop for user-initiated cancels
+		return // client is gone; quiet stop for user-initiated cancels
 	}
 	stage := "model"
 	if runError != nil {
