@@ -6,6 +6,7 @@ import (
 
 	"github.com/abubakarsiddik31/golem-chatbot/internal/auth"
 	"github.com/abubakarsiddik31/golem-chatbot/internal/config"
+	"github.com/abubakarsiddik31/golem-chatbot/internal/storage"
 )
 
 // ServerDeps carries the wired collaborators. Fields join as later tasks
@@ -15,6 +16,8 @@ type ServerDeps struct {
 	Log    *slog.Logger
 	Auth   *auth.Service
 	Tokens *auth.TokenMaker
+	Convos *storage.Conversations
+	Msgs   *storage.Messages
 }
 
 type Server struct {
@@ -43,7 +46,11 @@ func NewServer(deps ServerDeps) http.Handler {
 	// requires a valid bearer token.
 	authed := http.NewServeMux()
 	authed.HandleFunc("GET /api/me", s.handleMe)
-	// later tasks mount more authed routes here
+	authed.HandleFunc("GET /api/conversations", s.handleListConversations)
+	authed.HandleFunc("POST /api/conversations", s.handleCreateConversation)
+	authed.HandleFunc("GET /api/conversations/{id}", s.handleGetConversation)
+	authed.HandleFunc("PATCH /api/conversations/{id}", s.handlePatchConversation)
+	authed.HandleFunc("DELETE /api/conversations/{id}", s.handleDeleteConversation)
 	s.mux.Handle("/api/", requireAuth(deps.Tokens, authed))
 
 	return withCORS(deps.Cfg.FrontendOrigin, logRequests(deps.Log, s.mux))
