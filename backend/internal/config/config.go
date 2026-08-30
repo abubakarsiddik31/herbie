@@ -3,6 +3,7 @@ package config
 import (
 	"bufio"
 	"errors"
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
@@ -24,6 +25,14 @@ type Config struct {
 
 func Load() (Config, error) {
 	loadDotenv(".env")
+	inputRate, err := envFloat("CHAT_INPUT_USD_PER_MTOK", 0.30)
+	if err != nil {
+		return Config{}, err
+	}
+	outputRate, err := envFloat("CHAT_OUTPUT_USD_PER_MTOK", 2.50)
+	if err != nil {
+		return Config{}, err
+	}
 	cfg := Config{
 		Port:           env("APP_PORT", "8080"),
 		DatabaseURL:    os.Getenv("DATABASE_URL"),
@@ -32,8 +41,8 @@ func Load() (Config, error) {
 		GeminiBaseURL:  os.Getenv("GEMINI_BASE_URL"),
 		JWTSecret:      os.Getenv("JWT_SECRET"),
 		FrontendOrigin: env("FRONTEND_ORIGIN", "http://localhost:5173"),
-		ChatInputRate:  envFloat("CHAT_INPUT_USD_PER_MTOK", 0.30),
-		ChatOutputRate: envFloat("CHAT_OUTPUT_USD_PER_MTOK", 2.50),
+		ChatInputRate:  inputRate,
+		ChatOutputRate: outputRate,
 	}
 	var errs []error
 	if cfg.DatabaseURL == "" {
@@ -58,16 +67,16 @@ func env(key, def string) string {
 	return def
 }
 
-func envFloat(key string, def float64) float64 {
+func envFloat(key string, def float64) (float64, error) {
 	v := os.Getenv(key)
 	if v == "" {
-		return def
+		return def, nil
 	}
 	f, err := strconv.ParseFloat(v, 64)
 	if err != nil {
-		return def
+		return 0, fmt.Errorf("invalid %s: %q", key, v)
 	}
-	return f
+	return f, nil
 }
 
 // loadDotenv applies KEY=VALUE lines that are not already in the

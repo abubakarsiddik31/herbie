@@ -20,4 +20,8 @@ func TestLoadRequiresSecrets(t *testing.T) {
 	if cfg.ChatInputRate != 0.30 || cfg.ChatOutputRate != 2.50 {
 		t.Fatalf("rate defaults: %+v", cfg)
 	}
+	t.Setenv("CHAT_INPUT_USD_PER_MTOK", "0,5")
+	if _, err := Load(); err == nil {
+		t.Fatal("expected error for malformed rate override")
+	}
 }
