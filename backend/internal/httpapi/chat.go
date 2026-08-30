@@ -39,6 +39,7 @@ type MsgStore interface {
 
 type UsageStore interface {
 	Add(ctx context.Context, e storage.UsageEvent) error
+	Summary(ctx context.Context, userID string, days int) (storage.Summary, error)
 }
 
 const maxPromptChars = 8000

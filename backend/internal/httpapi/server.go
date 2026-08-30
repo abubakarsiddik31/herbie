@@ -56,6 +56,7 @@ func NewServer(deps ServerDeps) http.Handler {
 	authed.HandleFunc("PATCH /api/conversations/{id}", s.handlePatchConversation)
 	authed.HandleFunc("DELETE /api/conversations/{id}", s.handleDeleteConversation)
 	authed.HandleFunc("POST /api/conversations/{id}/messages", s.handleSendMessage)
+	authed.HandleFunc("GET /api/usage/summary", s.handleUsageSummary)
 	s.mux.Handle("/api/", requireAuth(deps.Tokens, authed))
 
 	return withCORS(deps.Cfg.FrontendOrigin, logRequests(deps.Log, s.mux))

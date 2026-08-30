@@ -157,6 +157,10 @@ func (f *fakeUsage) Add(_ context.Context, e storage.UsageEvent) error {
 	return nil
 }
 
+func (f *fakeUsage) Summary(_ context.Context, _ string, _ int) (storage.Summary, error) {
+	return storage.Summary{}, nil
+}
+
 func TestSendMessageStreamsAndPersists(t *testing.T) {
 	m := testmodel.New().Respond(model.Response{
 		Message: model.Message{Role: model.RoleAssistant, Content: "Hi there!"},
