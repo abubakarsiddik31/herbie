@@ -5,19 +5,23 @@ import (
 	"net/http"
 
 	"github.com/abubakarsiddik31/golem-chatbot/internal/auth"
+	"github.com/abubakarsiddik31/golem-chatbot/internal/chat"
 	"github.com/abubakarsiddik31/golem-chatbot/internal/config"
-	"github.com/abubakarsiddik31/golem-chatbot/internal/storage"
+	"github.com/abubakarsiddik31/golem-chatbot/internal/cost"
 )
 
-// ServerDeps carries the wired collaborators. Fields join as later tasks
-// land (stores, agent).
+// ServerDeps carries the wired collaborators. Stores are narrow interfaces
+// (chat.go) so handler tests run offline; *storage.* types satisfy them.
 type ServerDeps struct {
 	Cfg    config.Config
 	Log    *slog.Logger
 	Auth   *auth.Service
 	Tokens *auth.TokenMaker
-	Convos *storage.Conversations
-	Msgs   *storage.Messages
+	Convos ConvoStore
+	Msgs   MsgStore
+	Usage  UsageStore
+	Agent  *chat.Agent
+	Rates  cost.Rates
 }
 
 type Server struct {
@@ -51,6 +55,7 @@ func NewServer(deps ServerDeps) http.Handler {
 	authed.HandleFunc("GET /api/conversations/{id}", s.handleGetConversation)
 	authed.HandleFunc("PATCH /api/conversations/{id}", s.handlePatchConversation)
 	authed.HandleFunc("DELETE /api/conversations/{id}", s.handleDeleteConversation)
+	authed.HandleFunc("POST /api/conversations/{id}/messages", s.handleSendMessage)
 	s.mux.Handle("/api/", requireAuth(deps.Tokens, authed))
 
 	return withCORS(deps.Cfg.FrontendOrigin, logRequests(deps.Log, s.mux))
