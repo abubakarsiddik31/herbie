@@ -165,6 +165,7 @@ Errors: consistent `{error: {code, message}}`; auth middleware on everything exc
 ## Frontend
 
 - **Stack:** Vite, React 19, TypeScript `strict`, react-router (data mode off — plain routes), TanStack Query v5 (all REST), Zustand (auth token + user), Tailwind v4 + shadcn/ui, `react-markdown` + GFM for assistant answers, `recharts` for usage, `sonner` toasts.
+- **AI states via [Beautiful UI](https://www.beautifului.dev/)** (TurboProduct, MIT, copy-paste primitives — no registry/CLI documented, so we adapt them under `src/components/ai/` with attribution): Streaming Text (answer with inline sources, actions, follow-ups), Tool Chips (`search_documents` activity), Task Rows (per-run tool status: running/failed/completed), Thinking (expandable run-events trace), Loading State (pixel-grid loader while awaiting first token), plus their Chat composer / Prompt Bar / Sidebar Nav / Code Block / Context Cards (rendered retrieved sources). The Approval Card maps one-to-one onto golem's deferred tools for a future human-in-the-loop milestone.
 - **Auth flow:** access JWT in memory only (Zustand, not localStorage); refresh cookie HttpOnly `SameSite=Strict`, path `/api/auth`. API client retries once through `/api/auth/refresh` on 401, then redirects to login.
 - **Chat UI:** sidebar (conversations, new chat), thread with markdown rendering and citation rendering from `[n] (filename)` markers, tool-activity chips from `meta` events, streaming text via the fetch-SSE reader, Stop button (AbortController → server ctx cancel → golem run cancels), optimistic user message.
 - **Documents UI:** dropzone upload with progress, list with status badges (`processing/ready/failed`), delete with confirmation.
@@ -186,8 +187,23 @@ Errors: consistent `{error: {code, message}}`; auth middleware on everything exc
 ## Error handling
 
 - Backend: wrap with `%w`, classify at the edge; `golem.RunError` stages map to SSE `error` events; provider 408/429/5xx retried by golem (`WithMaxAttempts(2)` + default backoff); SSE emits `done` only on success.
-- Client disconnect → `onDelta` write error → run ctx cancel → run aborts; partial assistant message is persisted with a `truncated=true` marker so history replay stays coherent (golem's history repair handles the orphaned tail).
+- Client disconnect → `onDelta` write error → run ctx cancel → run aborts. **Golem returns a zero `Result` on error** (see gaps below), so the partial assistant text is reconstructed from what the handler's `onDelta` closure already forwarded, and persisted with `truncated=true` (usage for the interrupted attempt is unrecoverable); golem's history repair handles the orphaned tail on replay.
 - Ingestion is idempotent per document (delete Weaviate objects for `document_id` before upsert).
+
+## Golem gaps observed (framework follow-ups)
+
+Gaps hit while designing this app, in priority order — each with the workaround this app carries and the first-class shape golem could grow. Worth filing as golem issues/ADRs; none block this project.
+
+1. **Embeddings are absent (explicit ROADMAP non-goal).** The app hand-rolls a Gemini `batchEmbedContents` client (`internal/rag/embed.go`) mirroring golem's adapter conventions. *First-class:* a `model.Embedder` port (`EmbedDocuments`/`EmbedQuery`, batching, task types) with provider adapters and usage surfaced in `model.Usage`. This is the single biggest force-multplier for RAG apps and matches the ROADMAP's "revisit when users ask" trigger.
+2. **Error-path evidence is dropped.** `runLoop` (agent.go:557) returns `Result[Output]{}` on every error — partial transcript, accrued usage, and completed tool turns are discarded, undercutting golem's own "evidence-preserving runs" philosophy. *First-class:* `RunError` carries a `Partial *Result` (messages + usage so far). App workaround: reconstruct partial text from the `onDelta` closure; interrupted-attempt usage is lost.
+3. **No streaming terminal integrity on Gemini.** Gemini's SSE has no `[DONE]` sentinel — EOF is indistinguishable from completion (documented at stream.go:28-30), so a truncated stream bills as a silently short answer. The payload's `finishReason` is available and unchecked. *First-class:* the adapter parses `finishReason` and either surfaces it on `model.Response` or returns a distinguishable truncation error; optionally extend retry/fallback beyond "before first fragment".
+4. **`Result.Usage` is shallow.** Only Input/Output tokens. The runner already tracks `ModelCalls`/`ToolExecutions` (`runner.Outcome`) for the usage-limit check but never returns them. *First-class:* add `Requests`/`ToolCalls` (and `TotalTokens`) to `model.Usage` — this app's cost ledger wants request counts per run and currently must infer them.
+5. **Observers are construction-scoped, not run-scoped.** `WithRunEvents` binds one callback per agent; a shared server-side agent cannot route events (or streaming metering) per request. *First-class:* a run-scoped listener `RunOption`. App workaround: build a per-request agent (cheap config; the `*gemini.Client` stays process-wide).
+6. **History bounding counts messages, not tokens.** `TrimHistory(n)` has no token awareness and no `countTokens` port (Gemini exposes a free `:countTokens` endpoint). *First-class:* a token-budget `HistoryProcessor` and/or per-provider count-tokens helper. App workaround: message-count trim (40) as a proxy.
+7. **Tool results are text-only.** No images/parts can come back from a tool (multimodal input is prompt-side only). Not blocking text-RAG, but a ceiling for screenshot/document-image tools. *First-class:* `Parts` on tool messages.
+8. **Gemini rejects `responseSchema` together with function declarations,** so structured output on Gemini must use output-tool mode (`WithOutputTool`) — golem-lab already works around this. *First-class:* adapter-level accommodation or a loud, guide-level constraint. No impact here (string output).
+
+Minor notes: `UsageLimit` is checked post-response (one response may overshoot — a pre-send `countTokens` check would close it); streamed turns are single-attempt (no fragment replay) — related to gap 3.
 
 ## Out of scope (follow-ups)
 
