@@ -2,7 +2,7 @@
 
 - **Date:** 2026-08-30
 - **Status:** Draft — pending review by Abu Bakar Siddik
-- **Scope:** Chat + RAG web application built on golem (`github.com/abubakarsiddik31/golem` v0.7+): Go backend, React frontend, JWT auth, local Postgres, local Weaviate, Google Gemini chat + embeddings, token/cost tracking, file upload to local MinIO.
+- **Scope:** Chat + RAG web application built on golem (`github.com/abubakarsiddik31/golem` v0.7.1): Go backend, React frontend, JWT auth, local Postgres, local Weaviate, Google Gemini chat + embeddings, token/cost tracking, file upload to local MinIO.
 
 ## Goal
 
@@ -45,7 +45,7 @@ A local-first chat application where signed-in users upload documents (txt/md/pd
 ```
 
 - **Monorepo:** `backend/` (Go module `github.com/abubakarsiddik31/golem-chatbot`), `frontend/` (Vite), `deploy/docker-compose.yml`, `docs/`.
-- **Golem dependency:** `go get github.com/abubakarsiddik31/golem@v0.7.0`. If a release isn't tagged when we start, use `replace github.com/abubakarsiddik31/golem => ../golem-agent` (the golem-lab pattern) until tagged.
+- **Golem dependency:** `go get github.com/abubakarsiddik31/golem@v0.7.1`. If the tag isn't reachable when we start, use `replace github.com/abubakarsiddik31/golem => ../golem-agent` (the golem-lab pattern) until it is.
 - **Backend style:** stdlib `net/http` with Go 1.22+ method/path routing, `log/slog` JSON logging, env-only config (no config files), `context.Context` propagation, wrapped errors, no globals — matching golem's house rules (AGENTS.md).
 - **Golem is used for chat only.** Embeddings are an explicit golem non-goal (docs/ROADMAP.md), so `internal/rag/embed.go` calls `models/{model}:batchEmbedContents` directly with stdlib `net/http`, mirroring golem's adapter conventions (validated Config, classified errors implementing `Retryable() bool`).
 
@@ -100,7 +100,7 @@ MinIO: bucket `golem-chatbot-documents`, object key `{user_id}/{document_id}/{fi
 
 ## Chat pipeline (the golem core)
 
-Per chat request the handler builds a **per-request agent** (cheap config struct; the `*gemini.Client` is process-wide and concurrency-safe), capturing an SSE sink:
+One **shared agent** is built at startup (golem agents are safe for concurrent use; `Deps` flow per run through `RunContext`, so user scoping needs no per-request construction). Each chat request runs through it, wiring that request's SSE sink via the v0.7.1 run-scoped observer:
 
 ```go
 type Deps struct {
@@ -109,6 +109,7 @@ type Deps struct {
     Search         func(ctx context.Context, query string, k int) ([]rag.Chunk, error)
 }
 
+// built once at startup
 agent := golem.New[Deps, string](
     geminiClient,                       // providers/gemini, StreamingModel
     golem.DecodeFunc[string](passthrough),
@@ -119,7 +120,14 @@ agent := golem.New[Deps, string](
     golem.WithUsageLimit[Deps, string](golem.UsageLimit{       // spend guardrail
         Requests: 12, TotalTokens: 100_000,
     }),
-    golem.WithRunEvents[Deps, string](bridge.RunEvent),        // → SSE meta events
+)
+
+// per chat request
+result, err := agent.RunStreamWithHistory(ctx,
+    golem.RunContext[Deps]{Deps: Deps{UserID: uid, ConversationID: cid, Search: userSearch}},
+    history, prompt,
+    sseSink.Delta,
+    golem.WithRunObserver(sseSink.RunEvent),  // v0.7.1: per-request event routing
 )
 ```
 
@@ -129,8 +137,8 @@ agent := golem.New[Deps, string](
   - `event: meta` — run lifecycle: `tool_start`/`tool_end` (name, args), `model_end` (attempt usage) — powers "searching documents…" chips.
   - `event: delta` — `{"text": "…"}` text fragments.
   - `event: done` — `{"messageId", "inputTokens", "outputTokens", "costUsd"}`.
-  - `event: error` — `{"stage", "message"}` from `golem.RunError` (stages: model|decode|tool|loop|usage); `context.Canceled` maps to a quiet stop.
-- **Post-run:** persist assistant message (`content` = output, `data` = `result.Messages` tail, usage from `result.Usage`), write a `chat` usage event with computed cost, update `conversations.updated_at`, auto-title new conversations from the first user message (cheap: first 48 chars; no extra model call).
+  - `event: error` — `{"stage", "message"}` from `golem.RunError` (stages: model|decode|tool|loop|usage); a client-cancelled run rides `RunError` since v0.7.1 (still matchable with `errors.Is(err, context.Canceled)`) and maps to a quiet stop; tool timeouts report the `tool` stage. A Gemini stream truncated in transit fails with `DecodeError` (v0.7.1 sentinel check) instead of emitting a silently short answer.
+- **Post-run:** persist assistant message (`content` = output, `data` = `result.Messages` tail, usage from `result.Usage`), write a `chat` usage event with computed cost and the request count taken from the observer's `model_end` events (exact, retries included), update `conversations.updated_at`, auto-title new conversations from the first user message (cheap: first 48 chars; no extra model call).
 
 ## Ingestion pipeline
 
@@ -187,23 +195,29 @@ Errors: consistent `{error: {code, message}}`; auth middleware on everything exc
 ## Error handling
 
 - Backend: wrap with `%w`, classify at the edge; `golem.RunError` stages map to SSE `error` events; provider 408/429/5xx retried by golem (`WithMaxAttempts(2)` + default backoff); SSE emits `done` only on success.
-- Client disconnect → `onDelta` write error → run ctx cancel → run aborts. **Golem returns a zero `Result` on error** (see gaps below), so the partial assistant text is reconstructed from what the handler's `onDelta` closure already forwarded, and persisted with `truncated=true` (usage for the interrupted attempt is unrecoverable); golem's history repair handles the orphaned tail on replay.
+- Client disconnect → `onDelta` write error → run ctx cancel → run aborts. Since v0.7.1 the failed run keeps its evidence on `RunError.Partial` (`Messages` through the last completed turn, `Usage`, `Requests`/`ToolCalls`), so the handler persists the partial assistant turn directly — content from `Partial.Messages`, usage from `Partial.Usage` — with `truncated=true`. `Partial.Messages` is resume-ready history (repair synthesizes results for orphaned tool calls). A run that fails before completing a model turn has nil `Partial`; nothing is persisted for it.
+- A Gemini stream truncated in transit now fails with `DecodeError` instead of returning silently short text — surfaced to the UI as an error event with a retry affordance.
 - Ingestion is idempotent per document (delete Weaviate objects for `document_id` before upsert).
 
 ## Golem gaps observed (framework follow-ups)
 
-Gaps hit while designing this app, in priority order — each with the workaround this app carries and the first-class shape golem could grow. Worth filing as golem issues/ADRs; none block this project.
+Gaps hit while designing this app. **v0.7.1 (shipped 2026-08-30) closed three of them**; the report below is kept as the record, with the app's consumption noted.
 
-1. **Embeddings are absent (explicit ROADMAP non-goal).** The app hand-rolls a Gemini `batchEmbedContents` client (`internal/rag/embed.go`) mirroring golem's adapter conventions. *First-class:* a `model.Embedder` port (`EmbedDocuments`/`EmbedQuery`, batching, task types) with provider adapters and usage surfaced in `model.Usage`. This is the single biggest force-multplier for RAG apps and matches the ROADMAP's "revisit when users ask" trigger.
-2. **Error-path evidence is dropped.** `runLoop` (agent.go:557) returns `Result[Output]{}` on every error — partial transcript, accrued usage, and completed tool turns are discarded, undercutting golem's own "evidence-preserving runs" philosophy. *First-class:* `RunError` carries a `Partial *Result` (messages + usage so far). App workaround: reconstruct partial text from the `onDelta` closure; interrupted-attempt usage is lost.
-3. **No streaming terminal integrity on Gemini.** Gemini's SSE has no `[DONE]` sentinel — EOF is indistinguishable from completion (documented at stream.go:28-30), so a truncated stream bills as a silently short answer. The payload's `finishReason` is available and unchecked. *First-class:* the adapter parses `finishReason` and either surfaces it on `model.Response` or returns a distinguishable truncation error; optionally extend retry/fallback beyond "before first fragment".
-4. **`Result.Usage` is shallow.** Only Input/Output tokens. The runner already tracks `ModelCalls`/`ToolExecutions` (`runner.Outcome`) for the usage-limit check but never returns them. *First-class:* add `Requests`/`ToolCalls` (and `TotalTokens`) to `model.Usage` — this app's cost ledger wants request counts per run and currently must infer them.
-5. **Observers are construction-scoped, not run-scoped.** `WithRunEvents` binds one callback per agent; a shared server-side agent cannot route events (or streaming metering) per request. *First-class:* a run-scoped listener `RunOption`. App workaround: build a per-request agent (cheap config; the `*gemini.Client` stays process-wide).
-6. **History bounding counts messages, not tokens.** `TrimHistory(n)` has no token awareness and no `countTokens` port (Gemini exposes a free `:countTokens` endpoint). *First-class:* a token-budget `HistoryProcessor` and/or per-provider count-tokens helper. App workaround: message-count trim (40) as a proxy.
-7. **Tool results are text-only.** No images/parts can come back from a tool (multimodal input is prompt-side only). Not blocking text-RAG, but a ceiling for screenshot/document-image tools. *First-class:* `Parts` on tool messages.
-8. **Gemini rejects `responseSchema` together with function declarations,** so structured output on Gemini must use output-tool mode (`WithOutputTool`) — golem-lab already works around this. *First-class:* adapter-level accommodation or a loud, guide-level constraint. No impact here (string output).
+### Fixed in v0.7.1
 
-Minor notes: `UsageLimit` is checked post-response (one response may overshoot — a pre-send `countTokens` check would close it); streamed turns are single-attempt (no fragment replay) — related to gap 3.
+- **Error-path evidence** (was: `runLoop` returned a zero `Result` on every error, discarding the partial transcript and spent usage). Now `RunError.Partial *PartialResult` carries `Messages` (through the last completed turn, resume-ready via `RunWithHistory`), `Usage`, and `Requests`/`ToolCalls` (failed attempts included); cancellation/deadline errors ride `RunError` while staying `errors.Is`-matchable. *App:* partial assistant turns persist straight from `Partial` — no delta reconstruction.
+- **Gemini stream terminal integrity** (was: EOF indistinguishable from completion, so truncation billed as a short answer). Now a stream ending without a terminal `finishReason` fails with `DecodeError`, matching the other adapters' sentinel checks. *App:* truncation surfaces as an SSE error with a retry affordance.
+- **Run-scoped observers** (was: `WithRunEvents` bound one callback per agent, forcing per-request agent construction in servers). Now `WithRunObserver(onEvent)` is a `RunOption` accepted by every run variant, composing with the agent-level observer. *App:* one shared agent, per-request observers — see the chat pipeline.
+
+### Still open (first-class shapes golem could grow)
+
+1. **Embeddings are absent** (explicit ROADMAP non-goal). The app hand-rolls a Gemini `batchEmbedContents` client (`internal/rag/embed.go`) mirroring golem's adapter conventions. *First-class:* a `model.Embedder` port (`EmbedDocuments`/`EmbedQuery`, batching, task types) with provider adapters and usage surfaced in `model.Usage`. Biggest remaining force-multiplier for RAG apps — the ROADMAP's "revisit when users ask" trigger.
+2. **`Result.Usage` is shallow on the success path.** Only Input/Output tokens; the request/tool-call counts exist internally (they now surface on `PartialResult`) but are not returned for successful runs. *First-class:* add `Requests`/`ToolCalls` (and `TotalTokens`) to `model.Usage`. *App:* counts requests exactly from the observer's `model_end` events.
+3. **History bounding counts messages, not tokens.** `TrimHistory(n)` has no token awareness and no `countTokens` port (Gemini exposes a free `:countTokens` endpoint). *First-class:* a token-budget `HistoryProcessor` and/or per-provider count-tokens helper. *App:* message-count trim (40) as a proxy.
+4. **Tool results are text-only.** No images/parts can come back from a tool (multimodal input is prompt-side only). Not blocking text-RAG, but a ceiling for screenshot/document-image tools. *First-class:* `Parts` on tool messages.
+5. **Gemini rejects `responseSchema` together with function declarations,** so structured output on Gemini must use output-tool mode (`WithOutputTool`) — golem-lab already works around this. *First-class:* adapter-level accommodation or a loud, guide-level constraint. No impact here (string output).
+
+Minor notes: `UsageLimit` is checked post-response (one response may overshoot — a pre-send `countTokens` check would close it); streamed turns are single-attempt (no fragment replay) — failure is now at least explicit thanks to the truncation fix.
 
 ## Out of scope (follow-ups)
 
