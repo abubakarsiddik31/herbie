@@ -229,15 +229,17 @@ func DecodeConfigs(rows []storage.UserTool) ([]ToolConfig, error) {
 // rendering; a placeholder subst rejects stays as-is.
 func replacePlaceholders(tpl string, subst func(name string) (string, error), esc func(string) string) (string, error) {
 	var b strings.Builder
+	prev := 0
 	for _, m := range placeholderRE.FindAllStringSubmatchIndex(tpl, -1) {
 		name := tpl[m[2]:m[3]]
 		v, err := subst(name)
 		if err != nil {
 			return "", err
 		}
-		b.WriteString(tpl[b.Len():m[0]])
+		b.WriteString(tpl[prev:m[0]])
 		b.WriteString(esc(v))
+		prev = m[1]
 	}
-	b.WriteString(tpl[b.Len():])
+	b.WriteString(tpl[prev:])
 	return b.String(), nil
 }
