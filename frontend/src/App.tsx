@@ -1,3 +1,29 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { BrowserRouter, Navigate, Route, Routes } from "react-router";
+import { Toaster } from "@/components/ui/sonner";
+import { RequireAuth } from "@/components/RequireAuth";
+import { LoginPage } from "@/pages/LoginPage";
+import { RegisterPage } from "@/pages/RegisterPage";
+import { ChatPage } from "@/pages/ChatPage";
+import { UsagePage } from "@/pages/UsagePage";
+
+const queryClient = new QueryClient();
+
 export default function App() {
-  return <div className="p-8 text-lg">golem-chatbot</div>;
+  return (
+    <QueryClientProvider client={queryClient}>
+      <BrowserRouter>
+        <Routes>
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/register" element={<RegisterPage />} />
+          <Route element={<RequireAuth />}>
+            <Route path="/" element={<ChatPage />} />
+            <Route path="/usage" element={<UsagePage />} />
+          </Route>
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+        <Toaster position="top-center" />
+      </BrowserRouter>
+    </QueryClientProvider>
+  );
 }
