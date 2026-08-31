@@ -188,7 +188,7 @@ func (s *Server) settleRun(ctx context.Context, userID, convID string, outcome c
 // tool call, usage, pending calls) and tells the client what needs a
 // decision. No done event follows — the stream ends waiting for approvals.
 func (s *Server) pauseRun(ctx context.Context, userID, convID string, outcome chat.Outcome, sink *sseSink) {
-	if err := s.persistRunMessages(ctx, userID, convID, outcome.Messages, outcome.Usage, outcome.Requests, false); err != nil {
+	if err := s.persistRunMessages(ctx, userID, convID, outcome.Messages, outcome.Usage, outcome.Requests, false, nil); err != nil {
 		s.deps.Log.Error("persist paused messages", "err", err)
 	}
 	if err := s.deps.Usage.Add(ctx, usageEventFor(userID, convID, s.deps.Cfg.GeminiModel, outcome.Usage, outcome.Requests, s.deps.Rates)); err != nil {
@@ -221,7 +221,7 @@ func (s *Server) persistFailure(ctx context.Context, userID, convID string, runE
 		partial = runError.Partial
 	}
 	if partial != nil && len(partial.Messages) > 0 {
-		if err := s.persistRunMessages(ctx, userID, convID, partial.Messages, partial.Usage, partial.Requests, true); err != nil {
+		if err := s.persistRunMessages(ctx, userID, convID, partial.Messages, partial.Usage, partial.Requests, true, nil); err != nil {
 			s.deps.Log.Error("persist partial", "err", err)
 		}
 		_ = s.deps.Usage.Add(ctx, usageEventFor(userID, convID, s.deps.Cfg.GeminiModel, partial.Usage, partial.Requests, s.deps.Rates))
@@ -244,7 +244,7 @@ func (s *Server) persistFailure(ctx context.Context, userID, convID string, runE
 // Tool-call and tool-result rows ARE persisted: the next turn's history and
 // any deferred resume need them. Usage and cost land on the last assistant
 // row only.
-func (s *Server) persistRunMessages(ctx context.Context, userID, convID string, msgs []model.Message, usage model.Usage, requests int, truncated bool) error {
+func (s *Server) persistRunMessages(ctx context.Context, userID, convID string, msgs []model.Message, usage model.Usage, requests int, truncated bool, skip map[string]bool) error {
 	lastAssistant := -1
 	for i, m := range msgs {
 		if m.Role == model.RoleAssistant {
@@ -260,6 +260,9 @@ func (s *Server) persistRunMessages(ctx context.Context, userID, convID string, 
 			Role: string(m.Role), Content: m.Content, Data: mustJSON(m),
 			Truncated: truncated,
 		}
+		if skip[string(row.Data)] {
+			continue // resume runs replay the paused history; those rows exist
+		}
 		if i == lastAssistant {
 			row.InputTokens = usage.InputTokens
 			row.OutputTokens = usage.OutputTokens
@@ -274,7 +277,7 @@ func (s *Server) persistRunMessages(ctx context.Context, userID, convID string, 
 }
 
 func (s *Server) finishRun(ctx context.Context, userID, convID string, outcome chat.Outcome, sink *sseSink) {
-	if err := s.persistRunMessages(ctx, userID, convID, outcome.Messages, outcome.Usage, outcome.Requests, false); err != nil {
+	if err := s.persistRunMessages(ctx, userID, convID, outcome.Messages, outcome.Usage, outcome.Requests, false, nil); err != nil {
 		s.deps.Log.Error("persist assistant messages", "err", err)
 	}
 	if err := s.deps.Usage.Add(ctx, usageEventFor(userID, convID, s.deps.Cfg.GeminiModel, outcome.Usage, outcome.Requests, s.deps.Rates)); err != nil {
