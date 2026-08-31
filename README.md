@@ -50,7 +50,11 @@ The AI-state components in `frontend/src/components/ai/` (streaming text, thinki
 ## Custom tools (Phase 2a)
 
 Each user can register HTTP API tools from the **Tools** page; the chat agent
-advertises and executes them on every message. A tool is a name, a model-facing
+advertises and executes them on every message. The page ships a gallery of 18
+prebuilt templates (weather, GitHub, Hacker News, Wikipedia, RSS, FX/crypto
+rates, and more — free, keyless, read-only APIs) that prefill the editor; a
+vitest suite validates every template against the same authoring rules the
+backend enforces. A tool is a name, a model-facing
 description, a method + URL template (`{{param}}` path placeholders, query
 params appended, optional JSON body template), typed params
 (`string`/`number`/`boolean`, `path`/`query`), and static headers (secrets are
