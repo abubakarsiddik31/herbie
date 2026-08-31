@@ -43,3 +43,9 @@ func (s *sseSink) ModelStart()             { _ = s.event("meta", map[string]stri
 func (s *sseSink) ModelEnd(in, out int) {
 	_ = s.event("meta", map[string]any{"type": "model_end", "inputTokens": in, "outputTokens": out})
 }
+func (s *sseSink) ToolStart(name string) {
+	_ = s.event("meta", map[string]any{"type": "tool_start", "name": name})
+}
+func (s *sseSink) ToolEnd(name string, ok bool) {
+	_ = s.event("meta", map[string]any{"type": "tool_end", "name": name, "ok": ok})
+}

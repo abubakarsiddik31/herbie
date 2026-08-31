@@ -166,7 +166,7 @@ func TestSendMessageStreamsAndPersists(t *testing.T) {
 		Message: model.Message{Role: model.RoleAssistant, Content: "Hi there!"},
 		Usage:   model.Usage{InputTokens: 12, OutputTokens: 7},
 	})
-	agent, err := chat.New(m, golem.UsageLimit{})
+	agent, err := chat.New(m, golem.UsageLimit{}, chat.DefaultToolEnv())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,7 +207,7 @@ func TestFailedRunEmitsErrorEvent(t *testing.T) {
 		_ = testmodel.Emit(onDelta, model.Delta{Content: "partial "})
 		return model.Response{}, errors.New("boom")
 	})
-	agent, err := chat.New(m, golem.UsageLimit{})
+	agent, err := chat.New(m, golem.UsageLimit{}, chat.DefaultToolEnv())
 	if err != nil {
 		t.Fatal(err)
 	}

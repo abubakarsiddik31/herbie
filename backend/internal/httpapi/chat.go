@@ -97,7 +97,7 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	outcome, err := s.deps.Agent.Run(ctx, chat.Deps{UserID: userID, ConversationID: convID}, history, req.Content, sink)
+	outcome, err := s.deps.Agent.Run(ctx, chat.Deps{UserID: userID, ConversationID: convID}, history, req.Content, sink, nil)
 	if err != nil {
 		s.persistFailure(ctx, userID, convID, err, sink)
 		return

@@ -61,7 +61,12 @@ func main() {
 		log.Error("gemini", "err", err)
 		os.Exit(1)
 	}
-	agent, err := chat.New(gemini, golem.UsageLimit{Requests: 12, TotalTokens: 100_000})
+	agent, err := chat.New(gemini, golem.UsageLimit{Requests: 12, TotalTokens: 100_000}, chat.ToolEnv{
+		HTTPTimeout:       cfg.ToolHTTPTimeout,
+		HTTPMaxBytes:      cfg.ToolHTTPMaxBytes,
+		ResultMaxBytes:    cfg.ToolResultMaxBytes,
+		AllowPrivateHosts: cfg.ToolAllowPrivateHosts,
+	})
 	if err != nil {
 		log.Error("agent", "err", err)
 		os.Exit(1)
