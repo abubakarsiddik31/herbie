@@ -182,13 +182,13 @@ GET  /healthz
 
 **[P2]** `GET /api/documents | POST /api/documents | DELETE /api/documents/{id}`
 
-Errors: consistent `{error: {code, message}}`; auth middleware on everything except register/login/refresh/healthz.
+Errors: consistent `{error: {code, message}}`; auth middleware on everything except register/login/refresh/logout (cookie-scoped by design) and healthz.
 
 ## Frontend [P1; documents UI joins P2]
 
 - **Stack:** Vite, React 19, TypeScript `strict`, react-router (plain routes), TanStack Query v5 (all REST), Zustand (auth token + user), Tailwind v4 + shadcn/ui, `react-markdown` + GFM for assistant answers, `recharts` for usage, `sonner` toasts.
 - **AI states via [Beautiful UI](https://www.beautifului.dev/)** (TurboProduct, MIT, copy-paste primitives — no registry/CLI documented, so we adapt them under `src/components/ai/` with attribution). **P1:** Streaming Text (answer, follow-ups), Thinking (expandable run-events trace), Loading State (pixel-grid loader before first token), Chat composer / Prompt Bar, Sidebar Nav, Code Block. **P2 adds:** Tool Chips (`search_documents`), Task Rows (tool status), Context Cards (rendered sources). Approval Card maps onto golem deferred tools for a future milestone.
-- **Auth flow:** access JWT in memory only (Zustand); refresh cookie HttpOnly `SameSite=Strict`, path `/api/auth`. API client retries once through `/api/auth/refresh` on 401, then redirects to login.
+- **Auth flow:** access JWT in memory only (Zustand); refresh cookie HttpOnly `SameSite=Lax` (dev-friendly; Lax already blocks cross-site POSTs), path `/api/auth`. API client retries once through `/api/auth/refresh` on 401, then redirects to login.
 - **Chat UI:** sidebar (conversations, new chat), thread with markdown rendering, streaming text via the fetch-SSE reader, Thinking trace from `meta` events, Stop button (AbortController → server ctx cancel → golem run cancels → partial persisted), optimistic user message.
 - **Usage UI [P1]:** totals cards (tokens + USD), 30-day bar chart. **[P2]** per-document embedding cost table.
 - **Documents UI [P2]:** dropzone upload with progress, status badges, delete with confirmation.
