@@ -73,15 +73,17 @@ func main() {
 	}
 
 	handler := httpapi.NewServer(httpapi.ServerDeps{
-		Cfg:    cfg,
-		Log:    log,
-		Auth:   svc,
-		Tokens: tokens,
-		Convos: storage.NewConversations(pool),
-		Msgs:   storage.NewMessages(pool),
-		Usage:  storage.NewUsage(pool),
-		Agent:  agent,
-		Rates:  cost.Rates{ChatInputPerM: cfg.ChatInputRate, ChatOutputPerM: cfg.ChatOutputRate},
+		Cfg:     cfg,
+		Log:     log,
+		Auth:    svc,
+		Tokens:  tokens,
+		Convos:  storage.NewConversations(pool),
+		Msgs:    storage.NewMessages(pool),
+		Usage:   storage.NewUsage(pool),
+		Tools:   storage.NewTools(pool),
+		Pending: storage.NewPendingCalls(pool),
+		Agent:   agent,
+		Rates:   cost.Rates{ChatInputPerM: cfg.ChatInputRate, ChatOutputPerM: cfg.ChatOutputRate},
 	})
 	srv := &http.Server{Addr: ":" + cfg.Port, Handler: handler, ReadHeaderTimeout: 10 * time.Second}
 

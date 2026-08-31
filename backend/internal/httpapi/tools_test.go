@@ -40,11 +40,19 @@ func (f *fakeToolStore) Create(_ context.Context, t storage.UserTool) (storage.U
 }
 
 func (f *fakeToolStore) List(_ context.Context, userID string) ([]storage.UserTool, error) {
+	return f.list(userID, false)
+}
+
+func (f *fakeToolStore) ListEnabled(_ context.Context, userID string) ([]storage.UserTool, error) {
+	return f.list(userID, true)
+}
+
+func (f *fakeToolStore) list(userID string, enabledOnly bool) ([]storage.UserTool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	var out []storage.UserTool
 	for _, row := range f.rows {
-		if row.UserID == userID {
+		if row.UserID == userID && (!enabledOnly || row.Enabled) {
 			out = append(out, row)
 		}
 	}

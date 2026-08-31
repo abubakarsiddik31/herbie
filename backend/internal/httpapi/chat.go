@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math"
 	"net/http"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/abubakarsiddik31/golem-chatbot/internal/cost"
 	"github.com/abubakarsiddik31/golem-chatbot/internal/storage"
 	"github.com/abubakarsiddik31/golem/model"
+	"github.com/abubakarsiddik31/golem/tool"
 )
 
 // The handler depends on store interfaces, not concrete *storage.* types,
@@ -42,6 +44,16 @@ type UsageStore interface {
 	Summary(ctx context.Context, userID string, days int) (storage.Summary, error)
 }
 
+// PendingStore bridges paused runs (approval-gated tools) to the later
+// resume request.
+type PendingStore interface {
+	Add(ctx context.Context, calls []storage.PendingToolCall) error
+	ForConversation(ctx context.Context, convID, userID string) ([]storage.PendingToolCall, error)
+	SetStatus(ctx context.Context, userID, callID, status string) error
+}
+
+var _ PendingStore = (*storage.PendingCalls)(nil)
+
 const maxPromptChars = 8000
 
 func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
@@ -69,6 +81,19 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A paused conversation must be resolved before new turns.
+	if s.deps.Pending != nil {
+		pending, err := s.deps.Pending.ForConversation(ctx, convID, userID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "internal", "could not check pending approvals")
+			return
+		}
+		if len(pending) > 0 {
+			writeError(w, http.StatusConflict, "approval_pending", "resolve the pending approval first")
+			return
+		}
+	}
+
 	// Auto-title from the first user message.
 	if n, err := s.deps.Convos.CountMessages(ctx, convID, userID); err == nil && n == 0 {
 		_ = s.deps.Convos.SetTitle(ctx, convID, userID, truncateRunes(req.Content, 48))
@@ -90,6 +115,15 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	history := messagesToHistory(msgs)
 
+	// Tools load before the SSE sink goes out so failures can still be
+	// plain HTTP errors. One broken config skips that tool only (logged by
+	// DecodeConfigs's returned error).
+	tools, err := s.userTools(ctx, userID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "could not load tools")
+		return
+	}
+
 	// SSE headers go out only after validation; from here the response is a stream.
 	sink, ok := newSSESink(w)
 	if !ok {
@@ -97,16 +131,86 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	outcome, err := s.deps.Agent.Run(ctx, chat.Deps{UserID: userID, ConversationID: convID}, history, req.Content, sink, nil)
+	outcome, err := s.deps.Agent.Run(ctx, chat.Deps{UserID: userID, ConversationID: convID}, history, req.Content, sink, tools)
 	if err != nil {
 		s.persistFailure(ctx, userID, convID, err, sink)
+		return
+	}
+	s.settleRun(ctx, userID, convID, outcome, sink)
+}
+
+// userTools builds the caller's enabled golem tools. A nil Tools store (tests
+// without the tools feature) means no tools.
+func (s *Server) userTools(ctx context.Context, userID string) ([]tool.Tool[chat.Deps], error) {
+	if s.deps.Tools == nil {
+		return nil, nil
+	}
+	rows, err := s.deps.Tools.ListEnabled(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("list enabled tools: %w", err)
+	}
+	cfgs, derr := chat.DecodeConfigs(rows)
+	if derr != nil {
+		s.deps.Log.Error("skip broken tool config", "err", derr)
+	}
+	return chat.BuildTools(cfgs, s.toolEnv())
+}
+
+// toolEnv derives the execution bounds from config, filling the unset
+// (zero-valued test config) fields with the package defaults.
+func (s *Server) toolEnv() chat.ToolEnv {
+	env := chat.ToolEnv{
+		HTTPTimeout:       s.deps.Cfg.ToolHTTPTimeout,
+		HTTPMaxBytes:      s.deps.Cfg.ToolHTTPMaxBytes,
+		ResultMaxBytes:    s.deps.Cfg.ToolResultMaxBytes,
+		AllowPrivateHosts: s.deps.Cfg.ToolAllowPrivateHosts,
+	}
+	if env.HTTPTimeout <= 0 {
+		def := chat.DefaultToolEnv()
+		env.HTTPTimeout = def.HTTPTimeout
+		env.HTTPMaxBytes = def.HTTPMaxBytes
+		env.ResultMaxBytes = def.ResultMaxBytes
+	}
+	return env
+}
+
+// settleRun dispatches a finished run: approval pauses park the conversation,
+// everything else finishes normally.
+func (s *Server) settleRun(ctx context.Context, userID, convID string, outcome chat.Outcome, sink *sseSink) {
+	if len(outcome.Pending) > 0 {
+		s.pauseRun(ctx, userID, convID, outcome, sink)
 		return
 	}
 	s.finishRun(ctx, userID, convID, outcome, sink)
 }
 
+// pauseRun persists the paused conversation (history through the unanswered
+// tool call, usage, pending calls) and tells the client what needs a
+// decision. No done event follows — the stream ends waiting for approvals.
+func (s *Server) pauseRun(ctx context.Context, userID, convID string, outcome chat.Outcome, sink *sseSink) {
+	if err := s.persistRunMessages(ctx, userID, convID, outcome.Messages, outcome.Usage, outcome.Requests, false); err != nil {
+		s.deps.Log.Error("persist paused messages", "err", err)
+	}
+	if err := s.deps.Usage.Add(ctx, usageEventFor(userID, convID, s.deps.Cfg.GeminiModel, outcome.Usage, outcome.Requests, s.deps.Rates)); err != nil {
+		s.deps.Log.Error("record usage", "err", err)
+	}
+	calls := make([]storage.PendingToolCall, 0, len(outcome.Pending))
+	for _, p := range outcome.Pending {
+		calls = append(calls, storage.PendingToolCall{
+			CallID: p.CallID, ConversationID: convID, UserID: userID,
+			ToolName: p.ToolName, Args: p.Args, Reason: p.Reason, Status: "pending",
+		})
+	}
+	if err := s.deps.Pending.Add(ctx, calls); err != nil {
+		s.deps.Log.Error("persist pending calls", "err", err)
+	}
+	_ = s.deps.Convos.Touch(ctx, convID)
+	_ = sink.event("approval_request", map[string]any{"calls": outcome.Pending})
+}
+
 // persistFailure uses golem v0.7.1 partial evidence: whatever completed is
-// kept, marked truncated.
+// kept, marked truncated. Every partial message persists so the next turn's
+// history — including any completed tool exchanges — replays faithfully.
 func (s *Server) persistFailure(ctx context.Context, userID, convID string, runErr error, sink *sseSink) {
 	clientGone := errors.Is(runErr, context.Canceled) || errors.Is(runErr, context.DeadlineExceeded)
 	var runError *golem.RunError
@@ -117,18 +221,10 @@ func (s *Server) persistFailure(ctx context.Context, userID, convID string, runE
 		partial = runError.Partial
 	}
 	if partial != nil && len(partial.Messages) > 0 {
-		content := partialTailText(partial.Messages)
-		if content != "" {
-			if err := s.deps.Msgs.Add(ctx, storage.Message{
-				ConversationID: convID, UserID: userID, Role: string(model.RoleAssistant),
-				Content: content, Data: mustJSON(partial.Messages[len(partial.Messages)-1]),
-				InputTokens: partial.Usage.InputTokens, OutputTokens: partial.Usage.OutputTokens,
-				Requests: partial.Requests, Truncated: true,
-			}); err != nil {
-				s.deps.Log.Error("persist partial", "err", err)
-			}
-			_ = s.deps.Usage.Add(ctx, usageEventFor(userID, convID, s.deps.Cfg.GeminiModel, partial.Usage, partial.Requests, s.deps.Rates))
+		if err := s.persistRunMessages(ctx, userID, convID, partial.Messages, partial.Usage, partial.Requests, true); err != nil {
+			s.deps.Log.Error("persist partial", "err", err)
 		}
+		_ = s.deps.Usage.Add(ctx, usageEventFor(userID, convID, s.deps.Cfg.GeminiModel, partial.Usage, partial.Requests, s.deps.Rates))
 	}
 	_ = s.deps.Convos.Touch(ctx, convID)
 	if clientGone {
@@ -142,19 +238,44 @@ func (s *Server) persistFailure(ctx context.Context, userID, convID string, runE
 	s.deps.Log.Error("chat run failed", "err", runErr)
 }
 
-func (s *Server) finishRun(ctx context.Context, userID, convID string, outcome chat.Outcome, sink *sseSink) {
-	cost := s.deps.Rates.ChatCostMicros(outcome.Usage.InputTokens, outcome.Usage.OutputTokens)
-	var data []byte
-	if len(outcome.Messages) > 0 {
-		data = mustJSON(outcome.Messages[len(outcome.Messages)-1])
+// persistRunMessages stores every run-produced message as its own row. The
+// system message and the fresh user prompt stay out — the prompt row was
+// persisted by the handler, and replaying either would duplicate them.
+// Tool-call and tool-result rows ARE persisted: the next turn's history and
+// any deferred resume need them. Usage and cost land on the last assistant
+// row only.
+func (s *Server) persistRunMessages(ctx context.Context, userID, convID string, msgs []model.Message, usage model.Usage, requests int, truncated bool) error {
+	lastAssistant := -1
+	for i, m := range msgs {
+		if m.Role == model.RoleAssistant {
+			lastAssistant = i
+		}
 	}
-	if err := s.deps.Msgs.Add(ctx, storage.Message{
-		ConversationID: convID, UserID: userID, Role: string(model.RoleAssistant),
-		Content: outcome.Output, Data: data,
-		InputTokens: outcome.Usage.InputTokens, OutputTokens: outcome.Usage.OutputTokens,
-		Requests: outcome.Requests, CostMicros: cost,
-	}); err != nil {
-		s.deps.Log.Error("persist assistant message", "err", err)
+	for i, m := range msgs {
+		if m.Role != model.RoleAssistant && m.Role != model.RoleTool {
+			continue
+		}
+		row := storage.Message{
+			ConversationID: convID, UserID: userID,
+			Role: string(m.Role), Content: m.Content, Data: mustJSON(m),
+			Truncated: truncated,
+		}
+		if i == lastAssistant {
+			row.InputTokens = usage.InputTokens
+			row.OutputTokens = usage.OutputTokens
+			row.Requests = requests
+			row.CostMicros = s.deps.Rates.ChatCostMicros(usage.InputTokens, usage.OutputTokens)
+		}
+		if err := s.deps.Msgs.Add(ctx, row); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Server) finishRun(ctx context.Context, userID, convID string, outcome chat.Outcome, sink *sseSink) {
+	if err := s.persistRunMessages(ctx, userID, convID, outcome.Messages, outcome.Usage, outcome.Requests, false); err != nil {
+		s.deps.Log.Error("persist assistant messages", "err", err)
 	}
 	if err := s.deps.Usage.Add(ctx, usageEventFor(userID, convID, s.deps.Cfg.GeminiModel, outcome.Usage, outcome.Requests, s.deps.Rates)); err != nil {
 		s.deps.Log.Error("record usage", "err", err)
@@ -166,6 +287,7 @@ func (s *Server) finishRun(ctx context.Context, userID, convID string, outcome c
 	if msgs, err := s.deps.Msgs.ForConversation(ctx, convID, userID); err == nil && len(msgs) > 0 {
 		msgID = msgs[len(msgs)-1].ID
 	}
+	cost := s.deps.Rates.ChatCostMicros(outcome.Usage.InputTokens, outcome.Usage.OutputTokens)
 	_ = sink.event("done", map[string]any{
 		"messageId":    msgID,
 		"inputTokens":  outcome.Usage.InputTokens,
@@ -173,6 +295,20 @@ func (s *Server) finishRun(ctx context.Context, userID, convID string, outcome c
 		"requests":     outcome.Requests,
 		"costUsd":      math.Round(float64(cost)/10) / 1e5, // 5 decimal places
 	})
+}
+
+// fullHistory decodes every stored row — used by the resume path, whose
+// history must end with the unanswered tool call.
+func fullHistory(msgs []storage.Message) []model.Message {
+	var history []model.Message
+	for _, m := range msgs {
+		var mm model.Message
+		if err := json.Unmarshal(m.Data, &mm); err != nil {
+			continue // damaged row: skip rather than fail the run
+		}
+		history = append(history, mm)
+	}
+	return history
 }
 
 func usageEventFor(userID, convID, mdl string, usage model.Usage, requests int, rates cost.Rates) storage.UsageEvent {
@@ -199,15 +335,6 @@ func messagesToHistory(msgs []storage.Message) []model.Message {
 		history = append(history, mm)
 	}
 	return history
-}
-
-func partialTailText(msgs []model.Message) string {
-	for i := len(msgs) - 1; i >= 0; i-- {
-		if msgs[i].Role == model.RoleAssistant {
-			return msgs[i].Content
-		}
-	}
-	return ""
 }
 
 func truncateRunes(s string, n int) string {

@@ -15,6 +15,7 @@ import (
 type ToolStore interface {
 	Create(ctx context.Context, t storage.UserTool) (storage.UserTool, error)
 	List(ctx context.Context, userID string) ([]storage.UserTool, error)
+	ListEnabled(ctx context.Context, userID string) ([]storage.UserTool, error)
 	ByID(ctx context.Context, id, userID string) (storage.UserTool, error)
 	Update(ctx context.Context, t storage.UserTool) (storage.UserTool, error)
 	Delete(ctx context.Context, id, userID string) error

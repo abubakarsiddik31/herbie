@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"github.com/abubakarsiddik31/golem-chatbot/internal/storage"
+	"github.com/abubakarsiddik31/golem/model"
 )
 
 type conversationDTO struct {
@@ -80,6 +81,11 @@ func (s *Server) handleGetConversation(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]msgDTO, 0, len(msgs))
 	for _, m := range msgs {
+		// Tool plumbing stays out of the transcript: tool-result rows and
+		// empty assistant tool-call rows are history replay data only.
+		if m.Role == string(model.RoleTool) || m.Content == "" {
+			continue
+		}
 		out = append(out, msgDTO{ID: m.ID, Role: m.Role, Content: m.Content, Truncated: m.Truncated, CreatedAt: m.CreatedAt.UTC().Format(timeRFC3339)})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"conversation": toConversationDTO(conv), "messages": out})
