@@ -360,6 +360,13 @@ table "tools" {
 
 table "pending_tool_calls" {
   schema = schema.public
+  # Surrogate PK: providers synthesize call IDs per request (Gemini emits
+  # call-1, call-2, …), so call_id repeats across pauses of one conversation.
+  column "id" {
+    type    = uuid
+    null    = false
+    default = sql("gen_random_uuid()")
+  }
   column "call_id" {
     type = text
     null = false
@@ -396,7 +403,7 @@ table "pending_tool_calls" {
     default = sql("now()")
   }
   primary_key {
-    columns = [column.call_id]
+    columns = [column.id]
   }
   foreign_key "pending_tool_calls_conversation_id_fkey" {
     columns     = [column.conversation_id]

@@ -43,7 +43,7 @@ func (f *fakePending) ForConversation(_ context.Context, convID, userID string) 
 
 func (f *fakePending) SetStatus(_ context.Context, userID, callID, status string) error {
 	for i := range f.rows {
-		if f.rows[i].CallID == callID && f.rows[i].UserID == userID {
+		if f.rows[i].CallID == callID && f.rows[i].UserID == userID && f.rows[i].Status == "pending" {
 			f.rows[i].Status = status
 			return nil
 		}
@@ -180,7 +180,7 @@ func TestSendMessagePausesForApproval(t *testing.T) {
 	rec := postMessage(t, h, token, conv.ID, "weather in x?")
 
 	body := rec.Body.String()
-	if !strings.Contains(body, "event: approval_request") || !strings.Contains(body, `"callId":"call-1"`) {
+	if !strings.Contains(body, "event: approval_request") || !strings.Contains(body, `"toolName":"get_weather"`) || !strings.Contains(body, `"callId":"`) {
 		t.Fatalf("missing approval_request in SSE:\n%s", body)
 	}
 	if strings.Contains(body, "event: done") {

@@ -158,7 +158,10 @@ func sampleJSON(tpl string, declared map[string]ParamDef) string {
 	})
 }
 
-// Schema builds the JSON Schema golem advertises to the model.
+// Schema builds the JSON Schema golem advertises to the model. It stays
+// inside the subset the Gemini function-declaration API accepts — notably no
+// `additionalProperties`; unknown arguments are still rejected at execution
+// time (parseExecArgs) with a model correction round.
 func (c ToolConfig) Schema() (json.RawMessage, error) {
 	properties := map[string]any{}
 	var required []string
@@ -172,9 +175,8 @@ func (c ToolConfig) Schema() (json.RawMessage, error) {
 		}
 	}
 	schema := map[string]any{
-		"type":                 "object",
-		"properties":           properties,
-		"additionalProperties": false,
+		"type":       "object",
+		"properties": properties,
 	}
 	if len(required) > 0 {
 		schema["required"] = required

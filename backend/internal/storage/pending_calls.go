@@ -61,11 +61,14 @@ func (p *PendingCalls) ForConversation(ctx context.Context, convID, userID strin
 	return out, rows.Err()
 }
 
-// SetStatus records the decision on one call. Unknown call ID (or one not
-// owned by the user) maps to ErrNotFound.
+// SetStatus records the decision on one pending call. Only rows still in
+// 'pending' match — call IDs are provider-synthesized (Gemini emits call-1,
+// call-2, …) and repeat across pauses, so resolved history must never be
+// touched. No matching pending row maps to ErrNotFound.
 func (p *PendingCalls) SetStatus(ctx context.Context, userID, callID, status string) error {
 	tag, err := p.pool.Exec(ctx,
-		`UPDATE pending_tool_calls SET status = $3 WHERE call_id = $1 AND user_id = $2`,
+		`UPDATE pending_tool_calls SET status = $3
+		 WHERE call_id = $1 AND user_id = $2 AND status = 'pending'`,
 		callID, userID, status)
 	if err != nil {
 		return fmt.Errorf("set pending call status: %w", err)

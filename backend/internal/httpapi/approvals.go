@@ -108,7 +108,7 @@ func (s *Server) handleApprovals(w http.ResponseWriter, r *http.Request) {
 	}
 	outcome, err := s.deps.Agent.RunDeferred(ctx,
 		chat.Deps{UserID: userID, ConversationID: convID},
-		fullHistory(msgs), golem.DeferredResults{Approvals: resolutions},
+		pausedRunHistory(msgs), golem.DeferredResults{Approvals: resolutions},
 		sink, tools)
 	if err != nil {
 		s.persistFailure(ctx, userID, convID, err, sink)
@@ -120,14 +120,15 @@ func (s *Server) handleApprovals(w http.ResponseWriter, r *http.Request) {
 	for _, row := range msgs {
 		known[string(row.Data)] = true
 	}
-	if err := s.persistRunMessages(ctx, userID, convID, outcome.Messages, outcome.Usage, outcome.Requests, false, known); err != nil {
+	idMap, err := s.persistRunMessages(ctx, userID, convID, outcome.Messages, outcome.Usage, outcome.Requests, false, known)
+	if err != nil {
 		s.deps.Log.Error("persist resumed messages", "err", err)
 	}
 
 	if len(outcome.Pending) > 0 {
 		// The resumed run paused again: park the new pending calls and ask
 		// again. Message rows are already persisted above.
-		s.parkPending(ctx, userID, convID, outcome, sink)
+		s.parkPending(ctx, userID, convID, outcome, sink, idMap)
 		return
 	}
 	s.finishResumed(ctx, userID, convID, outcome, sink)
@@ -135,22 +136,27 @@ func (s *Server) handleApprovals(w http.ResponseWriter, r *http.Request) {
 
 // parkPending persists the pending calls of a paused run and announces them.
 // Unlike pauseRun it does not touch message rows — the caller persisted them.
-func (s *Server) parkPending(ctx context.Context, userID, convID string, outcome chat.Outcome, sink *sseSink) {
+func (s *Server) parkPending(ctx context.Context, userID, convID string, outcome chat.Outcome, sink *sseSink, idMap map[string]string) {
 	if err := s.deps.Usage.Add(ctx, usageEventFor(userID, convID, s.deps.Cfg.GeminiModel, outcome.Usage, outcome.Requests, s.deps.Rates)); err != nil {
 		s.deps.Log.Error("record usage", "err", err)
 	}
 	calls := make([]storage.PendingToolCall, 0, len(outcome.Pending))
+	announced := make([]chat.PendingApproval, 0, len(outcome.Pending))
 	for _, p := range outcome.Pending {
+		if mapped, ok := idMap[p.CallID]; ok {
+			p.CallID = mapped
+		}
 		calls = append(calls, storage.PendingToolCall{
 			CallID: p.CallID, ConversationID: convID, UserID: userID,
 			ToolName: p.ToolName, Args: p.Args, Reason: p.Reason, Status: "pending",
 		})
+		announced = append(announced, p)
 	}
 	if err := s.deps.Pending.Add(ctx, calls); err != nil {
 		s.deps.Log.Error("persist pending calls", "err", err)
 	}
 	_ = s.deps.Convos.Touch(ctx, convID)
-	_ = sink.event("approval_request", map[string]any{"calls": outcome.Pending})
+	_ = sink.event("approval_request", map[string]any{"calls": announced})
 }
 
 // finishResumed records usage and emits done without re-persisting messages.

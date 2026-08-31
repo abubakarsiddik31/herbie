@@ -103,8 +103,13 @@ func TestSchema(t *testing.T) {
 	if err := json.Unmarshal(schema, &got); err != nil {
 		t.Fatalf("schema not json: %v", err)
 	}
-	if got["type"] != "object" || got["additionalProperties"] != false {
+	if got["type"] != "object" {
 		t.Fatalf("schema envelope wrong: %v", got)
+	}
+	// Gemini's function-declaration API rejects additionalProperties; the
+	// schema must stay inside that subset.
+	if _, bad := got["additionalProperties"]; bad {
+		t.Fatalf("additionalProperties must not be emitted: %v", got)
 	}
 	required, ok := got["required"].([]any)
 	if !ok || len(required) != 1 || required[0] != "latitude" {

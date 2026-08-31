@@ -19,7 +19,7 @@ import (
 // pausedConversation runs the pause leg: a gated tool, a scripted model whose
 // first response calls it, and the send-message request that parks the
 // conversation. The scripted model's second response serves the resume run.
-func pausedConversation(t *testing.T, gatedHits *int) (*fakeConvos, *fakeMsgs, *fakePending, http.Handler, string, storage.Conversation) {
+func pausedConversation(t *testing.T, gatedHits *int) (*fakeConvos, *fakeMsgs, *fakePending, http.Handler, string, storage.Conversation, string) {
 	t.Helper()
 	gated := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		*gatedHits++
@@ -45,15 +45,40 @@ func pausedConversation(t *testing.T, gatedHits *int) (*fakeConvos, *fakeMsgs, *
 	if !strings.Contains(rec.Body.String(), "event: approval_request") {
 		t.Fatalf("pause leg failed:\n%s", rec.Body.String())
 	}
-	return convs, msgs, pending, h, token, conv
+	return convs, msgs, pending, h, token, conv, announcedCallID(t, rec.Body.String())
+}
+
+// announcedCallID extracts the rewritten, conversation-unique call ID from an
+// approval_request SSE body.
+func announcedCallID(t *testing.T, body string) string {
+	t.Helper()
+	const marker = `event: approval_request`
+	idx := strings.Index(body, marker)
+	if idx < 0 {
+		t.Fatalf("no approval_request in body")
+	}
+	var payload struct {
+		Calls []struct {
+			CallID string `json:"callId"`
+		} `json:"calls"`
+	}
+	line := body[idx:]
+	dataIdx := strings.Index(line, "data: ")
+	if err := json.Unmarshal([]byte(strings.TrimSpace(line[dataIdx+6:strings.Index(line, "\n\n")])), &payload); err != nil {
+		t.Fatalf("decode approval_request: %v", err)
+	}
+	if len(payload.Calls) == 0 || payload.Calls[0].CallID == "" {
+		t.Fatalf("approval_request without calls")
+	}
+	return payload.Calls[0].CallID
 }
 
 func TestApprovalsResume(t *testing.T) {
 	hits := 0
-	_, msgs, pending, h, token, conv := pausedConversation(t, &hits)
+	_, msgs, pending, h, token, conv, callID := pausedConversation(t, &hits)
 
 	req := reqJSON(http.MethodPost, "/api/conversations/"+conv.ID+"/approvals", map[string]any{
-		"decisions": []map[string]any{{"callId": "call-1", "approved": true}},
+		"decisions": []map[string]any{{"callId": callID, "approved": true}},
 	})
 	req.Header.Set("Authorization", "Bearer "+token)
 	rec := httptest.NewRecorder()
@@ -79,12 +104,76 @@ func TestApprovalsResume(t *testing.T) {
 	}
 }
 
+// TestApprovalsResumeWithCollidingCallIDs reproduces the Gemini ID scheme:
+// two runs in one conversation both synthesize "call-1". The earlier run's
+// call was answered; the paused run's call must still be resumable.
+func TestApprovalsResumeWithCollidingCallIDs(t *testing.T) {
+	agent, _ := chat.New(testmodel.New().
+		Respond(model.Response{Message: model.Message{Role: model.RoleAssistant, Content: "hn results"},
+			Usage: model.Usage{InputTokens: 4, OutputTokens: 2}}),
+		golem.UsageLimit{}, chat.DefaultToolEnv())
+	msgs := newFakeMsgs()
+	convs := newFakeConvos(msgs)
+	pending := &fakePending{}
+	// The approved re-run executes through the real tool, so it must be
+	// declared in the user's enabled set.
+	tools := newFakeToolStore()
+	hits := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits++
+		_, _ = io.WriteString(w, `{"hits":[]}`)
+	}))
+	t.Cleanup(srv.Close)
+	_, _ = tools.Create(context.Background(), storage.UserTool{
+		UserID: "u-1", Name: "search_hn", Description: "hn", Method: "GET",
+		URLTemplate: srv.URL, Params: json.RawMessage(`[]`), Headers: json.RawMessage(`{}`),
+		Enabled: true,
+	})
+	h, token := newHandlerServerFull(t, agent, convs, msgs, newFakeUsage(), tools, pending)
+
+	conv := convs.mustCreate("u-1", "")
+	// Run 1 (answered) and the paused run, both with Gemini-style call-1.
+	callMsg := func(name string) model.Message {
+		return model.Message{Role: model.RoleAssistant,
+			ToolCalls: []model.ToolCall{{ID: "call-1", Name: name, Args: json.RawMessage(`{}`)}}}
+	}
+	for _, m := range []model.Message{
+		{Role: model.RoleUser, Content: "weather?"},
+		callMsg("get_weather"),
+		{Role: model.RoleTool, ToolCallID: "call-1", ToolName: "get_weather", Content: "21C"},
+		{Role: model.RoleAssistant, Content: "It is 21C"},
+		{Role: model.RoleUser, Content: "search hn"},
+		callMsg("search_hn"),
+	} {
+		_ = msgs.Add(context.Background(), storage.Message{
+			ConversationID: conv.ID, UserID: "u-1", Role: string(m.Role),
+			Content: m.Content, Data: mustJSON(m),
+		})
+	}
+	_ = pending.Add(context.Background(), []storage.PendingToolCall{
+		{CallID: "call-1", ConversationID: conv.ID, UserID: "u-1", ToolName: "search_hn", Args: []byte(`{}`), Status: "pending"},
+	})
+
+	// The paused run's handcrafted history carries the raw Gemini-style
+	// "call-1"; the decision must use exactly that ID.
+	req := reqJSON(http.MethodPost, "/api/conversations/"+conv.ID+"/approvals", map[string]any{
+		"decisions": []map[string]any{{"callId": "call-1", "approved": true}},
+	})
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "hn results") || !strings.Contains(rec.Body.String(), "event: done") {
+		t.Fatalf("resume with colliding IDs: status %d body %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestApprovalsDenial(t *testing.T) {
 	hits := 0
-	_, _, pending, h, token, conv := pausedConversation(t, &hits)
+	_, _, pending, h, token, conv, callID := pausedConversation(t, &hits)
 
 	req := reqJSON(http.MethodPost, "/api/conversations/"+conv.ID+"/approvals", map[string]any{
-		"decisions": []map[string]any{{"callId": "call-1", "approved": false, "reason": "user denied"}},
+		"decisions": []map[string]any{{"callId": callID, "approved": false, "reason": "user denied"}},
 	})
 	req.Header.Set("Authorization", "Bearer "+token)
 	rec := httptest.NewRecorder()
@@ -103,7 +192,7 @@ func TestApprovalsDenial(t *testing.T) {
 
 func TestApprovalsValidation(t *testing.T) {
 	hits := 0
-	_, _, pending, h, token, conv := pausedConversation(t, &hits)
+	_, _, pending, h, token, conv, callID := pausedConversation(t, &hits)
 
 	badCases := []struct {
 		name string
@@ -112,8 +201,8 @@ func TestApprovalsValidation(t *testing.T) {
 		{"unknown call", map[string]any{"decisions": []map[string]any{{"callId": "call-zzz", "approved": true}}}},
 		{"missing decision", map[string]any{}},
 		{"duplicate decision", map[string]any{"decisions": []map[string]any{
-			{"callId": "call-1", "approved": true},
-			{"callId": "call-1", "approved": true},
+			{"callId": callID, "approved": true},
+			{"callId": callID, "approved": true},
 		}}},
 	}
 	for _, tc := range badCases {

@@ -148,4 +148,16 @@ func TestPendingCallsPersistence(t *testing.T) {
 	if err := pending.SetStatus(ctx, "00000000-0000-0000-0000-000000000000", "call-b", "denied"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("wrong owner err = %v", err)
 	}
+
+	// Provider-synthesized call IDs repeat across pauses: re-pausing with a
+	// call ID that was already resolved must insert a fresh row.
+	err = pending.Add(ctx, []PendingToolCall{
+		{CallID: "call-a", ConversationID: conv.ID, UserID: userID, ToolName: "search_hn", Args: []byte(`{}`), Status: "pending"},
+	})
+	if err != nil {
+		t.Fatalf("re-pause with resolved call id: %v", err)
+	}
+	if live, _ := pending.ForConversation(ctx, conv.ID, userID); len(live) != 2 || live[1].CallID != "call-a" {
+		t.Fatalf("live pending after re-pause = %+v", live)
+	}
 }

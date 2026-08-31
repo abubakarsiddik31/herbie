@@ -2,11 +2,14 @@ package httpapi
 
 import (
 	"context"
+	cryptorand "crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
 	"net/http"
+	"strings"
 
 	"github.com/abubakarsiddik31/golem"
 	"github.com/abubakarsiddik31/golem-chatbot/internal/chat"
@@ -188,24 +191,33 @@ func (s *Server) settleRun(ctx context.Context, userID, convID string, outcome c
 // tool call, usage, pending calls) and tells the client what needs a
 // decision. No done event follows — the stream ends waiting for approvals.
 func (s *Server) pauseRun(ctx context.Context, userID, convID string, outcome chat.Outcome, sink *sseSink) {
-	if err := s.persistRunMessages(ctx, userID, convID, outcome.Messages, outcome.Usage, outcome.Requests, false, nil); err != nil {
+	idMap, err := s.persistRunMessages(ctx, userID, convID, outcome.Messages, outcome.Usage, outcome.Requests, false, nil)
+	if err != nil {
 		s.deps.Log.Error("persist paused messages", "err", err)
 	}
 	if err := s.deps.Usage.Add(ctx, usageEventFor(userID, convID, s.deps.Cfg.GeminiModel, outcome.Usage, outcome.Requests, s.deps.Rates)); err != nil {
 		s.deps.Log.Error("record usage", "err", err)
 	}
 	calls := make([]storage.PendingToolCall, 0, len(outcome.Pending))
+	announced := make([]chat.PendingApproval, 0, len(outcome.Pending))
 	for _, p := range outcome.Pending {
+		// Reference the persisted (rewritten, conversation-unique) call ID.
+		callID := p.CallID
+		if mapped, ok := idMap[p.CallID]; ok {
+			callID = mapped
+			p.CallID = mapped
+		}
 		calls = append(calls, storage.PendingToolCall{
-			CallID: p.CallID, ConversationID: convID, UserID: userID,
+			CallID: callID, ConversationID: convID, UserID: userID,
 			ToolName: p.ToolName, Args: p.Args, Reason: p.Reason, Status: "pending",
 		})
+		announced = append(announced, p)
 	}
 	if err := s.deps.Pending.Add(ctx, calls); err != nil {
 		s.deps.Log.Error("persist pending calls", "err", err)
 	}
 	_ = s.deps.Convos.Touch(ctx, convID)
-	_ = sink.event("approval_request", map[string]any{"calls": outcome.Pending})
+	_ = sink.event("approval_request", map[string]any{"calls": announced})
 }
 
 // persistFailure uses golem v0.7.1 partial evidence: whatever completed is
@@ -221,7 +233,7 @@ func (s *Server) persistFailure(ctx context.Context, userID, convID string, runE
 		partial = runError.Partial
 	}
 	if partial != nil && len(partial.Messages) > 0 {
-		if err := s.persistRunMessages(ctx, userID, convID, partial.Messages, partial.Usage, partial.Requests, true, nil); err != nil {
+		if _, err := s.persistRunMessages(ctx, userID, convID, partial.Messages, partial.Usage, partial.Requests, true, nil); err != nil {
 			s.deps.Log.Error("persist partial", "err", err)
 		}
 		_ = s.deps.Usage.Add(ctx, usageEventFor(userID, convID, s.deps.Cfg.GeminiModel, partial.Usage, partial.Requests, s.deps.Rates))
@@ -244,24 +256,59 @@ func (s *Server) persistFailure(ctx context.Context, userID, convID string, runE
 // Tool-call and tool-result rows ARE persisted: the next turn's history and
 // any deferred resume need them. Usage and cost land on the last assistant
 // row only.
-func (s *Server) persistRunMessages(ctx context.Context, userID, convID string, msgs []model.Message, usage model.Usage, requests int, truncated bool, skip map[string]bool) error {
+//
+// Provider-synthesized call IDs (Gemini's call-1, call-2, …) restart every
+// request, so they collide across runs of one conversation — golem keys
+// answered-ness by call ID alone. Each persisted call therefore gets a
+// conversation-unique ID; the returned map links the run's raw IDs to the
+// persisted ones (the approval pause needs it to key pending rows). A tool
+// result is matched to the most recent unanswered raw ID, mirroring the
+// emission order golem guarantees.
+func (s *Server) persistRunMessages(ctx context.Context, userID, convID string, msgs []model.Message, usage model.Usage, requests int, truncated bool, skip map[string]bool) (map[string]string, error) {
 	lastAssistant := -1
 	for i, m := range msgs {
 		if m.Role == model.RoleAssistant {
 			lastAssistant = i
 		}
 	}
+	idMap := map[string]string{}
+	unanswered := map[string]string{} // raw call ID → persisted call ID
 	for i, m := range msgs {
 		if m.Role != model.RoleAssistant && m.Role != model.RoleTool {
 			continue
+		}
+		// Replay detection must run BEFORE rewriting: a resumed run's
+		// Messages start with the paused history verbatim, and those rows
+		// already exist. Rewriting first would mint fresh IDs for them.
+		if raw := mustJSON(m); skip[string(raw)] {
+			continue
+		}
+		if m.Role == model.RoleAssistant && len(m.ToolCalls) > 0 {
+			m = cloneMessage(m)
+			for j, call := range m.ToolCalls {
+				prefix := convID
+				if len(prefix) > 8 {
+					prefix = prefix[:8]
+				}
+				newID := prefix + "-call-" + strings.ToLower(randomHex())
+				if call.ID != "" {
+					unanswered[call.ID] = newID
+					idMap[call.ID] = newID
+				}
+				m.ToolCalls[j].ID = newID
+			}
+		}
+		if m.Role == model.RoleTool && m.ToolCallID != "" {
+			if newID, ok := unanswered[m.ToolCallID]; ok {
+				m = cloneMessage(m)
+				m.ToolCallID = newID
+				delete(unanswered, rawOf(idMap, newID))
+			}
 		}
 		row := storage.Message{
 			ConversationID: convID, UserID: userID,
 			Role: string(m.Role), Content: m.Content, Data: mustJSON(m),
 			Truncated: truncated,
-		}
-		if skip[string(row.Data)] {
-			continue // resume runs replay the paused history; those rows exist
 		}
 		if i == lastAssistant {
 			row.InputTokens = usage.InputTokens
@@ -270,14 +317,38 @@ func (s *Server) persistRunMessages(ctx context.Context, userID, convID string, 
 			row.CostMicros = s.deps.Rates.ChatCostMicros(usage.InputTokens, usage.OutputTokens)
 		}
 		if err := s.deps.Msgs.Add(ctx, row); err != nil {
-			return err
+			return idMap, err
 		}
 	}
-	return nil
+	return idMap, nil
+}
+
+func cloneMessage(m model.Message) model.Message {
+	out := m
+	out.ToolCalls = append([]model.ToolCall(nil), m.ToolCalls...)
+	return out
+}
+
+// randomHex returns 16 random hex chars for a persisted call-ID suffix.
+func randomHex() string {
+	var b [8]byte
+	_, _ = cryptorand.Read(b[:])
+	return hex.EncodeToString(b[:])
+}
+
+// rawOf finds the raw ID mapped to a persisted ID (used to clear the
+// answered marker once its result is stored).
+func rawOf(idMap map[string]string, persisted string) string {
+	for raw, mapped := range idMap {
+		if mapped == persisted {
+			return raw
+		}
+	}
+	return ""
 }
 
 func (s *Server) finishRun(ctx context.Context, userID, convID string, outcome chat.Outcome, sink *sseSink) {
-	if err := s.persistRunMessages(ctx, userID, convID, outcome.Messages, outcome.Usage, outcome.Requests, false, nil); err != nil {
+	if _, err := s.persistRunMessages(ctx, userID, convID, outcome.Messages, outcome.Usage, outcome.Requests, false, nil); err != nil {
 		s.deps.Log.Error("persist assistant messages", "err", err)
 	}
 	if err := s.deps.Usage.Add(ctx, usageEventFor(userID, convID, s.deps.Cfg.GeminiModel, outcome.Usage, outcome.Requests, s.deps.Rates)); err != nil {
@@ -300,8 +371,7 @@ func (s *Server) finishRun(ctx context.Context, userID, convID string, outcome c
 	})
 }
 
-// fullHistory decodes every stored row — used by the resume path, whose
-// history must end with the unanswered tool call.
+// fullHistory decodes every stored row.
 func fullHistory(msgs []storage.Message) []model.Message {
 	var history []model.Message
 	for _, m := range msgs {
@@ -312,6 +382,23 @@ func fullHistory(msgs []storage.Message) []model.Message {
 		history = append(history, mm)
 	}
 	return history
+}
+
+// pausedRunHistory decodes the rows of the paused run: everything from the
+// last user message on. That is golem's deferred-resume contract ("history
+// is the paused run's Result.Messages") — and a hard requirement with
+// providers that synthesize call IDs per request (Gemini's call-1, call-2,
+// … repeat across runs, so a full-conversation history would let the resume
+// see the new call as already answered).
+func pausedRunHistory(msgs []storage.Message) []model.Message {
+	decoded := fullHistory(msgs)
+	start := 0
+	for i, m := range decoded {
+		if m.Role == model.RoleUser {
+			start = i
+		}
+	}
+	return decoded[start:]
 }
 
 func usageEventFor(userID, convID, mdl string, usage model.Usage, requests int, rates cost.Rates) storage.UsageEvent {

@@ -47,6 +47,38 @@ The smoke script uses `BASE` (default `http://localhost:8080`) and `EMAIL` (defa
 
 The AI-state components in `frontend/src/components/ai/` (streaming text, thinking trace, run loader) are adapted from [beautifului.dev](https://www.beautifului.dev/) (TurboProduct, MIT) with modifications for golem's run-event model.
 
+## Custom tools (Phase 2a)
+
+Each user can register HTTP API tools from the **Tools** page; the chat agent
+advertises and executes them on every message. A tool is a name, a model-facing
+description, a method + URL template (`{{param}}` path placeholders, query
+params appended, optional JSON body template), typed params
+(`string`/`number`/`boolean`, `path`/`query`), and static headers (secrets are
+stored server-side, masked as `••••` in the API, and never sent to the model).
+`Ask before running` gates a tool behind golem's deferred-tools flow: the chat
+pauses, an approval card appears, and Approve/Deny resumes the run.
+
+Execution is guarded and graceful: DNS-level SSRF block of loopback/private/
+link-local hosts (`TOOL_ALLOW_PRIVATE_HOSTS=true` disables the guard for
+dev), request timeout and size caps (`TOOL_HTTP_TIMEOUT`, `TOOL_HTTP_MAX_BYTES`,
+`TOOL_RESULT_MAX_BYTES`), and errors returned to the model as text results so a
+dead API degrades to a graceful answer instead of failing the run.
+
+Tool lifecycle persists every run message (tool calls included) so history
+replay and resume work across turns; provider-synthesized call IDs (Gemini's
+`call-1`, …) are rewritten to conversation-unique IDs at persistence time
+because they otherwise collide across runs. Schema migrations are generated
+with [Atlas](https://atlasgo.io) from `backend/internal/storage/schema.hcl`
+(the schema source of truth) into the goose-format files goose applies at
+startup:
+
+```bash
+/opt/homebrew/bin/atlas migrate diff <name> \
+  --dir file://backend/internal/storage/migrations --dir-format goose \
+  --to file://backend/internal/storage/schema.hcl \
+  --dev-url "docker://postgres/16/dev?search_path=public"
+```
+
 ## Phase 2
 
 RAG — document upload to MinIO, ingestion into Weaviate, an app-owned Gemini embedding client, and a `search_documents` retrieval tool on the agent — is design-complete. See `docs/superpowers/specs/2026-08-30-golem-chatbot-design.md`.
