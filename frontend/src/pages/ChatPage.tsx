@@ -49,7 +49,7 @@ export function ChatPage() {
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const seededRef = useRef<string | null>(null);
 
-  const { messages, setMessages, status, send, stop, reset, trace } = useChat(() => {
+  const { messages, setMessages, status, send, resolve, stop, reset, trace, pending } = useChat(() => {
     // Refresh titles/order after each completed run.
     void queryClient.invalidateQueries({ queryKey: ["conversations"] });
   });
@@ -133,6 +133,10 @@ export function ChatPage() {
   async function submit() {
     const content = input.trim();
     if (!content || status === "running" || createConversation.isPending) return;
+    if (selectedId && pending.length > 0) {
+      toast.error("Resolve the pending approval first.");
+      return;
+    }
     setInput("");
     setSendError(null);
     try {
@@ -147,6 +151,14 @@ export function ChatPage() {
     } catch (err) {
       setSendError(err instanceof ApiError ? err.message : "Something went wrong. Please try again.");
     }
+  }
+
+  function decide(approved: boolean) {
+    if (!selectedId || pending.length === 0) return;
+    const decisions = pending.map((p) => ({ callId: p.callId, approved, reason: approved ? undefined : "user denied" }));
+    void resolve(selectedId, decisions).catch((err) => {
+      setSendError(err instanceof ApiError ? err.message : "Failed to resume the conversation.");
+    });
   }
 
   async function logout() {
@@ -229,6 +241,9 @@ export function ChatPage() {
           </h1>
           <div className="flex shrink-0 items-center gap-1">
             <Button variant="ghost" size="sm" asChild>
+              <Link to="/tools">Tools</Link>
+            </Button>
+            <Button variant="ghost" size="sm" asChild>
               <Link to="/usage">Usage</Link>
             </Button>
             <Button variant="ghost" size="icon-sm" aria-label="Log out" onClick={() => void logout()}>
@@ -266,6 +281,28 @@ export function ChatPage() {
                 )}
               </div>
             ))}
+            {pending.length > 0 && (
+              <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-4">
+                <p className="text-sm font-medium">The agent wants to run a tool</p>
+                {pending.map((p) => (
+                  <div key={p.callId} className="mt-2 rounded-md bg-background/60 p-3">
+                    <div className="flex items-center gap-2">
+                      <Badge variant="outline" className="font-mono text-xs">{p.toolName}</Badge>
+                      <span className="font-mono text-muted-foreground text-xs">{JSON.stringify(p.args)}</span>
+                    </div>
+                    {p.reason && <p className="mt-1 text-muted-foreground text-xs">{p.reason}</p>}
+                  </div>
+                ))}
+                <div className="mt-3 flex gap-2">
+                  <Button size="sm" onClick={() => decide(true)} disabled={running}>
+                    Approve
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={() => decide(false)} disabled={running}>
+                    Deny
+                  </Button>
+                </div>
+              </div>
+            )}
             <div ref={bottomRef} />
           </div>
         </ScrollArea>
@@ -284,8 +321,8 @@ export function ChatPage() {
                   }
                 }}
                 rows={1}
-                placeholder="Message Golem…"
-                disabled={running}
+                placeholder={pending.length > 0 ? "Waiting for approval…" : "Message Golem…"}
+                disabled={running || pending.length > 0}
                 className="max-h-48 min-h-9 w-full resize-none rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs outline-none field-sizing-content placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-50"
               />
               {running ? (

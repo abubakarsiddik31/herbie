@@ -8,3 +8,33 @@ export interface ChatMessage {
 export interface UsageTotalsRow { kind: string; model: string; inputTokens: number; outputTokens: number; requests: number; costUsd: number }
 export interface UsageDailyRow { day: string; inputTokens: number; outputTokens: number; costUsd: number }
 export interface UsageSummary { totals: UsageTotalsRow[]; daily: UsageDailyRow[] }
+
+export interface ToolParam {
+  name: string;
+  in: "path" | "query";
+  type: "string" | "number" | "boolean";
+  required: boolean;
+  description: string;
+}
+
+export interface UserTool {
+  id: string;
+  name: string;
+  description: string;
+  method: string;
+  urlTemplate: string;
+  params: ToolParam[];
+  bodyTemplate: string;
+  headers: Record<string, string>;
+  requireApproval: boolean;
+  enabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PendingApproval {
+  callId: string;
+  toolName: string;
+  args: unknown;
+  reason: string;
+}
