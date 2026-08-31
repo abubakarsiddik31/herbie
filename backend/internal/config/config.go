@@ -10,7 +10,8 @@ import (
 )
 
 // Config carries every runtime setting. Values come from the environment;
-// a .env file in the working directory is loaded first, dev convenience only.
+// a .env file in the working directory or repo root is loaded first, dev
+// convenience only.
 type Config struct {
 	Port           string
 	DatabaseURL    string
@@ -23,8 +24,18 @@ type Config struct {
 	ChatOutputRate float64 // USD per 1M output tokens
 }
 
+// dotenvPaths are where a repo-root .env may sit relative to the working
+// directory: `make backend` runs the server from backend/, so the repo
+// root's .env is one level up.
+var dotenvPaths = []string{".env", "../.env", "../../.env"}
+
 func Load() (Config, error) {
-	loadDotenv(".env")
+	for _, path := range dotenvPaths {
+		if _, err := os.Stat(path); err == nil {
+			loadDotenv(path)
+			break
+		}
+	}
 	inputRate, err := envFloat("CHAT_INPUT_USD_PER_MTOK", 0.30)
 	if err != nil {
 		return Config{}, err
