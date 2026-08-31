@@ -20,6 +20,7 @@ type ServerDeps struct {
 	Convos ConvoStore
 	Msgs   MsgStore
 	Usage  UsageStore
+	Tools  ToolStore
 	Agent  *chat.Agent
 	Rates  cost.Rates
 }
@@ -56,6 +57,10 @@ func NewServer(deps ServerDeps) http.Handler {
 	authed.HandleFunc("PATCH /api/conversations/{id}", s.handlePatchConversation)
 	authed.HandleFunc("DELETE /api/conversations/{id}", s.handleDeleteConversation)
 	authed.HandleFunc("POST /api/conversations/{id}/messages", s.handleSendMessage)
+	authed.HandleFunc("GET /api/tools", s.handleListTools)
+	authed.HandleFunc("POST /api/tools", s.handleCreateTool)
+	authed.HandleFunc("PATCH /api/tools/{id}", s.handlePatchTool)
+	authed.HandleFunc("DELETE /api/tools/{id}", s.handleDeleteTool)
 	authed.HandleFunc("GET /api/usage/summary", s.handleUsageSummary)
 	s.mux.Handle("/api/", requireAuth(deps.Tokens, authed))
 

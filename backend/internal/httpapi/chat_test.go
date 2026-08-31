@@ -29,6 +29,14 @@ const testSecret = "0123456789abcdef0123456789abcdef"
 // in-memory fakes; it also mints a bearer token for user u-1.
 func newHandlerServer(t *testing.T, agent *chat.Agent, convs ConvoStore, msgs MsgStore, usage UsageStore) (http.Handler, string) {
 	t.Helper()
+	return newHandlerServerWithTools(t, agent, convs, msgs, usage, nil)
+}
+
+// newHandlerServerWithTools additionally wires a tools store (nil = no store;
+// the tools routes then only ever see handler errors, which the old tests
+// never touch).
+func newHandlerServerWithTools(t *testing.T, agent *chat.Agent, convs ConvoStore, msgs MsgStore, usage UsageStore, tools ToolStore) (http.Handler, string) {
+	t.Helper()
 	tm, err := auth.NewTokenMaker(testSecret)
 	if err != nil {
 		t.Fatal(err)
@@ -41,6 +49,7 @@ func newHandlerServer(t *testing.T, agent *chat.Agent, convs ConvoStore, msgs Ms
 		Convos: convs,
 		Msgs:   msgs,
 		Usage:  usage,
+		Tools:  tools,
 		Agent:  agent,
 		Rates:  cost.Rates{ChatInputPerM: 0.3, ChatOutputPerM: 2.5},
 	})
