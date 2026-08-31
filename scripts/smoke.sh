@@ -13,5 +13,5 @@ conv=$(curl -sf -X POST "$BASE/api/conversations" -H "Authorization: Bearer $tok
   | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
 curl -sf -N -X POST "$BASE/api/conversations/$conv/messages" \
   -H "Authorization: Bearer $token" -H 'Content-Type: application/json' \
-  -d '{"content":"Reply with exactly: pong"}' | head -40
+  -d '{"content":"Reply with exactly: pong"}' | awk 'NR<=40'
 echo "smoke ok"

@@ -14,7 +14,7 @@ export class ApiError extends Error {
 
 let refreshing: Promise<boolean> | null = null;
 
-async function tryRefresh(): Promise<boolean> {
+export async function tryRefresh(): Promise<boolean> {
   refreshing ??= fetch(`${BASE}/api/auth/refresh`, {
     method: "POST",
     credentials: "include",

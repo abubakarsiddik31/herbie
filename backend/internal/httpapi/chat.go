@@ -171,7 +171,7 @@ func (s *Server) finishRun(ctx context.Context, userID, convID string, outcome c
 		"inputTokens":  outcome.Usage.InputTokens,
 		"outputTokens": outcome.Usage.OutputTokens,
 		"requests":     outcome.Requests,
-		"costUsd":      math.Round(float64(cost)/10) / 1e5, // 4 decimal places
+		"costUsd":      math.Round(float64(cost)/10) / 1e5, // 5 decimal places
 	})
 }
 

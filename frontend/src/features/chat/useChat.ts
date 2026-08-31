@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from "react";
-import { BASE, ApiError } from "@/lib/api";
+import { BASE, ApiError, tryRefresh } from "@/lib/api";
 import { parseSSE } from "@/lib/sse";
 import { useAuth } from "@/stores/auth";
 import type { ChatMessage } from "@/lib/types";
@@ -39,14 +39,20 @@ export function useChat(onDone?: () => void) {
     let received = false;
     let hadError = false;
     try {
-      const token = useAuth.getState().accessToken;
-      const res = await fetch(`${BASE}/api/conversations/${conversationId}/messages`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ content }),
-        credentials: "include",
-        signal: controller.signal,
-      });
+      const doSend = () => {
+        const token = useAuth.getState().accessToken;
+        return fetch(`${BASE}/api/conversations/${conversationId}/messages`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: token ? `Bearer ${token}` : "" },
+          body: JSON.stringify({ content }),
+          credentials: "include",
+          signal: controller.signal,
+        });
+      };
+      let res = await doSend();
+      if (res.status === 401 && (await tryRefresh())) {
+        res = await doSend();
+      }
       if (!res.ok || !res.body) {
         if (res.status === 401) useAuth.getState().clear();
         throw new ApiError(res.status, "error", `stream failed (${res.status})`);
