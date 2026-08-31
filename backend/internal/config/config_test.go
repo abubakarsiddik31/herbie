@@ -4,7 +4,43 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
+
+func TestLoadToolDefaults(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://localhost/gc")
+	t.Setenv("JWT_SECRET", "0123456789abcdef0123456789abcdef")
+	t.Setenv("GEMINI_API_KEY", "k")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ToolHTTPTimeout != 20*time.Second {
+		t.Fatalf("ToolHTTPTimeout = %s", cfg.ToolHTTPTimeout)
+	}
+	if cfg.ToolHTTPMaxBytes != 1<<20 || cfg.ToolResultMaxBytes != 32<<10 {
+		t.Fatalf("byte defaults: %d %d", cfg.ToolHTTPMaxBytes, cfg.ToolResultMaxBytes)
+	}
+	if cfg.ToolAllowPrivateHosts || cfg.MaxToolsPerUser != 20 {
+		t.Fatalf("flags: %v %d", cfg.ToolAllowPrivateHosts, cfg.MaxToolsPerUser)
+	}
+}
+
+func TestLoadToolOverrides(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://localhost/gc")
+	t.Setenv("JWT_SECRET", "0123456789abcdef0123456789abcdef")
+	t.Setenv("GEMINI_API_KEY", "k")
+	t.Setenv("TOOL_HTTP_TIMEOUT", "5")
+	t.Setenv("TOOL_ALLOW_PRIVATE_HOSTS", "true")
+	t.Setenv("MAX_TOOLS_PER_USER", "3")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ToolHTTPTimeout != 5*time.Second || !cfg.ToolAllowPrivateHosts || cfg.MaxToolsPerUser != 3 {
+		t.Fatalf("overrides not applied: %+v", cfg)
+	}
+}
 
 func TestLoadRequiresSecrets(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://localhost/gc")

@@ -7,6 +7,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Config carries every runtime setting. Values come from the environment;
@@ -22,6 +23,13 @@ type Config struct {
 	FrontendOrigin string
 	ChatInputRate  float64 // USD per 1M input tokens
 	ChatOutputRate float64 // USD per 1M output tokens
+
+	// User-tool runtime settings.
+	ToolHTTPTimeout       time.Duration
+	ToolHTTPMaxBytes      int64
+	ToolResultMaxBytes    int64
+	ToolAllowPrivateHosts bool
+	MaxToolsPerUser       int
 }
 
 // dotenvPaths are where a repo-root .env may sit relative to the working
@@ -44,6 +52,14 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	toolTimeout, err := envInt("TOOL_HTTP_TIMEOUT", 20)
+	if err != nil {
+		return Config{}, err
+	}
+	maxTools, err := envInt("MAX_TOOLS_PER_USER", 20)
+	if err != nil {
+		return Config{}, err
+	}
 	cfg := Config{
 		Port:           env("APP_PORT", "8080"),
 		DatabaseURL:    os.Getenv("DATABASE_URL"),
@@ -54,6 +70,12 @@ func Load() (Config, error) {
 		FrontendOrigin: env("FRONTEND_ORIGIN", "http://localhost:5173"),
 		ChatInputRate:  inputRate,
 		ChatOutputRate: outputRate,
+
+		ToolHTTPTimeout:       time.Duration(toolTimeout) * time.Second,
+		ToolHTTPMaxBytes:      envInt64("TOOL_HTTP_MAX_BYTES", 1<<20),
+		ToolResultMaxBytes:    envInt64("TOOL_RESULT_MAX_BYTES", 32<<10),
+		ToolAllowPrivateHosts: envBool("TOOL_ALLOW_PRIVATE_HOSTS", false),
+		MaxToolsPerUser:       maxTools,
 	}
 	var errs []error
 	if cfg.DatabaseURL == "" {
@@ -88,6 +110,36 @@ func envFloat(key string, def float64) (float64, error) {
 		return 0, fmt.Errorf("invalid %s: %q", key, v)
 	}
 	return f, nil
+}
+
+func envInt(key string, def int) (int, error) {
+	v := os.Getenv(key)
+	if v == "" {
+		return def, nil
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return 0, fmt.Errorf("invalid %s: %q", key, v)
+	}
+	return n, nil
+}
+
+func envInt64(key string, def int64) int64 {
+	if v := os.Getenv(key); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+			return n
+		}
+	}
+	return def
+}
+
+func envBool(key string, def bool) bool {
+	if v := os.Getenv(key); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			return b
+		}
+	}
+	return def
 }
 
 // loadDotenv applies KEY=VALUE lines that are not already in the
