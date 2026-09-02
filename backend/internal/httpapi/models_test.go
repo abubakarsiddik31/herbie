@@ -184,3 +184,54 @@ func mustMerge(t *testing.T, conv storage.Conversation, modelID, sysPrompt strin
 	conv.SystemPrompt = sysPrompt
 	return conv
 }
+
+func TestGetConversationSurfacesUsage(t *testing.T) {
+	agent := newTestAgent(t, scriptedPongModel())
+	msgs := newFakeMsgs()
+	convs := newFakeConvos(msgs)
+	h, token := newHandlerServer(t, agent, convs, msgs, newFakeUsage())
+	conv := convs.mustCreate("u-1", "")
+
+	msgs.rows = append(msgs.rows,
+		storage.Message{ID: "m-1", ConversationID: conv.ID, UserID: "u-1", Role: "user", Content: "hi", Data: []byte(`{"role":"user","content":"hi"}`)},
+		storage.Message{ID: "m-2", ConversationID: conv.ID, UserID: "u-1", Role: "assistant", Content: "ho",
+			Data: []byte(`{"role":"assistant","content":"ho"}`), InputTokens: 1200, OutputTokens: 300, CostMicros: 8460, Model: "gemini-2.5-flash"},
+	)
+
+	req := reqJSON(http.MethodGet, "/api/conversations/"+conv.ID, nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d", rec.Code)
+	}
+	var got struct {
+		Messages []struct {
+			ID    string `json:"id"`
+			Usage *struct {
+				InputTokens  int     `json:"inputTokens"`
+				OutputTokens int     `json:"outputTokens"`
+				CostUsd      float64 `json:"costUsd"`
+				Model        string  `json:"model"`
+			} `json:"usage"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	var assistantUsage *struct {
+		InputTokens  int     `json:"inputTokens"`
+		OutputTokens int     `json:"outputTokens"`
+		CostUsd      float64 `json:"costUsd"`
+		Model        string  `json:"model"`
+	}
+	for _, m := range got.Messages {
+		if m.ID == "m-2" {
+			assistantUsage = m.Usage
+		}
+	}
+	if assistantUsage == nil || assistantUsage.InputTokens != 1200 || assistantUsage.OutputTokens != 300 ||
+		assistantUsage.Model != "gemini-2.5-flash" || assistantUsage.CostUsd != 0.00846 {
+		t.Fatalf("assistant usage wrong: %+v", assistantUsage)
+	}
+}

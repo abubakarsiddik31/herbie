@@ -6,7 +6,7 @@ import type { ChatMessage, PendingApproval } from "@/lib/types";
 
 export type RunStatus = "idle" | "running" | "error";
 
-interface DonePayload { messageId: string; inputTokens: number; outputTokens: number; requests: number; costUsd: number }
+interface DonePayload { messageId: string; inputTokens: number; outputTokens: number; requests: number; costUsd: number; model?: string }
 interface MetaPayload { type: string; inputTokens?: number; outputTokens?: number; name?: string; ok?: boolean }
 
 export interface ApprovalDecision { callId: string; approved: boolean; reason?: string }
@@ -54,7 +54,15 @@ export function useChat(onDone?: () => void) {
         const done = payload as DonePayload;
         setPending([]);
         setMessages((m) => m.map((msg) => msg.id === assistantId
-          ? { ...msg, id: done.messageId || msg.id, streaming: false } : msg));
+          ? {
+              ...msg,
+              id: done.messageId || msg.id,
+              streaming: false,
+              usage: done.model
+                ? { inputTokens: done.inputTokens, outputTokens: done.outputTokens, costUsd: done.costUsd, model: done.model }
+                : msg.usage,
+            }
+          : msg));
       } else if (frame.event === "error") {
         hadError = true;
         setMessages((m) => m.map((msg) => msg.id === assistantId

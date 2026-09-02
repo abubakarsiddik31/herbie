@@ -4,6 +4,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   BookOpen,
+  Check,
+  Copy,
   Flame,
   Gauge,
   Globe,
@@ -22,7 +24,7 @@ import {
   X,
 } from "lucide-react";
 import { ApiError, apiFetch } from "@/lib/api";
-import { cn } from "@/lib/utils";
+import { cn, fmtTokens } from "@/lib/utils";
 import type { ChatMessage, Conversation, ConversationSettings } from "@/lib/types";
 import { useAuth } from "@/stores/auth";
 import { Badge } from "@/components/ui/badge";
@@ -61,7 +63,29 @@ interface ConversationDetail {
 
 // Server messages arrive without the ephemeral streaming/error fields.
 function toChatMessage(m: ChatMessage): ChatMessage {
-  return { id: m.id, role: m.role, content: m.content, truncated: m.truncated, createdAt: m.createdAt };
+  return { id: m.id, role: m.role, content: m.content, truncated: m.truncated, createdAt: m.createdAt, usage: m.usage };
+}
+
+// CopyMessageButton is a small hover action that copies one message's text.
+function CopyMessageButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type="button"
+      aria-label="Copy message"
+      title="Copy"
+      onClick={async () => {
+        try {
+          await navigator.clipboard.writeText(text);
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1500);
+        } catch { /* clipboard unavailable */ }
+      }}
+      className="rounded-md p-1 text-muted-foreground/60 transition-colors hover:text-foreground"
+    >
+      {copied ? <Check className="size-3.5 text-emerald-600" /> : <Copy className="size-3.5" />}
+    </button>
+  );
 }
 
 const GROUP_ORDER = ["Today", "Yesterday", "Previous 7 days", "Older"] as const;
@@ -488,7 +512,7 @@ export function ChatPage() {
             ) : (
               <div className="space-y-5">
                 {messages.map((m) => (
-                  <div key={m.id} className={cn("flex", m.role === "user" ? "justify-end" : "gap-3")}>
+                  <div key={m.id} className={cn("flex", m.role === "user" ? "justify-end" : "group gap-3")}>
                     {m.role === "user" ? (
                       <div className="max-w-[75%] rounded-2xl rounded-br-md bg-primary px-4 py-2.5 whitespace-pre-wrap text-primary-foreground text-sm shadow-sm">
                         {m.content}
@@ -506,6 +530,18 @@ export function ChatPage() {
                           {m.error && <p className="text-destructive text-sm">{m.error}</p>}
                           {m.truncated && (
                             <Badge variant="outline" className="text-muted-foreground text-xs">stopped early</Badge>
+                          )}
+                          {!m.streaming && (
+                            <div className="flex items-center gap-1.5 pt-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+                              <CopyMessageButton text={m.content} />
+                              {m.usage && (
+                                <p className="text-[11px] text-muted-foreground/60">
+                                  {fmtTokens(m.usage.inputTokens)} in / {fmtTokens(m.usage.outputTokens)} out · $
+                                  {m.usage.costUsd.toFixed(5)}
+                                  {m.usage.model ? ` · ${m.usage.model}` : ""}
+                                </p>
+                              )}
+                            </div>
                           )}
                         </div>
                       </>
