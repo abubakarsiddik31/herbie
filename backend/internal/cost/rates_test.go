@@ -23,3 +23,21 @@ func TestChatCostMicros(t *testing.T) {
 		})
 	}
 }
+
+func TestTableChatCostMicrosFor(t *testing.T) {
+	table := Table{
+		Default: Rates{ChatInputPerM: 1, ChatOutputPerM: 2},
+		ByModel: map[string]Rates{"gpt-5": {ChatInputPerM: 3, ChatOutputPerM: 4}},
+	}
+	if got := table.ChatCostMicrosFor("gpt-5", 1_000_000, 0); got != 3_000_000 {
+		t.Errorf("known model rate = %d, want 3_000_000", got)
+	}
+	if got := table.ChatCostMicrosFor("unknown-model", 1_000_000, 0); got != 1_000_000 {
+		t.Errorf("unknown model falls back to default = %d, want 1_000_000", got)
+	}
+	// Zero-value Table behaves like a single global rate of zero.
+	var zero Table
+	if got := zero.ChatCostMicrosFor("gpt-5", 1000, 1000); got != 0 {
+		t.Errorf("zero table = %d, want 0", got)
+	}
+}
