@@ -15,6 +15,7 @@ import {
   Search,
   Send,
   ShieldCheck,
+  Sparkles,
   Square,
   Trash2,
   Wrench,
@@ -22,7 +23,7 @@ import {
 } from "lucide-react";
 import { ApiError, apiFetch } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import type { ChatMessage, Conversation } from "@/lib/types";
+import type { ChatMessage, Conversation, ConversationSettings } from "@/lib/types";
 import { useAuth } from "@/stores/auth";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -42,11 +43,14 @@ import { BrandMark } from "@/components/BrandMark";
 import { RunLoader } from "@/components/ai/RunLoader";
 import { StreamingText } from "@/components/ai/StreamingText";
 import { ThinkingTrace } from "@/components/ai/ThinkingTrace";
+import { ConversationSettingsDialog } from "@/features/chat/ConversationSettingsDialog";
 import { useChat } from "@/features/chat/useChat";
+import { useModels } from "@/features/chat/useModels";
 import {
   useConversations,
   useCreateConversation,
   useDeleteConversation,
+  useUpdateConversationSettings,
 } from "@/features/chat/useConversations";
 import { useTools } from "@/features/tools/useTools";
 
@@ -92,6 +96,13 @@ export function ChatPage() {
   const [renameTitle, setRenameTitle] = useState("");
   const [filter, setFilter] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  // Settings for a chat that does not exist yet; applied at create time.
+  const [draftSettings, setDraftSettings] = useState<ConversationSettings>({
+    model: "",
+    temperature: null,
+    systemPrompt: "",
+  });
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const seededRef = useRef<string | null>(null);
 
@@ -102,8 +113,10 @@ export function ChatPage() {
 
   const { data: conversations, isLoading: conversationsLoading } = useConversations();
   const { data: tools } = useTools();
+  const { data: models } = useModels();
   const createConversation = useCreateConversation();
   const deleteConversation = useDeleteConversation();
+  const updateSettings = useUpdateConversationSettings(selectedId);
 
   const renameMutation = useMutation({
     mutationFn: ({ id, title }: { id: string; title: string }) =>
@@ -204,7 +217,7 @@ export function ChatPage() {
     try {
       let conversationId = selectedId;
       if (conversationId === null) {
-        const conversation = await createConversation.mutateAsync();
+        const conversation = await createConversation.mutateAsync(draftSettings);
         conversationId = conversation.id;
         seededRef.current = conversationId;
         setSelectedId(conversationId);
@@ -234,6 +247,33 @@ export function ChatPage() {
   const activeConversation = conversations?.find((c) => c.id === selectedId);
   const running = status === "running";
   const showFilters = (conversations?.length ?? 0) >= 6;
+
+  // The settings the composer's model chip shows and the dialog edits: the
+  // stored conversation's when one is open, the draft otherwise.
+  const activeSettings: ConversationSettings = activeConversation
+    ? {
+        model: activeConversation.model || models?.default || "",
+        temperature: activeConversation.temperature,
+        systemPrompt: activeConversation.systemPrompt,
+      }
+    : draftSettings;
+
+  function modelLabel(modelID: string): string {
+    if (!modelID) return models?.models.find((m) => m.id === models.default)?.label ?? "Model";
+    return models?.models.find((m) => m.id === modelID)?.label ?? modelID;
+  }
+
+  function applySettings(settings: ConversationSettings) {
+    if (selectedId === null) {
+      setDraftSettings(settings);
+      setSettingsOpen(false);
+      return;
+    }
+    updateSettings.mutate(settings, {
+      onSuccess: () => setSettingsOpen(false),
+      onError: (err) => toast.error(err instanceof ApiError ? err.message : "Failed to save settings"),
+    });
+  }
 
   const visibleConversations = (conversations ?? []).filter((c) =>
     (c.title || "Untitled").toLowerCase().includes(filter.trim().toLowerCase()),
@@ -509,6 +549,16 @@ export function ChatPage() {
                 pending.length > 0 && "opacity-60",
               )}
             >
+              <Button
+                variant="ghost"
+                size="sm"
+                className="mb-0.5 shrink-0 gap-1.5 rounded-xl text-muted-foreground text-xs hover:text-foreground"
+                onClick={() => setSettingsOpen(true)}
+                title="Conversation settings"
+              >
+                <Sparkles />
+                <span className="hidden sm:inline">{modelLabel(activeSettings.model)}</span>
+              </Button>
               <textarea
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
@@ -553,6 +603,15 @@ export function ChatPage() {
           </div>
         </div>
       </main>
+
+      <ConversationSettingsDialog
+        open={settingsOpen}
+        onOpenChange={setSettingsOpen}
+        models={models}
+        settings={activeSettings}
+        onApply={applySettings}
+        saving={updateSettings.isPending}
+      />
 
       <Dialog open={renaming !== null} onOpenChange={(open) => { if (!open) setRenaming(null); }}>
         <DialogContent showCloseButton={false} className="sm:max-w-md">

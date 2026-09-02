@@ -1,5 +1,11 @@
 export interface User { id: string; email: string }
-export interface Conversation { id: string; title: string; createdAt: string; updatedAt: string }
+export interface Conversation {
+  id: string; title: string; createdAt: string; updatedAt: string;
+  model: string; temperature: number | null; systemPrompt: string;
+}
+export interface ModelInfo { id: string; label: string; provider: string }
+export interface ModelsResponse { default: string; models: ModelInfo[] }
+export interface ConversationSettings { model: string; temperature: number | null; systemPrompt: string }
 export interface ChatMessage {
   id: string; role: "user" | "assistant"; content: string;
   truncated: boolean; createdAt: string;
