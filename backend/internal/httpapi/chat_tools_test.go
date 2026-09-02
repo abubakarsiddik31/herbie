@@ -71,7 +71,7 @@ func newHandlerServerFull(t *testing.T, agent *chat.Agent, convs ConvoStore, msg
 		Tools:     tools,
 		Pending:   pending,
 		Agent:     agent,
-		Rates:     cost.Rates{ChatInputPerM: 0.3, ChatOutputPerM: 2.5},
+		Rates:     cost.Table{Default: cost.Rates{ChatInputPerM: 0.3, ChatOutputPerM: 2.5}},
 		ModelKeys: chat.ProviderKeys{Gemini: "test"},
 	})
 	token, _, err := tm.Issue("u-1", time.Now())

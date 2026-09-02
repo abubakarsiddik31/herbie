@@ -87,3 +87,41 @@ func TestLoadReadsParentDotenv(t *testing.T) {
 		t.Fatalf("parent .env not loaded: model = %q", cfg.GeminiModel)
 	}
 }
+
+func TestLoadAcceptsAnySingleProviderKey(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://localhost/gc")
+	t.Setenv("JWT_SECRET", "0123456789abcdef0123456789abcdef")
+	t.Setenv("GEMINI_API_KEY", "")
+	t.Setenv("OPENAI_API_KEY", "sk-test")
+	t.Setenv("ANTHROPIC_API_KEY", "")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("openai-only config must load: %v", err)
+	}
+	if cfg.OpenAIAPIKey != "sk-test" || cfg.OpenAIBaseURL != "" {
+		t.Fatalf("openai key not loaded: %+v", cfg)
+	}
+
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("ANTHROPIC_API_KEY", "ak-test")
+	t.Setenv("ANTHROPIC_BASE_URL", "https://proxy.example.com")
+	cfg, err = Load()
+	if err != nil {
+		t.Fatalf("anthropic-only config must load: %v", err)
+	}
+	if cfg.AnthropicAPIKey != "ak-test" || cfg.AnthropicBaseURL != "https://proxy.example.com" {
+		t.Fatalf("anthropic settings not loaded: %+v", cfg)
+	}
+}
+
+func TestLoadRejectsMissingProviderKeys(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://localhost/gc")
+	t.Setenv("JWT_SECRET", "0123456789abcdef0123456789abcdef")
+	t.Setenv("GEMINI_API_KEY", "")
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	if _, err := Load(); err == nil {
+		t.Fatal("expected error when no provider key is configured")
+	}
+}

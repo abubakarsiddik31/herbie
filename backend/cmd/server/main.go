@@ -53,7 +53,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	modelKeys := chat.ProviderKeys{Gemini: cfg.GeminiAPIKey, GeminiBaseURL: cfg.GeminiBaseURL}
+	modelKeys := chat.ProviderKeys{
+		Gemini: cfg.GeminiAPIKey, GeminiBaseURL: cfg.GeminiBaseURL,
+		OpenAI: cfg.OpenAIAPIKey, OpenAIBaseURL: cfg.OpenAIBaseURL,
+		Anthropic: cfg.AnthropicAPIKey, AnthropicBaseURL: cfg.AnthropicBaseURL,
+	}
 	registry := chat.NewModelRegistry(modelKeys)
 	agent, err := chat.New(registry, golem.UsageLimit{Requests: 12, TotalTokens: 100_000}, chat.ToolEnv{
 		HTTPTimeout:       cfg.ToolHTTPTimeout,
@@ -64,6 +68,17 @@ func main() {
 	if err != nil {
 		log.Error("agent", "err", err)
 		os.Exit(1)
+	}
+
+	// Per-model ledger rates from the catalog; the env rates stay as the
+	// fallback for models without a catalog entry.
+	byModel := make(map[string]cost.Rates, len(chat.Catalog()))
+	for _, m := range chat.Catalog() {
+		byModel[m.ID] = cost.Rates{ChatInputPerM: m.InputPerM, ChatOutputPerM: m.OutputPerM}
+	}
+	rates := cost.Table{
+		Default: cost.Rates{ChatInputPerM: cfg.ChatInputRate, ChatOutputPerM: cfg.ChatOutputRate},
+		ByModel: byModel,
 	}
 
 	handler := httpapi.NewServer(httpapi.ServerDeps{
@@ -77,7 +92,7 @@ func main() {
 		Tools:     storage.NewTools(pool),
 		Pending:   storage.NewPendingCalls(pool),
 		Agent:     agent,
-		Rates:     cost.Rates{ChatInputPerM: cfg.ChatInputRate, ChatOutputPerM: cfg.ChatOutputRate},
+		Rates:     rates,
 		ModelKeys: modelKeys,
 	})
 	srv := &http.Server{Addr: ":" + cfg.Port, Handler: handler, ReadHeaderTimeout: 10 * time.Second}

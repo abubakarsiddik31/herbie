@@ -172,7 +172,7 @@ func (s *Server) finishResumed(ctx context.Context, userID, convID string, spec 
 	if msgs, err := s.deps.Msgs.ForConversation(ctx, convID, userID); err == nil && len(msgs) > 0 {
 		msgID = msgs[len(msgs)-1].ID
 	}
-	cost := s.deps.Rates.ChatCostMicros(outcome.Usage.InputTokens, outcome.Usage.OutputTokens)
+	cost := s.deps.Rates.ChatCostMicrosFor(spec.Model, outcome.Usage.InputTokens, outcome.Usage.OutputTokens)
 	_ = sink.event("done", map[string]any{
 		"messageId":    msgID,
 		"inputTokens":  outcome.Usage.InputTokens,

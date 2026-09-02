@@ -14,15 +14,19 @@ import (
 // a .env file in the working directory or repo root is loaded first, dev
 // convenience only.
 type Config struct {
-	Port           string
-	DatabaseURL    string
-	GeminiAPIKey   string
-	GeminiModel    string
-	GeminiBaseURL  string
-	JWTSecret      string
-	FrontendOrigin string
-	ChatInputRate  float64 // USD per 1M input tokens
-	ChatOutputRate float64 // USD per 1M output tokens
+	Port             string
+	DatabaseURL      string
+	GeminiAPIKey     string
+	GeminiModel      string
+	GeminiBaseURL    string
+	OpenAIAPIKey     string
+	OpenAIBaseURL    string
+	AnthropicAPIKey  string
+	AnthropicBaseURL string
+	JWTSecret        string
+	FrontendOrigin   string
+	ChatInputRate    float64 // USD per 1M input tokens (fallback rate)
+	ChatOutputRate   float64 // USD per 1M output tokens (fallback rate)
 
 	// User-tool runtime settings.
 	ToolHTTPTimeout       time.Duration
@@ -61,15 +65,19 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	cfg := Config{
-		Port:           env("APP_PORT", "8080"),
-		DatabaseURL:    os.Getenv("DATABASE_URL"),
-		GeminiAPIKey:   os.Getenv("GEMINI_API_KEY"),
-		GeminiModel:    env("GEMINI_MODEL", "gemini-2.5-flash"),
-		GeminiBaseURL:  os.Getenv("GEMINI_BASE_URL"),
-		JWTSecret:      os.Getenv("JWT_SECRET"),
-		FrontendOrigin: env("FRONTEND_ORIGIN", "http://localhost:5173"),
-		ChatInputRate:  inputRate,
-		ChatOutputRate: outputRate,
+		Port:             env("APP_PORT", "8080"),
+		DatabaseURL:      os.Getenv("DATABASE_URL"),
+		GeminiAPIKey:     os.Getenv("GEMINI_API_KEY"),
+		GeminiModel:      env("GEMINI_MODEL", "gemini-2.5-flash"),
+		GeminiBaseURL:    os.Getenv("GEMINI_BASE_URL"),
+		OpenAIAPIKey:     os.Getenv("OPENAI_API_KEY"),
+		OpenAIBaseURL:    os.Getenv("OPENAI_BASE_URL"),
+		AnthropicAPIKey:  os.Getenv("ANTHROPIC_API_KEY"),
+		AnthropicBaseURL: os.Getenv("ANTHROPIC_BASE_URL"),
+		JWTSecret:        os.Getenv("JWT_SECRET"),
+		FrontendOrigin:   env("FRONTEND_ORIGIN", "http://localhost:5173"),
+		ChatInputRate:    inputRate,
+		ChatOutputRate:   outputRate,
 
 		ToolHTTPTimeout:       time.Duration(toolTimeout) * time.Second,
 		ToolHTTPMaxBytes:      envInt64("TOOL_HTTP_MAX_BYTES", 1<<20),
@@ -81,8 +89,8 @@ func Load() (Config, error) {
 	if cfg.DatabaseURL == "" {
 		errs = append(errs, errors.New("DATABASE_URL is required"))
 	}
-	if cfg.GeminiAPIKey == "" {
-		errs = append(errs, errors.New("GEMINI_API_KEY is required"))
+	if cfg.GeminiAPIKey == "" && cfg.OpenAIAPIKey == "" && cfg.AnthropicAPIKey == "" {
+		errs = append(errs, errors.New("at least one provider key is required (GEMINI_API_KEY, OPENAI_API_KEY, or ANTHROPIC_API_KEY)"))
 	}
 	if len(cfg.JWTSecret) < 32 {
 		errs = append(errs, errors.New("JWT_SECRET must be at least 32 bytes"))

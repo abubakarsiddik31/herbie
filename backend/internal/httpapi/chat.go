@@ -329,7 +329,7 @@ func (s *Server) persistRunMessages(ctx context.Context, userID, convID, modelSt
 			row.InputTokens = usage.InputTokens
 			row.OutputTokens = usage.OutputTokens
 			row.Requests = requests
-			row.CostMicros = s.deps.Rates.ChatCostMicros(usage.InputTokens, usage.OutputTokens)
+			row.CostMicros = s.deps.Rates.ChatCostMicrosFor(modelStr, usage.InputTokens, usage.OutputTokens)
 			row.Model = modelStr
 		}
 		if err := s.deps.Msgs.Add(ctx, row); err != nil {
@@ -377,7 +377,7 @@ func (s *Server) finishRun(ctx context.Context, userID, convID string, spec chat
 	if msgs, err := s.deps.Msgs.ForConversation(ctx, convID, userID); err == nil && len(msgs) > 0 {
 		msgID = msgs[len(msgs)-1].ID
 	}
-	cost := s.deps.Rates.ChatCostMicros(outcome.Usage.InputTokens, outcome.Usage.OutputTokens)
+	cost := s.deps.Rates.ChatCostMicrosFor(spec.Model, outcome.Usage.InputTokens, outcome.Usage.OutputTokens)
 	_ = sink.event("done", map[string]any{
 		"messageId":    msgID,
 		"inputTokens":  outcome.Usage.InputTokens,
@@ -418,12 +418,12 @@ func pausedRunHistory(msgs []storage.Message) []model.Message {
 	return decoded[start:]
 }
 
-func usageEventFor(userID, convID, mdl string, usage model.Usage, requests int, rates cost.Rates) storage.UsageEvent {
+func usageEventFor(userID, convID, mdl string, usage model.Usage, requests int, rates cost.Table) storage.UsageEvent {
 	cid := convID
 	return storage.UsageEvent{
 		UserID: userID, Kind: "chat", Model: mdl, ConversationID: &cid,
 		InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens,
-		Requests: requests, CostMicros: rates.ChatCostMicros(usage.InputTokens, usage.OutputTokens),
+		Requests: requests, CostMicros: rates.ChatCostMicrosFor(mdl, usage.InputTokens, usage.OutputTokens),
 	}
 }
 

@@ -23,7 +23,7 @@ type ServerDeps struct {
 	Tools     ToolStore
 	Pending   PendingStore
 	Agent     *chat.Agent
-	Rates     cost.Rates
+	Rates     cost.Table
 	ModelKeys chat.ProviderKeys
 }
 
