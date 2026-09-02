@@ -11,6 +11,7 @@ import {
   Globe,
   LogOut,
   Menu,
+  Mic,
   Pencil,
   PenLine,
   Plus,
@@ -49,6 +50,7 @@ import { ThinkingTrace } from "@/components/ai/ThinkingTrace";
 import { ConversationSettingsDialog } from "@/features/chat/ConversationSettingsDialog";
 import { useChat } from "@/features/chat/useChat";
 import { useModels } from "@/features/chat/useModels";
+import { useVoiceInput } from "@/features/chat/useVoiceInput";
 import {
   useConversations,
   useCreateConversation,
@@ -290,6 +292,31 @@ export function ChatPage() {
     void regenerate(selectedId).catch((err) => {
       setSendError(err instanceof ApiError ? err.message : "Failed to regenerate the answer.");
     });
+  }
+
+  // Dictation keeps whatever is already drafted and appends transcripts to
+  // it; interim fragments compose on top of the finalized ones.
+  const voiceBaseRef = useRef("");
+  const voiceTranscriptRef = useRef("");
+  const voice = useVoiceInput({
+    onInterim: (t) => {
+      const composed = [voiceBaseRef.current, `${voiceTranscriptRef.current} ${t}`.trim()].filter(Boolean).join(" ");
+      setInput(composed);
+    },
+    onFinal: (t) => {
+      voiceTranscriptRef.current = `${voiceTranscriptRef.current} ${t}`.trim();
+      setInput([voiceBaseRef.current, voiceTranscriptRef.current].filter(Boolean).join(" "));
+    },
+  });
+
+  function toggleVoice() {
+    if (voice.listening) {
+      voice.toggle();
+      return;
+    }
+    voiceBaseRef.current = input;
+    voiceTranscriptRef.current = "";
+    voice.toggle();
   }
 
   async function logout() {
@@ -697,6 +724,19 @@ export function ChatPage() {
                 disabled={running || pending.length > 0}
                 className="max-h-48 min-h-9 flex-1 resize-none bg-transparent px-2.5 py-1.5 text-sm outline-none field-sizing-content placeholder:text-muted-foreground disabled:cursor-not-allowed"
               />
+              {voice.supported && (
+                <Button
+                  size="icon"
+                  variant={voice.listening ? "default" : "ghost"}
+                  className="shrink-0 rounded-xl text-muted-foreground"
+                  onClick={toggleVoice}
+                  disabled={running || pending.length > 0}
+                  aria-label={voice.listening ? "Stop dictation" : "Start dictation"}
+                  title={voice.listening ? "Stop dictation" : "Dictate"}
+                >
+                  {voice.listening ? <Square /> : <Mic />}
+                </Button>
+              )}
               {running ? (
                 <Button
                   size="icon"
