@@ -14,6 +14,7 @@ import {
   Pencil,
   PenLine,
   Plus,
+  RefreshCw,
   Search,
   Send,
   ShieldCheck,
@@ -124,6 +125,8 @@ export function ChatPage() {
   const [filter, setFilter] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // The user message currently being edited inline (null = none).
+  const [editing, setEditing] = useState<{ id: string; draft: string } | null>(null);
   // Settings for a chat that does not exist yet; applied at create time.
   const [draftSettings, setDraftSettings] = useState<ConversationSettings>({
     model: "",
@@ -133,7 +136,7 @@ export function ChatPage() {
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const seededRef = useRef<string | null>(null);
 
-  const { messages, setMessages, status, send, resolve, stop, reset, trace, pending } = useChat(() => {
+  const { messages, setMessages, status, send, edit, regenerate, resolve, stop, reset, trace, pending } = useChat(() => {
     // Refresh titles/order after each completed run.
     void queryClient.invalidateQueries({ queryKey: ["conversations"] });
   });
@@ -267,6 +270,25 @@ export function ChatPage() {
     const decisions = pending.map((p) => ({ callId: p.callId, approved, reason: approved ? undefined : "user denied" }));
     void resolve(selectedId, decisions).catch((err) => {
       setSendError(err instanceof ApiError ? err.message : "Failed to resume the conversation.");
+    });
+  }
+
+  function saveEdit(msgId: string) {
+    if (!editing || selectedId === null) return;
+    const content = editing.draft.trim();
+    if (!content) return;
+    setEditing(null);
+    setSendError(null);
+    void edit(selectedId, msgId, content).catch((err) => {
+      setSendError(err instanceof ApiError ? err.message : "Failed to re-run the conversation.");
+    });
+  }
+
+  function regenerateLast() {
+    if (selectedId === null) return;
+    setSendError(null);
+    void regenerate(selectedId).catch((err) => {
+      setSendError(err instanceof ApiError ? err.message : "Failed to regenerate the answer.");
     });
   }
 
@@ -511,43 +533,99 @@ export function ChatPage() {
               </div>
             ) : (
               <div className="space-y-5">
-                {messages.map((m) => (
-                  <div key={m.id} className={cn("flex", m.role === "user" ? "justify-end" : "group gap-3")}>
-                    {m.role === "user" ? (
-                      <div className="max-w-[75%] rounded-2xl rounded-br-md bg-primary px-4 py-2.5 whitespace-pre-wrap text-primary-foreground text-sm shadow-sm">
-                        {m.content}
-                      </div>
-                    ) : (
-                      <>
-                        <BrandMark className="mt-0.5 size-7" />
-                        <div className="min-w-0 flex-1 space-y-1 pt-0.5">
-                          {m.streaming && trace.length > 0 && <ThinkingTrace rows={trace} />}
-                          {m.streaming && m.content === "" ? (
-                            <RunLoader />
-                          ) : (
-                            <StreamingText content={m.content} streaming={m.streaming} />
-                          )}
-                          {m.error && <p className="text-destructive text-sm">{m.error}</p>}
-                          {m.truncated && (
-                            <Badge variant="outline" className="text-muted-foreground text-xs">stopped early</Badge>
-                          )}
-                          {!m.streaming && (
-                            <div className="flex items-center gap-1.5 pt-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
-                              <CopyMessageButton text={m.content} />
-                              {m.usage && (
-                                <p className="text-[11px] text-muted-foreground/60">
-                                  {fmtTokens(m.usage.inputTokens)} in / {fmtTokens(m.usage.outputTokens)} out · $
-                                  {m.usage.costUsd.toFixed(5)}
-                                  {m.usage.model ? ` · ${m.usage.model}` : ""}
-                                </p>
-                              )}
+                {messages.map((m, i) => {
+                  const isLast = i === messages.length - 1;
+                  const blockInteraction = running || pending.length > 0;
+                  return (
+                    <div key={m.id} className={cn("flex", m.role === "user" ? "justify-end" : "group gap-3")}>
+                      {m.role === "user" ? (
+                        editing?.id === m.id ? (
+                          <div className="w-full max-w-[85%] rounded-2xl border border-ring/60 bg-card p-2 shadow-sm">
+                            <textarea
+                              value={editing.draft}
+                              onChange={(e) => setEditing({ id: m.id, draft: e.target.value })}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter" && !e.shiftKey) {
+                                  e.preventDefault();
+                                  saveEdit(m.id);
+                                } else if (e.key === "Escape") {
+                                  setEditing(null);
+                                }
+                              }}
+                              rows={2}
+                              autoFocus
+                              className="max-h-48 w-full resize-none bg-transparent px-1.5 py-1 text-sm outline-none field-sizing-content"
+                            />
+                            <div className="flex justify-end gap-1.5">
+                              <Button size="sm" variant="outline" onClick={() => setEditing(null)}>
+                                Cancel
+                              </Button>
+                              <Button size="sm" disabled={!editing.draft.trim() || blockInteraction} onClick={() => saveEdit(m.id)}>
+                                Save & resend
+                              </Button>
                             </div>
-                          )}
-                        </div>
-                      </>
-                    )}
-                  </div>
-                ))}
+                          </div>
+                        ) : (
+                          <div className="group flex max-w-[75%] items-end gap-1">
+                            <div className="rounded-2xl rounded-br-md bg-primary px-4 py-2.5 whitespace-pre-wrap text-primary-foreground text-sm shadow-sm">
+                              {m.content}
+                            </div>
+                            <button
+                              type="button"
+                              aria-label="Edit message"
+                              title="Edit & resend"
+                              disabled={blockInteraction}
+                              onClick={() => setEditing({ id: m.id, draft: m.content })}
+                              className="rounded-md p-1 text-muted-foreground/60 opacity-0 transition-opacity group-hover:opacity-100 hover:text-foreground disabled:cursor-not-allowed"
+                            >
+                              <Pencil className="size-3.5" />
+                            </button>
+                          </div>
+                        )
+                      ) : (
+                        <>
+                          <BrandMark className="mt-0.5 size-7" />
+                          <div className="min-w-0 flex-1 space-y-1 pt-0.5">
+                            {m.streaming && trace.length > 0 && <ThinkingTrace rows={trace} />}
+                            {m.streaming && m.content === "" ? (
+                              <RunLoader />
+                            ) : (
+                              <StreamingText content={m.content} streaming={m.streaming} />
+                            )}
+                            {m.error && <p className="text-destructive text-sm">{m.error}</p>}
+                            {m.truncated && (
+                              <Badge variant="outline" className="text-muted-foreground text-xs">stopped early</Badge>
+                            )}
+                            {!m.streaming && (
+                              <div className="flex items-center gap-1.5 pt-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+                                <CopyMessageButton text={m.content} />
+                                {isLast && (
+                                  <button
+                                    type="button"
+                                    aria-label="Regenerate answer"
+                                    title="Regenerate"
+                                    disabled={blockInteraction}
+                                    onClick={regenerateLast}
+                                    className="rounded-md p-1 text-muted-foreground/60 transition-colors hover:text-foreground disabled:cursor-not-allowed"
+                                  >
+                                    <RefreshCw className="size-3.5" />
+                                  </button>
+                                )}
+                                {m.usage && (
+                                  <p className="text-[11px] text-muted-foreground/60">
+                                    {fmtTokens(m.usage.inputTokens)} in / {fmtTokens(m.usage.outputTokens)} out · $
+                                    {m.usage.costUsd.toFixed(5)}
+                                    {m.usage.model ? ` · ${m.usage.model}` : ""}
+                                  </p>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  );
+                })}
                 {pending.length > 0 && (
                   <div className="overflow-hidden rounded-xl border border-amber-500/40 bg-amber-500/5">
                     <div className="flex items-center gap-2 border-b border-amber-500/20 px-4 py-3">

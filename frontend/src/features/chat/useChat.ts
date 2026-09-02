@@ -103,20 +103,11 @@ export function useChat(onDone?: () => void) {
     return res;
   }, []);
 
-  const send = useCallback(async (content: string, conversationId: string) => {
-    const controller = new AbortController();
-    abortRef.current = controller;
-    const userMsg: ChatMessage = { id: crypto.randomUUID(), role: "user", content, truncated: false, createdAt: new Date().toISOString() };
-    const assistantId = crypto.randomUUID();
-    setMessages((m) => [
-      ...m, userMsg,
-      { id: assistantId, role: "assistant", content: "", truncated: false, createdAt: new Date().toISOString(), streaming: true },
-    ]);
-    setTrace([]);
-    setPending([]);
-    setStatus("running");
+  // start drives one streaming request to completion and settles the
+  // assistant placeholder — shared by send, edit, and regenerate.
+  const start = useCallback(async (path: string, body: unknown, controller: AbortController, assistantId: string) => {
     try {
-      const res = await streamPOST(`/api/conversations/${conversationId}/messages`, { content }, controller);
+      const res = await streamPOST(path, body, controller);
       await consumeStream(res, assistantId);
     } catch (err) {
       if ((err as Error).name === "AbortError") {
@@ -133,6 +124,63 @@ export function useChat(onDone?: () => void) {
     }
   }, [consumeStream, streamPOST]);
 
+  const send = useCallback(async (content: string, conversationId: string) => {
+    const controller = new AbortController();
+    abortRef.current = controller;
+    const userMsg: ChatMessage = { id: crypto.randomUUID(), role: "user", content, truncated: false, createdAt: new Date().toISOString() };
+    const assistantId = crypto.randomUUID();
+    setMessages((m) => [
+      ...m, userMsg,
+      { id: assistantId, role: "assistant", content: "", truncated: false, createdAt: new Date().toISOString(), streaming: true },
+    ]);
+    setTrace([]);
+    setPending([]);
+    setStatus("running");
+    await start(`/api/conversations/${conversationId}/messages`, { content }, controller, assistantId);
+  }, [start]);
+
+  // edit rewrites one user message and re-runs the conversation from it:
+  // the local thread truncates to the edited message, then a fresh
+  // assistant placeholder streams the new answer.
+  const edit = useCallback(async (conversationId: string, msgId: string, content: string) => {
+    const controller = new AbortController();
+    abortRef.current = controller;
+    const assistantId = crypto.randomUUID();
+    setMessages((m) => {
+      const idx = m.findIndex((msg) => msg.id === msgId);
+      if (idx < 0) return m;
+      const kept = m.slice(0, idx + 1).map((msg) => msg.id === msgId ? { ...msg, content } : msg);
+      return [
+        ...kept,
+        { id: assistantId, role: "assistant", content: "", truncated: false, createdAt: new Date().toISOString(), streaming: true },
+      ];
+    });
+    setTrace([]);
+    setPending([]);
+    setStatus("running");
+    await start(`/api/conversations/${conversationId}/messages/${msgId}/edit`, { content }, controller, assistantId);
+  }, [start]);
+
+  // regenerate replaces the last assistant answer: trailing non-user
+  // messages drop locally and the last turn streams again.
+  const regenerate = useCallback(async (conversationId: string) => {
+    const controller = new AbortController();
+    abortRef.current = controller;
+    const assistantId = crypto.randomUUID();
+    setMessages((m) => {
+      const lastUser = m.map((msg) => msg.role).lastIndexOf("user");
+      if (lastUser < 0) return m;
+      return [
+        ...m.slice(0, lastUser + 1),
+        { id: assistantId, role: "assistant", content: "", truncated: false, createdAt: new Date().toISOString(), streaming: true },
+      ];
+    });
+    setTrace([]);
+    setPending([]);
+    setStatus("running");
+    await start(`/api/conversations/${conversationId}/regenerate`, {}, controller, assistantId);
+  }, [start]);
+
   const resolve = useCallback(async (conversationId: string, decisions: ApprovalDecision[]) => {
     const controller = new AbortController();
     abortRef.current = controller;
@@ -143,18 +191,8 @@ export function useChat(onDone?: () => void) {
     ]);
     setTrace([]);
     setStatus("running");
-    try {
-      const res = await streamPOST(`/api/conversations/${conversationId}/approvals`, { decisions }, controller);
-      await consumeStream(res, assistantId);
-    } catch (err) {
-      if ((err as Error).name === "AbortError") {
-        if (abortRef.current === controller) setStatus("idle");
-      } else {
-        if (abortRef.current === controller) setStatus("error");
-        throw err;
-      }
-    }
-  }, [consumeStream, streamPOST]);
+    await start(`/api/conversations/${conversationId}/approvals`, { decisions }, controller, assistantId);
+  }, [start]);
 
-  return { messages, setMessages, status, send, resolve, stop, reset, trace, pending };
+  return { messages, setMessages, status, send, edit, regenerate, resolve, stop, reset, trace, pending };
 }
