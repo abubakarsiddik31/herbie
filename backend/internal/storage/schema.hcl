@@ -3,9 +3,9 @@
 #   atlas migrate hash   (once, or after manual dir edits)
 #   /opt/homebrew/bin/atlas migrate diff <name> \
 #     --dir file://backend/internal/storage/migrations \
+#     --dir-format goose \
 #     --to file://backend/internal/storage/schema.hcl \
-#     --dev-url "docker://postgres/16/dev?search_path=public" \
-#     --format goose
+#     --dev-url "docker://postgres/16/dev?search_path=public"
 # goose (embedded) applies the generated files at startup and in tests.
 
 schema "public" {}
@@ -108,6 +108,20 @@ table "conversations" {
     null    = false
     default = ""
   }
+  column "model" {
+    type    = text
+    null    = false
+    default = ""
+  }
+  column "temperature" {
+    type = real
+    null = true
+  }
+  column "system_prompt" {
+    type    = text
+    null    = false
+    default = ""
+  }
   column "created_at" {
     type    = timestamptz
     null    = false
@@ -188,6 +202,11 @@ table "messages" {
     type    = boolean
     null    = false
     default = false
+  }
+  column "model" {
+    type    = text
+    null    = false
+    default = ""
   }
   column "created_at" {
     type    = timestamptz

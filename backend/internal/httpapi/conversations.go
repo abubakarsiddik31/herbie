@@ -48,7 +48,7 @@ func (s *Server) handleCreateConversation(w http.ResponseWriter, r *http.Request
 	if r.Body != nil {
 		_ = json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req) // optional body
 	}
-	conv, err := s.deps.Convos.Create(r.Context(), userID, req.Title)
+	conv, err := s.deps.Convos.Create(r.Context(), userID, req.Title, storage.ConversationPatch{})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal", "could not create conversation")
 		return

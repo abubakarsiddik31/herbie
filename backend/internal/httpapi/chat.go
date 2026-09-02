@@ -26,10 +26,11 @@ import (
 // var _ ConvoStore = (*storage.Conversations)(nil) below pins the
 // production wiring at compile time.
 type ConvoStore interface {
-	Create(ctx context.Context, userID, title string) (storage.Conversation, error)
+	Create(ctx context.Context, userID, title string, patch storage.ConversationPatch) (storage.Conversation, error)
 	List(ctx context.Context, userID string) ([]storage.Conversation, error)
 	ByID(ctx context.Context, id, userID string) (storage.Conversation, error)
 	SetTitle(ctx context.Context, id, userID, title string) error
+	SetSettings(ctx context.Context, id, userID string, patch storage.ConversationPatch) error
 	Touch(ctx context.Context, id string) error
 	Delete(ctx context.Context, id, userID string) error
 	CountMessages(ctx context.Context, id, userID string) (int, error)

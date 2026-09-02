@@ -114,7 +114,7 @@ func TestPendingCallsPersistence(t *testing.T) {
 	if _, err := pool.Exec(ctx, `DELETE FROM pending_tool_calls WHERE user_id = $1`, userID); err != nil {
 		t.Fatalf("cleanup: %v", err)
 	}
-	conv, err := NewConversations(pool).Create(ctx, userID, "t")
+	conv, err := NewConversations(pool).Create(ctx, userID, "t", ConversationPatch{})
 	if err != nil {
 		t.Fatalf("create conversation: %v", err)
 	}
