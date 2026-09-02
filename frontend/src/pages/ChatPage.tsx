@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Link, useNavigate } from "react-router";
+import { Link, useNavigate, useParams } from "react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
@@ -88,7 +88,10 @@ export function ChatPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const user = useAuth((s) => s.user);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  // The selected conversation lives in the URL (/chat/:conversationId?), so
+  // refresh and deep links land on the same thread.
+  const { conversationId } = useParams();
+  const selectedId = conversationId ?? null;
   const [input, setInput] = useState("");
   const [sendError, setSendError] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<Conversation | null>(null);
@@ -125,13 +128,14 @@ export function ChatPage() {
     onError: (err) => toast.error(err instanceof ApiError ? err.message : "Failed to rename conversation"),
   });
 
-  const { data: detail, isFetching: detailLoading } = useQuery({
+  const { data: detail, isFetching: detailLoading, isError: detailError } = useQuery({
     queryKey: ["conversation", selectedId],
     queryFn: () => {
       if (selectedId === null) throw new Error("no conversation selected");
       return apiFetch<ConversationDetail>(`/api/conversations/${selectedId}`);
     },
     enabled: selectedId !== null,
+    retry: false,
   });
 
   // Seed the thread once per selected conversation. The create-then-send path
@@ -143,6 +147,12 @@ export function ChatPage() {
     seededRef.current = selectedId;
     setMessages(detail.messages.map(toChatMessage));
   }, [detail, selectedId, setMessages]);
+
+  // A URL id that doesn't exist (deep link, deleted elsewhere) falls back to
+  // a fresh chat.
+  useEffect(() => {
+    if (detailError) navigate("/chat", { replace: true });
+  }, [detailError, navigate]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ block: "end" });
@@ -160,7 +170,7 @@ export function ChatPage() {
     seededRef.current = null;
     queryClient.removeQueries({ queryKey: ["conversation", id] });
     setSendError(null);
-    setSelectedId(id);
+    navigate(`/chat/${id}`);
     setSidebarOpen(false);
   }
 
@@ -168,7 +178,7 @@ export function ChatPage() {
     reset();
     seededRef.current = null;
     setSendError(null);
-    setSelectedId(null);
+    navigate("/chat");
     setSidebarOpen(false);
   }
 
@@ -197,7 +207,7 @@ export function ChatPage() {
       onSuccess: () => {
         if (id === selectedId) {
           reset();
-          setSelectedId(null);
+          navigate("/chat");
         }
         setPendingDelete(null);
       },
@@ -220,7 +230,7 @@ export function ChatPage() {
         const conversation = await createConversation.mutateAsync(draftSettings);
         conversationId = conversation.id;
         seededRef.current = conversationId;
-        setSelectedId(conversationId);
+        navigate(`/chat/${conversationId}`, { replace: true });
       }
       await send(content, conversationId);
     } catch (err) {
