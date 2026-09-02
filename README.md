@@ -1,19 +1,42 @@
 # golem-chatbot
 
-A local-first chat application built on [golem](https://github.com/abubakarsiddik31/golem) — a Go agent framework by the same author. Register, chat with a streaming Gemini-backed agent, and see every run metered: tokens, request counts, and USD cost per day and per model.
+A local-first chat application built on [golem](https://github.com/abubakarsiddik31/golem) — a Go agent framework by the same author. Register, chat with a streaming agent, and see every run metered: tokens, request counts, and USD cost per day and per model.
 
 ## Architecture
 
 ```text
-┌────────────┐   REST /api/* + SSE    ┌──────────────────────────────┐
-│ React SPA  │◄──────────────────────►│ Go backend (stdlib net/http) │
-│ Vite + TS  │  SSE over fetch (JWT)  │  golem agent → Gemini        │
-└────────────┘                        └──────┬───────┬───────┬──────┘
-                                             │       │       │
+┌────────────┐   REST /api/* + SSE    ┌──────────────────────────────────┐
+│ React SPA  │◄──────────────────────►│ Go backend (stdlib net/http)     │
+│ Vite + TS  │  SSE over fetch (JWT)  │  golem agent → Gemini/OpenAI/    │
+└────────────┘                        │  Anthropic (server-configured)   │
+                                      └──────┬───────┬───────┬──────┘
                                          Postgres  Weaviate* MinIO*
-                                             └─── Gemini API
-  * Phase 2 (RAG) — composed behind the `rag` docker profile, dormant in Phase 1
+                                             └─── provider APIs
+  * Phase 2c (RAG) — composed behind the `rag` docker profile, dormant until then
 ```
+
+## Models, settings, and multimodal chat
+
+The model is a **per-conversation setting**, not a server constant. The server
+advertises a curated catalog (`backend/internal/chat/catalog.go`) filtered by
+which provider keys are configured in the environment — `GEMINI_API_KEY`,
+optional `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` (base URLs overridable for
+proxies). Every conversation carries its own model, temperature (or provider
+default), and system prompt; the composer's settings dialog edits them, and a
+model registry resolves each run to a cached provider client. Per-model rates
+price the usage ledger, so the dashboard's per-model table stays exact across
+providers.
+
+Chat is multimodal: attach up to 4 images (PNG/JPEG/WebP/GIF, ≤ 4 MB each) per
+message and any catalog model answers over them via golem's image parts;
+attachments persist with the message and replay in history. The composer also
+dictates via the browser's Web Speech API (Chrome/Edge/Safari) — speech never
+leaves the browser.
+
+Threads behave the way you expect: conversation selection lives in the URL
+(`/chat/<id>`), user messages can be edited and resent (truncating what
+followed), the last answer can be regenerated, code blocks and messages have
+copy buttons, and every answer shows its tokens, cost, and model.
 
 ## Quickstart
 

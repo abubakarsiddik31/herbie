@@ -124,10 +124,13 @@ export function useChat(onDone?: () => void) {
     }
   }, [consumeStream, streamPOST]);
 
-  const send = useCallback(async (content: string, conversationId: string) => {
+  const send = useCallback(async (content: string, conversationId: string, images?: { mediaType: string; data: string }[]) => {
     const controller = new AbortController();
     abortRef.current = controller;
-    const userMsg: ChatMessage = { id: crypto.randomUUID(), role: "user", content, truncated: false, createdAt: new Date().toISOString() };
+    const userMsg: ChatMessage = {
+      id: crypto.randomUUID(), role: "user", content, truncated: false, createdAt: new Date().toISOString(),
+      images: images?.map((img) => ({ mediaType: img.mediaType, dataUrl: `data:${img.mediaType};base64,${img.data}` })),
+    };
     const assistantId = crypto.randomUUID();
     setMessages((m) => [
       ...m, userMsg,
@@ -136,7 +139,7 @@ export function useChat(onDone?: () => void) {
     setTrace([]);
     setPending([]);
     setStatus("running");
-    await start(`/api/conversations/${conversationId}/messages`, { content }, controller, assistantId);
+    await start(`/api/conversations/${conversationId}/messages`, images?.length ? { content, images } : { content }, controller, assistantId);
   }, [start]);
 
   // edit rewrites one user message and re-runs the conversation from it:

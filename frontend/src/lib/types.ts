@@ -11,6 +11,7 @@ export interface ChatMessage {
   id: string; role: "user" | "assistant"; content: string;
   truncated: boolean; createdAt: string;
   streaming?: boolean; error?: string;
+  images?: { mediaType: string; dataUrl: string }[];
   usage?: MessageUsage;
 }
 export interface UsageTotalsRow { kind: string; model: string; inputTokens: number; outputTokens: number; requests: number; costUsd: number }

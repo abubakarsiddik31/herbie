@@ -15,6 +15,7 @@ import {
   Pencil,
   PenLine,
   Plus,
+  Paperclip,
   RefreshCw,
   Search,
   Send,
@@ -26,6 +27,7 @@ import {
   X,
 } from "lucide-react";
 import { ApiError, apiFetch } from "@/lib/api";
+import { MAX_IMAGES_PER_MESSAGE, readImageFiles, type PendingImage } from "@/lib/images";
 import { cn, fmtTokens } from "@/lib/utils";
 import type { ChatMessage, Conversation, ConversationSettings } from "@/lib/types";
 import { useAuth } from "@/stores/auth";
@@ -66,7 +68,7 @@ interface ConversationDetail {
 
 // Server messages arrive without the ephemeral streaming/error fields.
 function toChatMessage(m: ChatMessage): ChatMessage {
-  return { id: m.id, role: m.role, content: m.content, truncated: m.truncated, createdAt: m.createdAt, usage: m.usage };
+  return { id: m.id, role: m.role, content: m.content, truncated: m.truncated, createdAt: m.createdAt, usage: m.usage, images: m.images };
 }
 
 // CopyMessageButton is a small hover action that copies one message's text.
@@ -129,6 +131,9 @@ export function ChatPage() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   // The user message currently being edited inline (null = none).
   const [editing, setEditing] = useState<{ id: string; draft: string } | null>(null);
+  // Images picked for the next message (cleared on send).
+  const [attachments, setAttachments] = useState<PendingImage[]>([]);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   // Settings for a chat that does not exist yet; applied at create time.
   const [draftSettings, setDraftSettings] = useState<ConversationSettings>({
     model: "",
@@ -246,13 +251,15 @@ export function ChatPage() {
 
   async function submit(preset?: string) {
     const content = (preset ?? input).trim();
-    if (!content || status === "running" || createConversation.isPending) return;
+    if ((!content && attachments.length === 0) || status === "running" || createConversation.isPending) return;
     if (selectedId && pending.length > 0) {
       toast.error("Resolve the pending approval first.");
       return;
     }
-    setInput("");
+    if (preset === undefined) setInput("");
     setSendError(null);
+    const images = attachments.map(({ mediaType, data }) => ({ mediaType, data }));
+    setAttachments([]);
     try {
       let conversationId = selectedId;
       if (conversationId === null) {
@@ -261,10 +268,22 @@ export function ChatPage() {
         seededRef.current = conversationId;
         navigate(`/chat/${conversationId}`, { replace: true });
       }
-      await send(content, conversationId);
+      await send(content, conversationId, images);
     } catch (err) {
       setSendError(err instanceof ApiError ? err.message : "Something went wrong. Please try again.");
     }
+  }
+
+  async function pickImages(files: FileList | null) {
+    if (!files || files.length === 0) return;
+    const { images, errors } = await readImageFiles([...files]);
+    for (const message of errors) toast.error(message);
+    setAttachments((prev) => [...prev, ...images].slice(0, MAX_IMAGES_PER_MESSAGE));
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }
+
+  function removeAttachment(previewUrl: string) {
+    setAttachments((prev) => prev.filter((a) => a.previewUrl !== previewUrl));
   }
 
   function decide(approved: boolean) {
@@ -593,10 +612,24 @@ export function ChatPage() {
                             </div>
                           </div>
                         ) : (
-                          <div className="group flex max-w-[75%] items-end gap-1">
-                            <div className="rounded-2xl rounded-br-md bg-primary px-4 py-2.5 whitespace-pre-wrap text-primary-foreground text-sm shadow-sm">
-                              {m.content}
-                            </div>
+                          <div className="group flex max-w-[75%] flex-col items-end gap-1">
+                            {m.images && m.images.length > 0 && (
+                              <div className="flex flex-wrap justify-end gap-1.5">
+                                {m.images.map((img, idx) => (
+                                  <img
+                                    key={idx}
+                                    src={img.dataUrl}
+                                    alt="attachment"
+                                    className="max-h-48 max-w-[16rem] rounded-xl border object-cover shadow-sm"
+                                  />
+                                ))}
+                              </div>
+                            )}
+                            {m.content && (
+                              <div className="rounded-2xl rounded-br-md bg-primary px-4 py-2.5 whitespace-pre-wrap text-primary-foreground text-sm shadow-sm">
+                                {m.content}
+                              </div>
+                            )}
                             <button
                               type="button"
                               aria-label="Edit message"
@@ -693,6 +726,23 @@ export function ChatPage() {
         <div className="border-t p-3">
           <div className="mx-auto w-full max-w-3xl">
             {sendError && <p className="mb-2 text-destructive text-sm">{sendError}</p>}
+            {attachments.length > 0 && (
+              <div className="mb-2 flex flex-wrap gap-2">
+                {attachments.map((a) => (
+                  <div key={a.previewUrl} className="group/img relative">
+                    <img src={a.previewUrl} alt={a.name} className="size-16 rounded-lg border object-cover" />
+                    <button
+                      type="button"
+                      aria-label={`Remove ${a.name}`}
+                      onClick={() => removeAttachment(a.previewUrl)}
+                      className="absolute -top-1.5 -right-1.5 rounded-full border bg-background p-0.5 text-muted-foreground shadow-sm hover:text-foreground"
+                    >
+                      <X className="size-3" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
             <div
               className={cn(
                 "flex items-end gap-1.5 rounded-2xl border bg-card p-1.5 shadow-sm transition-all",
@@ -709,6 +759,25 @@ export function ChatPage() {
               >
                 <Sparkles />
                 <span className="hidden sm:inline">{modelLabel(activeSettings.model)}</span>
+              </Button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/png,image/jpeg,image/webp,image/gif"
+                multiple
+                hidden
+                onChange={(e) => void pickImages(e.target.files)}
+              />
+              <Button
+                variant="ghost"
+                size="icon"
+                className="mb-0.5 shrink-0 rounded-xl text-muted-foreground"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={running || pending.length > 0 || attachments.length >= MAX_IMAGES_PER_MESSAGE}
+                aria-label="Attach images"
+                title="Attach images"
+              >
+                <Paperclip />
               </Button>
               <textarea
                 value={input}
@@ -752,7 +821,7 @@ export function ChatPage() {
                   size="icon"
                   className="shrink-0 rounded-xl"
                   onClick={() => void submit()}
-                  disabled={!input.trim() || createConversation.isPending}
+                  disabled={(!input.trim() && attachments.length === 0) || createConversation.isPending}
                   aria-label="Send message"
                 >
                   <Send />
