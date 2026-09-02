@@ -10,6 +10,7 @@ import (
 	"math"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/abubakarsiddik31/golem"
 	"github.com/abubakarsiddik31/golem-chatbot/internal/chat"
@@ -41,6 +42,9 @@ var _ ConvoStore = (*storage.Conversations)(nil)
 type MsgStore interface {
 	Add(ctx context.Context, msg storage.Message) error
 	ForConversation(ctx context.Context, convID, userID string) ([]storage.Message, error)
+	ByID(ctx context.Context, msgID, userID string) (storage.Message, error)
+	UpdateContent(ctx context.Context, msgID, userID, content string, data []byte) error
+	DeleteAfter(ctx context.Context, convID, userID string, after time.Time, afterID string) (int64, error)
 }
 
 type UsageStore interface {
@@ -88,16 +92,8 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 	spec := s.runSpecFor(conv)
 
 	// A paused conversation must be resolved before new turns.
-	if s.deps.Pending != nil {
-		pending, err := s.deps.Pending.ForConversation(ctx, convID, userID)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "internal", "could not check pending approvals")
-			return
-		}
-		if len(pending) > 0 {
-			writeError(w, http.StatusConflict, "approval_pending", "resolve the pending approval first")
-			return
-		}
+	if s.blockedByPendingApproval(w, ctx, convID, userID) {
+		return
 	}
 
 	// Auto-title from the first user message.
@@ -119,8 +115,50 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal", "could not load history")
 		return
 	}
-	history := messagesToHistory(msgs)
+	// Rows already stored before this run must not be re-persisted when the
+	// run's Messages replay them as history.
+	known := make(map[string]bool, len(msgs))
+	for _, row := range msgs {
+		known[string(row.Data)] = true
+	}
+	s.runTurn(ctx, userID, convID, spec, historyFrom(msgs, len(msgs)-1), req.Content, nil, known, w)
+}
 
+// blockedByPendingApproval writes the response and reports true when the
+// conversation has unresolved approvals; a paused conversation must be
+// resolved before any new run.
+func (s *Server) blockedByPendingApproval(w http.ResponseWriter, ctx context.Context, convID, userID string) bool {
+	if s.deps.Pending == nil {
+		return false
+	}
+	pending, err := s.deps.Pending.ForConversation(ctx, convID, userID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "could not check pending approvals")
+		return true
+	}
+	if len(pending) > 0 {
+		writeError(w, http.StatusConflict, "approval_pending", "resolve the pending approval first")
+		return true
+	}
+	return false
+}
+
+// knownRows builds the skip set of already-stored message payloads.
+func knownRows(msgs []storage.Message) map[string]bool {
+	known := make(map[string]bool, len(msgs))
+	for _, row := range msgs {
+		known[string(row.Data)] = true
+	}
+	return known
+}
+
+// runTurn streams one model turn to w: loads the caller's tools, opens the
+// SSE sink, runs the agent, and settles the outcome (persist + done/error).
+// Callers validate, prepare history/spec/parts, and persist the prompt;
+// known holds the payloads of rows already in the store so history replay
+// rows are not duplicated. The sink opens only after those steps so
+// failures stay plain HTTP errors.
+func (s *Server) runTurn(ctx context.Context, userID, convID string, spec chat.RunSpec, history []model.Message, prompt string, parts []model.Part, known map[string]bool, w http.ResponseWriter) {
 	// Tools load before the SSE sink goes out so failures can still be
 	// plain HTTP errors. One broken config skips that tool only (logged by
 	// DecodeConfigs's returned error).
@@ -129,20 +167,17 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal", "could not load tools")
 		return
 	}
-
-	// SSE headers go out only after validation; from here the response is a stream.
 	sink, ok := newSSESink(w)
 	if !ok {
 		writeError(w, http.StatusInternalServerError, "internal", "streaming unsupported")
 		return
 	}
-
-	outcome, err := s.deps.Agent.Run(ctx, chat.Deps{UserID: userID, ConversationID: convID}, history, req.Content, nil, sink, tools, spec)
+	outcome, err := s.deps.Agent.Run(ctx, chat.Deps{UserID: userID, ConversationID: convID}, history, prompt, parts, sink, tools, spec)
 	if err != nil {
 		s.persistFailure(ctx, userID, convID, spec, err, sink)
 		return
 	}
-	s.settleRun(ctx, userID, convID, spec, outcome, sink)
+	s.settleRun(ctx, userID, convID, spec, outcome, sink, known)
 }
 
 // runSpecFor resolves a conversation's model settings into a RunSpec: an
@@ -194,19 +229,35 @@ func (s *Server) toolEnv() chat.ToolEnv {
 
 // settleRun dispatches a finished run: approval pauses park the conversation,
 // everything else finishes normally.
-func (s *Server) settleRun(ctx context.Context, userID, convID string, spec chat.RunSpec, outcome chat.Outcome, sink *sseSink) {
+func (s *Server) settleRun(ctx context.Context, userID, convID string, spec chat.RunSpec, outcome chat.Outcome, sink *sseSink, known map[string]bool) {
+	newFrom := replayedPrefixLen(outcome.Messages)
 	if len(outcome.Pending) > 0 {
-		s.pauseRun(ctx, userID, convID, spec, outcome, sink)
+		s.pauseRun(ctx, userID, convID, spec, outcome, sink, known, newFrom)
 		return
 	}
-	s.finishRun(ctx, userID, convID, spec, outcome, sink)
+	s.finishRun(ctx, userID, convID, spec, outcome, sink, known, newFrom)
+}
+
+// replayedPrefixLen reports how many leading messages of a streamed run's
+// Messages are replay (history plus the fresh prompt): everything up to and
+// including the last user message. Golem returns the full conversation, so
+// those rows are already in the store and only genuinely new rows (after
+// that point) may add rows. 0 means "no positional constraint".
+func replayedPrefixLen(msgs []model.Message) int {
+	last := -1
+	for i, m := range msgs {
+		if m.Role == model.RoleUser {
+			last = i
+		}
+	}
+	return last + 1
 }
 
 // pauseRun persists the paused conversation (history through the unanswered
 // tool call, usage, pending calls) and tells the client what needs a
 // decision. No done event follows — the stream ends waiting for approvals.
-func (s *Server) pauseRun(ctx context.Context, userID, convID string, spec chat.RunSpec, outcome chat.Outcome, sink *sseSink) {
-	idMap, err := s.persistRunMessages(ctx, userID, convID, spec.Model, outcome.Messages, outcome.Usage, outcome.Requests, false, nil)
+func (s *Server) pauseRun(ctx context.Context, userID, convID string, spec chat.RunSpec, outcome chat.Outcome, sink *sseSink, known map[string]bool, newFrom int) {
+	idMap, err := s.persistRunMessages(ctx, userID, convID, spec.Model, outcome.Messages, outcome.Usage, outcome.Requests, false, known, newFrom)
 	if err != nil {
 		s.deps.Log.Error("persist paused messages", "err", err)
 	}
@@ -248,7 +299,7 @@ func (s *Server) persistFailure(ctx context.Context, userID, convID string, spec
 		partial = runError.Partial
 	}
 	if partial != nil && len(partial.Messages) > 0 {
-		if _, err := s.persistRunMessages(ctx, userID, convID, spec.Model, partial.Messages, partial.Usage, partial.Requests, true, nil); err != nil {
+		if _, err := s.persistRunMessages(ctx, userID, convID, spec.Model, partial.Messages, partial.Usage, partial.Requests, true, nil, replayedPrefixLen(partial.Messages)); err != nil {
 			s.deps.Log.Error("persist partial", "err", err)
 		}
 		_ = s.deps.Usage.Add(ctx, usageEventFor(userID, convID, spec.Model, partial.Usage, partial.Requests, s.deps.Rates))
@@ -272,6 +323,14 @@ func (s *Server) persistFailure(ctx context.Context, userID, convID string, spec
 // any deferred resume need them. Usage and cost land on the last assistant
 // row only.
 //
+// Two skip rules keep stored rows from duplicating. Rows in the replayed
+// prefix (index < newFrom — history plus the fresh prompt, per golem's
+// "Messages is the full conversation" contract) are positional and always
+// skipped; newFrom <= 0 disables that rule. Beyond the prefix, a row whose
+// exact payload matches a stored row (skip map) is a resumed run's replay
+// and is skipped too — the approvals resume path relies on that, since a
+// resumed run's Messages start with the paused history verbatim.
+//
 // Provider-synthesized call IDs (Gemini's call-1, call-2, …) restart every
 // request, so they collide across runs of one conversation — golem keys
 // answered-ness by call ID alone. Each persisted call therefore gets a
@@ -279,7 +338,7 @@ func (s *Server) persistFailure(ctx context.Context, userID, convID string, spec
 // persisted ones (the approval pause needs it to key pending rows). A tool
 // result is matched to the most recent unanswered raw ID, mirroring the
 // emission order golem guarantees.
-func (s *Server) persistRunMessages(ctx context.Context, userID, convID, modelStr string, msgs []model.Message, usage model.Usage, requests int, truncated bool, skip map[string]bool) (map[string]string, error) {
+func (s *Server) persistRunMessages(ctx context.Context, userID, convID, modelStr string, msgs []model.Message, usage model.Usage, requests int, truncated bool, skip map[string]bool, newFrom int) (map[string]string, error) {
 	lastAssistant := -1
 	for i, m := range msgs {
 		if m.Role == model.RoleAssistant {
@@ -295,7 +354,14 @@ func (s *Server) persistRunMessages(ctx context.Context, userID, convID, modelSt
 		// Replay detection must run BEFORE rewriting: a resumed run's
 		// Messages start with the paused history verbatim, and those rows
 		// already exist. Rewriting first would mint fresh IDs for them.
-		if raw := mustJSON(m); skip[string(raw)] {
+		if newFrom > 0 {
+			// Streamed run: everything before the fresh prompt is replay.
+			if i < newFrom {
+				continue
+			}
+		} else if skip[string(mustJSON(m))] {
+			// Deferred resume: the paused history replays verbatim from
+			// index 0, so payload equality is the replay test.
 			continue
 		}
 		if m.Role == model.RoleAssistant && len(m.ToolCalls) > 0 {
@@ -363,8 +429,8 @@ func rawOf(idMap map[string]string, persisted string) string {
 	return ""
 }
 
-func (s *Server) finishRun(ctx context.Context, userID, convID string, spec chat.RunSpec, outcome chat.Outcome, sink *sseSink) {
-	if _, err := s.persistRunMessages(ctx, userID, convID, spec.Model, outcome.Messages, outcome.Usage, outcome.Requests, false, nil); err != nil {
+func (s *Server) finishRun(ctx context.Context, userID, convID string, spec chat.RunSpec, outcome chat.Outcome, sink *sseSink, known map[string]bool, newFrom int) {
+	if _, err := s.persistRunMessages(ctx, userID, convID, spec.Model, outcome.Messages, outcome.Usage, outcome.Requests, false, known, newFrom); err != nil {
 		s.deps.Log.Error("persist assistant messages", "err", err)
 	}
 	if err := s.deps.Usage.Add(ctx, usageEventFor(userID, convID, spec.Model, outcome.Usage, outcome.Requests, s.deps.Rates)); err != nil {
@@ -427,17 +493,17 @@ func usageEventFor(userID, convID, mdl string, usage model.Usage, requests int, 
 	}
 }
 
-// messagesToHistory decodes every stored message except the last (the fresh
-// user prompt, which golem appends itself).
-func messagesToHistory(msgs []storage.Message) []model.Message {
-	if len(msgs) <= 1 {
+// historyFrom decodes the first upto stored rows as replay history.
+// Damaged rows are skipped rather than failing the run.
+func historyFrom(msgs []storage.Message, upto int) []model.Message {
+	if upto <= 0 {
 		return nil
 	}
 	var history []model.Message
-	for _, m := range msgs[:len(msgs)-1] {
+	for _, m := range msgs[:upto] {
 		var mm model.Message
 		if err := json.Unmarshal(m.Data, &mm); err != nil {
-			continue // damaged row: skip rather than fail the run
+			continue
 		}
 		history = append(history, mm)
 	}

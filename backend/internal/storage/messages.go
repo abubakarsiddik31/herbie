@@ -2,9 +2,11 @@ package storage
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -41,6 +43,17 @@ func (m *Messages) Add(ctx context.Context, msg Message) error {
 	return nil
 }
 
+const messageColumns = `id, conversation_id::text, user_id::text, role, content, data,
+		       input_tokens, output_tokens, requests, cost_micro_usd, truncated, model, created_at`
+
+func scanMessage(row pgx.Row) (Message, error) {
+	var msg Message
+	err := row.Scan(&msg.ID, &msg.ConversationID, &msg.UserID, &msg.Role, &msg.Content,
+		&msg.Data, &msg.InputTokens, &msg.OutputTokens, &msg.Requests, &msg.CostMicros,
+		&msg.Truncated, &msg.Model, &msg.CreatedAt)
+	return msg, err
+}
+
 func (m *Messages) ForConversation(ctx context.Context, convID, userID string) ([]Message, error) {
 	rows, err := m.pool.Query(ctx,
 		`SELECT id, conversation_id::text, user_id::text, role, content, data,
@@ -62,4 +75,46 @@ func (m *Messages) ForConversation(ctx context.Context, convID, userID string) (
 		out = append(out, msg)
 	}
 	return out, rows.Err()
+}
+
+// ByID loads one message row owned by userID.
+func (m *Messages) ByID(ctx context.Context, msgID, userID string) (Message, error) {
+	msg, err := scanMessage(m.pool.QueryRow(ctx,
+		`SELECT id, conversation_id::text, user_id::text, role, content, data,
+		        input_tokens, output_tokens, requests, cost_micro_usd, truncated, model, created_at
+		 FROM messages WHERE id = $1 AND user_id = $2`, msgID, userID))
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return Message{}, ErrNotFound
+		}
+		return Message{}, fmt.Errorf("message by id: %w", err)
+	}
+	return msg, nil
+}
+
+// UpdateContent rewrites one message's text and stored payload (the row's
+// images, if any, are preserved by the caller passing merged data).
+func (m *Messages) UpdateContent(ctx context.Context, msgID, userID, content string, data []byte) error {
+	tag, err := m.pool.Exec(ctx,
+		`UPDATE messages SET content = $3, data = $4 WHERE id = $1 AND user_id = $2`,
+		msgID, userID, content, data)
+	if err != nil {
+		return fmt.Errorf("update message content: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// DeleteAfter removes every row strictly after (after, afterID) in the
+// conversation's (created_at, id) order — the edit-and-resend truncation.
+func (m *Messages) DeleteAfter(ctx context.Context, convID, userID string, after time.Time, afterID string) (int64, error) {
+	tag, err := m.pool.Exec(ctx,
+		`DELETE FROM messages WHERE conversation_id = $1 AND user_id = $2 AND (created_at, id) > ($3, $4)`,
+		convID, userID, after, afterID)
+	if err != nil {
+		return 0, fmt.Errorf("delete messages after: %w", err)
+	}
+	return tag.RowsAffected(), nil
 }

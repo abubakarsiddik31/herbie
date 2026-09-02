@@ -118,12 +118,14 @@ func (s *Server) handleApprovals(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// The resume run's Messages replay the paused history; skip rows that
-	// already exist (message JSON is stable across round-trips).
+	// already exist (message JSON is stable across round-trips). newFrom 0
+	// disables the positional rule — the known-payload map alone is correct
+	// here because the paused history ends with an unanswered tool call.
 	known := make(map[string]bool, len(msgs))
 	for _, row := range msgs {
 		known[string(row.Data)] = true
 	}
-	idMap, err := s.persistRunMessages(ctx, userID, convID, spec.Model, outcome.Messages, outcome.Usage, outcome.Requests, false, known)
+	idMap, err := s.persistRunMessages(ctx, userID, convID, spec.Model, outcome.Messages, outcome.Usage, outcome.Requests, false, known, 0)
 	if err != nil {
 		s.deps.Log.Error("persist resumed messages", "err", err)
 	}

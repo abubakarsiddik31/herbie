@@ -201,6 +201,43 @@ func (f *fakeMsgs) forConv(convID, userID string) []storage.Message {
 	return out
 }
 
+func (f *fakeMsgs) ByID(_ context.Context, msgID, userID string) (storage.Message, error) {
+	for _, m := range f.rows {
+		if m.ID == msgID && m.UserID == userID {
+			return m, nil
+		}
+	}
+	return storage.Message{}, storage.ErrNotFound
+}
+
+func (f *fakeMsgs) UpdateContent(_ context.Context, msgID, userID, content string, data []byte) error {
+	for i := range f.rows {
+		if f.rows[i].ID == msgID && f.rows[i].UserID == userID {
+			f.rows[i].Content = content
+			f.rows[i].Data = data
+			return nil
+		}
+	}
+	return storage.ErrNotFound
+}
+
+// DeleteAfter mirrors the SQL (created_at, id) tuple comparison the real
+// store performs for the truncate-and-resend endpoints.
+func (f *fakeMsgs) DeleteAfter(_ context.Context, convID, userID string, after time.Time, afterID string) (int64, error) {
+	var kept []storage.Message
+	var removed int64
+	for _, m := range f.rows {
+		if m.ConversationID == convID && m.UserID == userID &&
+			(m.CreatedAt.After(after) || (m.CreatedAt.Equal(after) && m.ID > afterID)) {
+			removed++
+			continue
+		}
+		kept = append(kept, m)
+	}
+	f.rows = kept
+	return removed, nil
+}
+
 func (f *fakeMsgs) count() int { return len(f.rows) }
 
 type fakeUsage struct{ events []storage.UsageEvent }

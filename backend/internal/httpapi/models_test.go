@@ -1,11 +1,15 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/abubakarsiddik31/golem"
+	"github.com/abubakarsiddik31/golem-chatbot/internal/chat"
 
 	"github.com/abubakarsiddik31/golem-chatbot/internal/storage"
 	"github.com/abubakarsiddik31/golem/model"
@@ -233,5 +237,137 @@ func TestGetConversationSurfacesUsage(t *testing.T) {
 	if assistantUsage == nil || assistantUsage.InputTokens != 1200 || assistantUsage.OutputTokens != 300 ||
 		assistantUsage.Model != "gemini-2.5-flash" || assistantUsage.CostUsd != 0.00846 {
 		t.Fatalf("assistant usage wrong: %+v", assistantUsage)
+	}
+}
+
+// endlessModel answers every run with the same streamed content — the
+// truncate-and-resend endpoints run the agent more than once per test.
+func endlessModel(content string) testmodel.StreamFunc {
+	return testmodel.StreamFunc(func(_ context.Context, _ model.Request, onDelta func(model.Delta) error) (model.Response, error) {
+		_ = testmodel.Emit(onDelta, model.Delta{Content: content})
+		return model.Response{
+			Message: model.Message{Role: model.RoleAssistant, Content: content},
+			Usage:   model.Usage{InputTokens: 5, OutputTokens: 3},
+		}, nil
+	})
+}
+
+func newEndlessAgent(t *testing.T, content string) *chat.Agent {
+	t.Helper()
+	reg := chat.NewModelRegistryWithFactory(chat.ProviderKeys{Gemini: "test"}, func(string, string, *float64) (model.StreamingModel, error) {
+		return endlessModel(content), nil
+	})
+	agent, err := chat.New(reg, golem.UsageLimit{}, chat.DefaultToolEnv())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return agent
+}
+
+func TestEditMessageTruncatesAndReruns(t *testing.T) {
+	msgs := newFakeMsgs()
+	convs := newFakeConvos(msgs)
+	h, token := newHandlerServer(t, newEndlessAgent(t, "again"), convs, msgs, newFakeUsage())
+	conv := convs.mustCreate("u-1", "")
+
+	if rec := postMessage(t, h, token, conv.ID, "hello"); rec.Code != http.StatusOK {
+		t.Fatalf("first send: %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := postMessage(t, h, token, conv.ID, "second"); rec.Code != http.StatusOK {
+		t.Fatalf("second send: %d %s", rec.Code, rec.Body.String())
+	}
+	if msgs.count() != 4 {
+		t.Fatalf("expected 4 rows before edit, got %d", msgs.count())
+	}
+
+	req := reqJSON(http.MethodPost, "/api/conversations/"+conv.ID+"/messages/m-1/edit", map[string]string{"content": "rewritten"})
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("edit status %d: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "event: done") {
+		t.Fatalf("edit must re-run to a done event:\n%s", rec.Body.String())
+	}
+	rows := msgs.forConv(conv.ID, "u-1")
+	if len(rows) != 2 { // edited user row + fresh assistant row
+		t.Fatalf("rows after edit = %d, want 2 (truncated then re-run)", len(rows))
+	}
+	if rows[0].Content != "rewritten" || rows[0].ID != "m-1" {
+		t.Fatalf("edited row wrong: %+v", rows[0])
+	}
+	if rows[1].Role != "assistant" {
+		t.Fatalf("last row should be the fresh assistant answer: %+v", rows[1])
+	}
+}
+
+func TestEditMessageValidation(t *testing.T) {
+	msgs := newFakeMsgs()
+	convs := newFakeConvos(msgs)
+	h, token := newHandlerServer(t, newEndlessAgent(t, "x"), convs, msgs, newFakeUsage())
+	conv := convs.mustCreate("u-1", "")
+	_ = postMessage(t, h, token, conv.ID, "hello")
+
+	post := func(path string, body map[string]string) *httptest.ResponseRecorder {
+		req := reqJSON(http.MethodPost, path, body)
+		req.Header.Set("Authorization", "Bearer "+token)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec
+	}
+
+	if rec := post("/api/conversations/"+conv.ID+"/messages/m-2/edit", map[string]string{"content": "nope"}); rec.Code != http.StatusBadRequest {
+		t.Fatalf("editing an assistant row must 400, got %d", rec.Code)
+	}
+	if rec := post("/api/conversations/"+conv.ID+"/messages/m-99/edit", map[string]string{"content": "nope"}); rec.Code != http.StatusNotFound {
+		t.Fatalf("editing an unknown row must 404, got %d", rec.Code)
+	}
+	if msgs.forConv(conv.ID, "u-1")[1].Content == "nope" {
+		t.Fatal("assistant row must be untouched")
+	}
+}
+
+func TestRegenerateReplacesLastAnswer(t *testing.T) {
+	msgs := newFakeMsgs()
+	convs := newFakeConvos(msgs)
+	h, token := newHandlerServer(t, newEndlessAgent(t, "fresh"), convs, msgs, newFakeUsage())
+	conv := convs.mustCreate("u-1", "")
+	_ = postMessage(t, h, token, conv.ID, "hello")
+	_ = postMessage(t, h, token, conv.ID, "again")
+	if msgs.count() != 4 {
+		t.Fatalf("expected 4 rows, got %d", msgs.count())
+	}
+
+	req := reqJSON(http.MethodPost, "/api/conversations/"+conv.ID+"/regenerate", map[string]any{})
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("regenerate status %d: %s", rec.Code, rec.Body.String())
+	}
+	rows := msgs.forConv(conv.ID, "u-1")
+	if len(rows) != 4 { // both turns kept; only the last answer was replaced
+		t.Fatalf("rows after regenerate = %d, want 4", len(rows))
+	}
+	if rows[2].Role != "user" || rows[2].Content != "again" {
+		t.Fatalf("history truncated past the last user message: %+v", rows)
+	}
+	if rows[3].Role != "assistant" {
+		t.Fatalf("last row should be a fresh assistant answer: %+v", rows[3])
+	}
+}
+
+func TestRegenerateEmptyConversationRejected(t *testing.T) {
+	msgs := newFakeMsgs()
+	convs := newFakeConvos(msgs)
+	h, token := newHandlerServer(t, newEndlessAgent(t, "x"), convs, msgs, newFakeUsage())
+	conv := convs.mustCreate("u-1", "")
+	req := reqJSON(http.MethodPost, "/api/conversations/"+conv.ID+"/regenerate", map[string]any{})
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("regenerate on empty conversation must 400, got %d", rec.Code)
 	}
 }
