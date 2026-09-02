@@ -53,6 +53,7 @@ func NewServer(deps ServerDeps) http.Handler {
 	// requires a valid bearer token.
 	authed := http.NewServeMux()
 	authed.HandleFunc("GET /api/me", s.handleMe)
+	authed.HandleFunc("GET /api/models", s.handleListModels)
 	authed.HandleFunc("GET /api/conversations", s.handleListConversations)
 	authed.HandleFunc("POST /api/conversations", s.handleCreateConversation)
 	authed.HandleFunc("GET /api/conversations/{id}", s.handleGetConversation)

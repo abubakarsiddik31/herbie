@@ -5,23 +5,56 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"unicode/utf8"
 
+	"github.com/abubakarsiddik31/golem-chatbot/internal/chat"
 	"github.com/abubakarsiddik31/golem-chatbot/internal/storage"
 	"github.com/abubakarsiddik31/golem/model"
 )
 
 type conversationDTO struct {
-	ID        string `json:"id"`
-	Title     string `json:"title"`
-	CreatedAt string `json:"createdAt"`
-	UpdatedAt string `json:"updatedAt"`
+	ID           string   `json:"id"`
+	Title        string   `json:"title"`
+	Model        string   `json:"model"`
+	Temperature  *float64 `json:"temperature"`
+	SystemPrompt string   `json:"systemPrompt"`
+	CreatedAt    string   `json:"createdAt"`
+	UpdatedAt    string   `json:"updatedAt"`
 }
 
 func toConversationDTO(c storage.Conversation) conversationDTO {
-	return conversationDTO{ID: c.ID, Title: c.Title, CreatedAt: c.CreatedAt.UTC().Format(timeRFC3339), UpdatedAt: c.UpdatedAt.UTC().Format(timeRFC3339)}
+	return conversationDTO{
+		ID: c.ID, Title: c.Title, Model: c.Model, Temperature: c.Temperature, SystemPrompt: c.SystemPrompt,
+		CreatedAt: c.CreatedAt.UTC().Format(timeRFC3339), UpdatedAt: c.UpdatedAt.UTC().Format(timeRFC3339),
+	}
 }
 
 const timeRFC3339 = "2006-01-02T15:04:05.000Z07:00"
+
+const maxSystemPromptChars = 4000
+
+// settingsPatch converts an incoming partial settings body into a storage
+// patch, validating the values against the server's model catalog.
+func (s *Server) settingsPatch(modelID string, temperature *float64, clearTemperature bool, systemPrompt *string) (storage.ConversationPatch, error) {
+	patch := storage.ConversationPatch{Temperature: temperature, ClearTemperature: clearTemperature, SystemPrompt: systemPrompt}
+	if modelID != "" {
+		spec, ok := chat.FindModel(modelID)
+		if !ok {
+			return patch, errors.New("unknown model " + modelID)
+		}
+		if !chat.HasProvider(s.deps.ModelKeys, spec.Provider) {
+			return patch, errors.New("model " + modelID + " is not configured on this server")
+		}
+		patch.Model = &modelID
+	}
+	if temperature != nil && (*temperature < 0 || *temperature > 2) {
+		return patch, errors.New("temperature must be between 0 and 2")
+	}
+	if systemPrompt != nil && utf8.RuneCountInString(*systemPrompt) > maxSystemPromptChars {
+		return patch, errors.New("system prompt too long")
+	}
+	return patch, nil
+}
 
 func (s *Server) handleListConversations(w http.ResponseWriter, r *http.Request) {
 	userID, _ := userIDFrom(r.Context())
@@ -43,12 +76,21 @@ func (s *Server) handleListConversations(w http.ResponseWriter, r *http.Request)
 func (s *Server) handleCreateConversation(w http.ResponseWriter, r *http.Request) {
 	userID, _ := userIDFrom(r.Context())
 	var req struct {
-		Title string `json:"title"`
+		Title            string   `json:"title"`
+		Model            string   `json:"model"`
+		Temperature      *float64 `json:"temperature"`
+		SystemPrompt     string   `json:"systemPrompt"`
+		ClearTemperature bool     `json:"-"`
 	}
 	if r.Body != nil {
 		_ = json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req) // optional body
 	}
-	conv, err := s.deps.Convos.Create(r.Context(), userID, req.Title, storage.ConversationPatch{})
+	patch, err := s.settingsPatch(req.Model, req.Temperature, req.ClearTemperature, &req.SystemPrompt)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "validation_error", err.Error())
+		return
+	}
+	conv, err := s.deps.Convos.Create(r.Context(), userID, req.Title, patch)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal", "could not create conversation")
 		return
@@ -94,14 +136,33 @@ func (s *Server) handleGetConversation(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handlePatchConversation(w http.ResponseWriter, r *http.Request) {
 	userID, _ := userIDFrom(r.Context())
 	var req struct {
-		Title string `json:"title"`
+		Title            *string  `json:"title"`
+		Model            string   `json:"model"`
+		Temperature      *float64 `json:"temperature"`
+		SystemPrompt     *string  `json:"systemPrompt"`
+		ClearTemperature bool     `json:"clearTemperature"`
 	}
-	if err := decodeJSON(r, &req); err != nil || req.Title == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "title is required")
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "invalid body")
 		return
 	}
-	if err := s.deps.Convos.SetTitle(r.Context(), r.PathValue("id"), userID, req.Title); err != nil {
-		writeError(w, http.StatusInternalServerError, "internal", "could not rename")
+	if req.Title != nil && *req.Title == "" {
+		writeError(w, http.StatusBadRequest, "bad_request", "title cannot be empty")
+		return
+	}
+	patch, err := s.settingsPatch(req.Model, req.Temperature, req.ClearTemperature, req.SystemPrompt)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "validation_error", err.Error())
+		return
+	}
+	if req.Title != nil {
+		if err := s.deps.Convos.SetTitle(r.Context(), r.PathValue("id"), userID, *req.Title); err != nil {
+			writeError(w, http.StatusInternalServerError, "internal", "could not rename")
+			return
+		}
+	}
+	if err := s.deps.Convos.SetSettings(r.Context(), r.PathValue("id"), userID, patch); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "could not update settings")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

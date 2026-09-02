@@ -12,10 +12,10 @@ import (
 )
 
 type Conversation struct {
-	ID        string
-	UserID    string
-	Title     string
-	Model     string // "" = server default
+	ID     string
+	UserID string
+	Title  string
+	Model  string // "" = server default
 	// Temperature nil = provider default.
 	Temperature  *float64
 	SystemPrompt string // "" = built-in prompt

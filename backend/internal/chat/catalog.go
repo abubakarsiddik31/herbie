@@ -84,3 +84,8 @@ func providerKey(keys ProviderKeys, provider string) string {
 	}
 	return ""
 }
+
+// HasProvider reports whether a provider has a configured key.
+func HasProvider(keys ProviderKeys, provider string) bool {
+	return providerKey(keys, provider) != ""
+}
