@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
@@ -126,18 +127,19 @@ func (s *Server) handleGetConversation(w http.ResponseWriter, r *http.Request) {
 		Model        string  `json:"model"`
 	}
 	type msgDTO struct {
-		ID        string    `json:"id"`
-		Role      string    `json:"role"`
-		Content   string    `json:"content"`
-		Truncated bool      `json:"truncated"`
-		CreatedAt string    `json:"createdAt"`
-		Usage     *usageDTO `json:"usage,omitempty"`
+		ID        string     `json:"id"`
+		Role      string     `json:"role"`
+		Content   string     `json:"content"`
+		Truncated bool       `json:"truncated"`
+		CreatedAt string     `json:"createdAt"`
+		Usage     *usageDTO  `json:"usage,omitempty"`
+		Images    []imageDTO `json:"images,omitempty"`
 	}
 	out := make([]msgDTO, 0, len(msgs))
 	for _, m := range msgs {
 		// Tool plumbing stays out of the transcript: tool-result rows and
 		// empty assistant tool-call rows are history replay data only.
-		if m.Role == string(model.RoleTool) || m.Content == "" {
+		if m.Role == string(model.RoleTool) || (m.Content == "" && !userHasImages(m.Data)) {
 			continue
 		}
 		var usage *usageDTO
@@ -149,9 +151,41 @@ func (s *Server) handleGetConversation(w http.ResponseWriter, r *http.Request) {
 				Model:        m.Model,
 			}
 		}
-		out = append(out, msgDTO{ID: m.ID, Role: m.Role, Content: m.Content, Truncated: m.Truncated, CreatedAt: m.CreatedAt.UTC().Format(timeRFC3339), Usage: usage})
+		out = append(out, msgDTO{
+			ID: m.ID, Role: m.Role, Content: m.Content, Truncated: m.Truncated,
+			CreatedAt: m.CreatedAt.UTC().Format(timeRFC3339), Usage: usage,
+			Images: imagesOf(m.Data),
+		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"conversation": toConversationDTO(conv), "messages": out})
+}
+
+// imageDTO is one stored image attachment, served as a data URL.
+type imageDTO struct {
+	MediaType string `json:"mediaType"`
+	DataURL   string `json:"dataUrl"`
+}
+
+// imagesOf extracts an image listing from a stored message payload; empty
+// for text-only rows.
+func imagesOf(data []byte) []imageDTO {
+	var payload model.Message
+	if json.Unmarshal(data, &payload) != nil || len(payload.Parts) == 0 {
+		return nil
+	}
+	images := make([]imageDTO, 0, len(payload.Parts))
+	for _, p := range payload.Parts {
+		images = append(images, imageDTO{
+			MediaType: p.MediaType,
+			DataURL:   "data:" + p.MediaType + ";base64," + base64.StdEncoding.EncodeToString(p.Data),
+		})
+	}
+	return images
+}
+
+func userHasImages(data []byte) bool {
+	var payload model.Message
+	return json.Unmarshal(data, &payload) == nil && len(payload.Parts) > 0
 }
 
 func (s *Server) handlePatchConversation(w http.ResponseWriter, r *http.Request) {

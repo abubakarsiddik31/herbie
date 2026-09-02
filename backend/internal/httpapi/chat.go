@@ -68,14 +68,20 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 	userID, _ := userIDFrom(r.Context())
 	convID := r.PathValue("id")
 	var req struct {
-		Content string `json:"content"`
+		Content string       `json:"content"`
+		Images  []imageInput `json:"images"`
 	}
-	if err := decodeJSON(r, &req); err != nil || req.Content == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "content is required")
+	if err := decodeJSON(r, &req); err != nil || (req.Content == "" && len(req.Images) == 0) {
+		writeError(w, http.StatusBadRequest, "bad_request", "content or images is required")
 		return
 	}
 	if len([]rune(req.Content)) > maxPromptChars {
 		writeError(w, http.StatusBadRequest, "bad_request", "message too long")
+		return
+	}
+	parts, err := decodeImages(req.Images)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "validation_error", err.Error())
 		return
 	}
 
@@ -102,10 +108,11 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Persist the user message first, then build history from prior turns.
+	// Image parts ride in the payload, so history replay resends them.
 	if err := s.deps.Msgs.Add(ctx, storage.Message{
 		ConversationID: convID, UserID: userID, Role: string(model.RoleUser),
 		Content: req.Content,
-		Data:    mustJSON(model.Message{Role: model.RoleUser, Content: req.Content}),
+		Data:    mustJSON(model.Message{Role: model.RoleUser, Content: req.Content, Parts: parts}),
 	}); err != nil {
 		writeError(w, http.StatusInternalServerError, "internal", "could not store message")
 		return
@@ -121,7 +128,7 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 	for _, row := range msgs {
 		known[string(row.Data)] = true
 	}
-	s.runTurn(ctx, userID, convID, spec, historyFrom(msgs, len(msgs)-1), req.Content, nil, known, w)
+	s.runTurn(ctx, userID, convID, spec, historyFrom(msgs, len(msgs)-1), req.Content, parts, known, w)
 }
 
 // blockedByPendingApproval writes the response and reports true when the
