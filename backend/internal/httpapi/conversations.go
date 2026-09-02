@@ -34,18 +34,22 @@ const timeRFC3339 = "2006-01-02T15:04:05.000Z07:00"
 const maxSystemPromptChars = 4000
 
 // settingsPatch converts an incoming partial settings body into a storage
-// patch, validating the values against the server's model catalog.
-func (s *Server) settingsPatch(modelID string, temperature *float64, clearTemperature bool, systemPrompt *string) (storage.ConversationPatch, error) {
+// patch, validating the values against the server's model catalog. A nil
+// modelID leaves the stored model unchanged; an empty (but present) one
+// resets to the server default.
+func (s *Server) settingsPatch(modelID *string, temperature *float64, clearTemperature bool, systemPrompt *string) (storage.ConversationPatch, error) {
 	patch := storage.ConversationPatch{Temperature: temperature, ClearTemperature: clearTemperature, SystemPrompt: systemPrompt}
-	if modelID != "" {
-		spec, ok := chat.FindModel(modelID)
-		if !ok {
-			return patch, errors.New("unknown model " + modelID)
+	if modelID != nil {
+		if *modelID != "" {
+			spec, ok := chat.FindModel(*modelID)
+			if !ok {
+				return patch, errors.New("unknown model " + *modelID)
+			}
+			if !chat.HasProvider(s.deps.ModelKeys, spec.Provider) {
+				return patch, errors.New("model " + *modelID + " is not configured on this server")
+			}
 		}
-		if !chat.HasProvider(s.deps.ModelKeys, spec.Provider) {
-			return patch, errors.New("model " + modelID + " is not configured on this server")
-		}
-		patch.Model = &modelID
+		patch.Model = modelID
 	}
 	if temperature != nil && (*temperature < 0 || *temperature > 2) {
 		return patch, errors.New("temperature must be between 0 and 2")
@@ -85,7 +89,7 @@ func (s *Server) handleCreateConversation(w http.ResponseWriter, r *http.Request
 	if r.Body != nil {
 		_ = json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req) // optional body
 	}
-	patch, err := s.settingsPatch(req.Model, req.Temperature, req.ClearTemperature, &req.SystemPrompt)
+	patch, err := s.settingsPatch(&req.Model, req.Temperature, req.ClearTemperature, &req.SystemPrompt)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "validation_error", err.Error())
 		return
@@ -137,7 +141,7 @@ func (s *Server) handlePatchConversation(w http.ResponseWriter, r *http.Request)
 	userID, _ := userIDFrom(r.Context())
 	var req struct {
 		Title            *string  `json:"title"`
-		Model            string   `json:"model"`
+		Model            *string  `json:"model"`
 		Temperature      *float64 `json:"temperature"`
 		SystemPrompt     *string  `json:"systemPrompt"`
 		ClearTemperature bool     `json:"clearTemperature"`
