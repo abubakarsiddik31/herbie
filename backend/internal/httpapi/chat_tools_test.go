@@ -11,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/abubakarsiddik31/golem"
 	"github.com/abubakarsiddik31/golem-chatbot/internal/auth"
 	"github.com/abubakarsiddik31/golem-chatbot/internal/auth/authtest"
 	"github.com/abubakarsiddik31/golem-chatbot/internal/chat"
@@ -62,17 +61,18 @@ func newHandlerServerFull(t *testing.T, agent *chat.Agent, convs ConvoStore, msg
 	cfg := config.Config{}
 	cfg.ToolAllowPrivateHosts = true
 	h := NewServer(ServerDeps{
-		Cfg:     cfg,
-		Log:     slog.New(slog.NewTextHandler(io.Discard, nil)),
-		Auth:    authtest.NewService(testSecret),
-		Tokens:  tm,
-		Convos:  convs,
-		Msgs:    msgs,
-		Usage:   usage,
-		Tools:   tools,
-		Pending: pending,
-		Agent:   agent,
-		Rates:   cost.Rates{ChatInputPerM: 0.3, ChatOutputPerM: 2.5},
+		Cfg:       cfg,
+		Log:       slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Auth:      authtest.NewService(testSecret),
+		Tokens:    tm,
+		Convos:    convs,
+		Msgs:      msgs,
+		Usage:     usage,
+		Tools:     tools,
+		Pending:   pending,
+		Agent:     agent,
+		Rates:     cost.Rates{ChatInputPerM: 0.3, ChatOutputPerM: 2.5},
+		ModelKeys: chat.ProviderKeys{Gemini: "test"},
 	})
 	token, _, err := tm.Issue("u-1", time.Now())
 	if err != nil {
@@ -113,7 +113,7 @@ func TestSendMessageRunsToolAndPersistsEveryMessage(t *testing.T) {
 		Respond(toolCallResponse("call-1", "get_weather", json.RawMessage(`{"city":"x"}`))).
 		Respond(model.Response{Message: model.Message{Role: model.RoleAssistant, Content: "It is 21C"},
 			Usage: model.Usage{InputTokens: 10, OutputTokens: 5}})
-	agent, _ := chat.New(m, golem.UsageLimit{}, chat.DefaultToolEnv())
+	agent := newTestAgent(t, m)
 
 	msgs := newFakeMsgs()
 	convs := newFakeConvos(msgs)
@@ -167,7 +167,7 @@ func TestSendMessagePausesForApproval(t *testing.T) {
 
 	m := testmodel.New().
 		Respond(toolCallResponse("call-1", "get_weather", json.RawMessage(`{"city":"x"}`)))
-	agent, _ := chat.New(m, golem.UsageLimit{}, chat.DefaultToolEnv())
+	agent := newTestAgent(t, m)
 
 	msgs := newFakeMsgs()
 	convs := newFakeConvos(msgs)
@@ -202,7 +202,7 @@ func TestSendMessageWithoutToolsStoreStillWorks(t *testing.T) {
 		Message: model.Message{Role: model.RoleAssistant, Content: "plain"},
 		Usage:   model.Usage{InputTokens: 1, OutputTokens: 1},
 	})
-	agent, _ := chat.New(m, golem.UsageLimit{}, chat.DefaultToolEnv())
+	agent := newTestAgent(t, m)
 	msgs := newFakeMsgs()
 	convs := newFakeConvos(msgs)
 	h, token := newHandlerServer(t, agent, convs, msgs, newFakeUsage())

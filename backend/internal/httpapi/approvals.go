@@ -26,7 +26,8 @@ func (s *Server) handleApprovals(w http.ResponseWriter, r *http.Request) {
 	convID := r.PathValue("id")
 	ctx := r.Context()
 
-	if _, err := s.deps.Convos.ByID(ctx, convID, userID); err != nil {
+	conv, err := s.deps.Convos.ByID(ctx, convID, userID)
+	if err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "not_found", "conversation not found")
 			return
@@ -34,6 +35,8 @@ func (s *Server) handleApprovals(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal", "could not load conversation")
 		return
 	}
+	// The resume runs under the conversation's current model settings.
+	spec := s.runSpecFor(conv)
 
 	var req struct {
 		Decisions []approvalDecision `json:"decisions"`
@@ -109,9 +112,9 @@ func (s *Server) handleApprovals(w http.ResponseWriter, r *http.Request) {
 	outcome, err := s.deps.Agent.RunDeferred(ctx,
 		chat.Deps{UserID: userID, ConversationID: convID},
 		pausedRunHistory(msgs), golem.DeferredResults{Approvals: resolutions},
-		sink, tools)
+		sink, tools, spec)
 	if err != nil {
-		s.persistFailure(ctx, userID, convID, err, sink)
+		s.persistFailure(ctx, userID, convID, spec, err, sink)
 		return
 	}
 	// The resume run's Messages replay the paused history; skip rows that
@@ -120,7 +123,7 @@ func (s *Server) handleApprovals(w http.ResponseWriter, r *http.Request) {
 	for _, row := range msgs {
 		known[string(row.Data)] = true
 	}
-	idMap, err := s.persistRunMessages(ctx, userID, convID, outcome.Messages, outcome.Usage, outcome.Requests, false, known)
+	idMap, err := s.persistRunMessages(ctx, userID, convID, spec.Model, outcome.Messages, outcome.Usage, outcome.Requests, false, known)
 	if err != nil {
 		s.deps.Log.Error("persist resumed messages", "err", err)
 	}
@@ -128,16 +131,16 @@ func (s *Server) handleApprovals(w http.ResponseWriter, r *http.Request) {
 	if len(outcome.Pending) > 0 {
 		// The resumed run paused again: park the new pending calls and ask
 		// again. Message rows are already persisted above.
-		s.parkPending(ctx, userID, convID, outcome, sink, idMap)
+		s.parkPending(ctx, userID, convID, spec, outcome, sink, idMap)
 		return
 	}
-	s.finishResumed(ctx, userID, convID, outcome, sink)
+	s.finishResumed(ctx, userID, convID, spec, outcome, sink)
 }
 
 // parkPending persists the pending calls of a paused run and announces them.
 // Unlike pauseRun it does not touch message rows — the caller persisted them.
-func (s *Server) parkPending(ctx context.Context, userID, convID string, outcome chat.Outcome, sink *sseSink, idMap map[string]string) {
-	if err := s.deps.Usage.Add(ctx, usageEventFor(userID, convID, s.deps.Cfg.GeminiModel, outcome.Usage, outcome.Requests, s.deps.Rates)); err != nil {
+func (s *Server) parkPending(ctx context.Context, userID, convID string, spec chat.RunSpec, outcome chat.Outcome, sink *sseSink, idMap map[string]string) {
+	if err := s.deps.Usage.Add(ctx, usageEventFor(userID, convID, spec.Model, outcome.Usage, outcome.Requests, s.deps.Rates)); err != nil {
 		s.deps.Log.Error("record usage", "err", err)
 	}
 	calls := make([]storage.PendingToolCall, 0, len(outcome.Pending))
@@ -160,8 +163,8 @@ func (s *Server) parkPending(ctx context.Context, userID, convID string, outcome
 }
 
 // finishResumed records usage and emits done without re-persisting messages.
-func (s *Server) finishResumed(ctx context.Context, userID, convID string, outcome chat.Outcome, sink *sseSink) {
-	if err := s.deps.Usage.Add(ctx, usageEventFor(userID, convID, s.deps.Cfg.GeminiModel, outcome.Usage, outcome.Requests, s.deps.Rates)); err != nil {
+func (s *Server) finishResumed(ctx context.Context, userID, convID string, spec chat.RunSpec, outcome chat.Outcome, sink *sseSink) {
+	if err := s.deps.Usage.Add(ctx, usageEventFor(userID, convID, spec.Model, outcome.Usage, outcome.Requests, s.deps.Rates)); err != nil {
 		s.deps.Log.Error("record usage", "err", err)
 	}
 	_ = s.deps.Convos.Touch(ctx, convID)
@@ -176,5 +179,6 @@ func (s *Server) finishResumed(ctx context.Context, userID, convID string, outco
 		"outputTokens": outcome.Usage.OutputTokens,
 		"requests":     outcome.Requests,
 		"costUsd":      math.Round(float64(cost)/10) / 1e5,
+		"model":        spec.Model,
 	})
 }

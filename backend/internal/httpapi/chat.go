@@ -76,7 +76,8 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
-	if _, err := s.deps.Convos.ByID(ctx, convID, userID); err != nil {
+	conv, err := s.deps.Convos.ByID(ctx, convID, userID)
+	if err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "not_found", "conversation not found")
 			return
@@ -84,6 +85,7 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal", "could not load conversation")
 		return
 	}
+	spec := s.runSpecFor(conv)
 
 	// A paused conversation must be resolved before new turns.
 	if s.deps.Pending != nil {
@@ -135,12 +137,24 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	outcome, err := s.deps.Agent.Run(ctx, chat.Deps{UserID: userID, ConversationID: convID}, history, req.Content, sink, tools)
+	outcome, err := s.deps.Agent.Run(ctx, chat.Deps{UserID: userID, ConversationID: convID}, history, req.Content, nil, sink, tools, spec)
 	if err != nil {
-		s.persistFailure(ctx, userID, convID, err, sink)
+		s.persistFailure(ctx, userID, convID, spec, err, sink)
 		return
 	}
-	s.settleRun(ctx, userID, convID, outcome, sink)
+	s.settleRun(ctx, userID, convID, spec, outcome, sink)
+}
+
+// runSpecFor resolves a conversation's model settings into a RunSpec: an
+// unset model falls back to the server default (first catalog entry with a
+// configured key), an empty system prompt to the built-in one (applied at
+// agent build), and nil temperature to the provider default.
+func (s *Server) runSpecFor(conv storage.Conversation) chat.RunSpec {
+	spec := chat.RunSpec{Model: conv.Model, Temperature: conv.Temperature, SystemPrompt: conv.SystemPrompt}
+	if spec.Model == "" {
+		spec.Model = chat.DefaultModel(s.deps.ModelKeys).ID
+	}
+	return spec
 }
 
 // userTools builds the caller's enabled golem tools. A nil Tools store (tests
@@ -180,23 +194,23 @@ func (s *Server) toolEnv() chat.ToolEnv {
 
 // settleRun dispatches a finished run: approval pauses park the conversation,
 // everything else finishes normally.
-func (s *Server) settleRun(ctx context.Context, userID, convID string, outcome chat.Outcome, sink *sseSink) {
+func (s *Server) settleRun(ctx context.Context, userID, convID string, spec chat.RunSpec, outcome chat.Outcome, sink *sseSink) {
 	if len(outcome.Pending) > 0 {
-		s.pauseRun(ctx, userID, convID, outcome, sink)
+		s.pauseRun(ctx, userID, convID, spec, outcome, sink)
 		return
 	}
-	s.finishRun(ctx, userID, convID, outcome, sink)
+	s.finishRun(ctx, userID, convID, spec, outcome, sink)
 }
 
 // pauseRun persists the paused conversation (history through the unanswered
 // tool call, usage, pending calls) and tells the client what needs a
 // decision. No done event follows — the stream ends waiting for approvals.
-func (s *Server) pauseRun(ctx context.Context, userID, convID string, outcome chat.Outcome, sink *sseSink) {
-	idMap, err := s.persistRunMessages(ctx, userID, convID, outcome.Messages, outcome.Usage, outcome.Requests, false, nil)
+func (s *Server) pauseRun(ctx context.Context, userID, convID string, spec chat.RunSpec, outcome chat.Outcome, sink *sseSink) {
+	idMap, err := s.persistRunMessages(ctx, userID, convID, spec.Model, outcome.Messages, outcome.Usage, outcome.Requests, false, nil)
 	if err != nil {
 		s.deps.Log.Error("persist paused messages", "err", err)
 	}
-	if err := s.deps.Usage.Add(ctx, usageEventFor(userID, convID, s.deps.Cfg.GeminiModel, outcome.Usage, outcome.Requests, s.deps.Rates)); err != nil {
+	if err := s.deps.Usage.Add(ctx, usageEventFor(userID, convID, spec.Model, outcome.Usage, outcome.Requests, s.deps.Rates)); err != nil {
 		s.deps.Log.Error("record usage", "err", err)
 	}
 	calls := make([]storage.PendingToolCall, 0, len(outcome.Pending))
@@ -224,7 +238,7 @@ func (s *Server) pauseRun(ctx context.Context, userID, convID string, outcome ch
 // persistFailure uses golem v0.7.1 partial evidence: whatever completed is
 // kept, marked truncated. Every partial message persists so the next turn's
 // history — including any completed tool exchanges — replays faithfully.
-func (s *Server) persistFailure(ctx context.Context, userID, convID string, runErr error, sink *sseSink) {
+func (s *Server) persistFailure(ctx context.Context, userID, convID string, spec chat.RunSpec, runErr error, sink *sseSink) {
 	clientGone := errors.Is(runErr, context.Canceled) || errors.Is(runErr, context.DeadlineExceeded)
 	var runError *golem.RunError
 	_ = errors.As(runErr, &runError)
@@ -234,10 +248,10 @@ func (s *Server) persistFailure(ctx context.Context, userID, convID string, runE
 		partial = runError.Partial
 	}
 	if partial != nil && len(partial.Messages) > 0 {
-		if _, err := s.persistRunMessages(ctx, userID, convID, partial.Messages, partial.Usage, partial.Requests, true, nil); err != nil {
+		if _, err := s.persistRunMessages(ctx, userID, convID, spec.Model, partial.Messages, partial.Usage, partial.Requests, true, nil); err != nil {
 			s.deps.Log.Error("persist partial", "err", err)
 		}
-		_ = s.deps.Usage.Add(ctx, usageEventFor(userID, convID, s.deps.Cfg.GeminiModel, partial.Usage, partial.Requests, s.deps.Rates))
+		_ = s.deps.Usage.Add(ctx, usageEventFor(userID, convID, spec.Model, partial.Usage, partial.Requests, s.deps.Rates))
 	}
 	_ = s.deps.Convos.Touch(ctx, convID)
 	if clientGone {
@@ -265,7 +279,7 @@ func (s *Server) persistFailure(ctx context.Context, userID, convID string, runE
 // persisted ones (the approval pause needs it to key pending rows). A tool
 // result is matched to the most recent unanswered raw ID, mirroring the
 // emission order golem guarantees.
-func (s *Server) persistRunMessages(ctx context.Context, userID, convID string, msgs []model.Message, usage model.Usage, requests int, truncated bool, skip map[string]bool) (map[string]string, error) {
+func (s *Server) persistRunMessages(ctx context.Context, userID, convID, modelStr string, msgs []model.Message, usage model.Usage, requests int, truncated bool, skip map[string]bool) (map[string]string, error) {
 	lastAssistant := -1
 	for i, m := range msgs {
 		if m.Role == model.RoleAssistant {
@@ -316,6 +330,7 @@ func (s *Server) persistRunMessages(ctx context.Context, userID, convID string, 
 			row.OutputTokens = usage.OutputTokens
 			row.Requests = requests
 			row.CostMicros = s.deps.Rates.ChatCostMicros(usage.InputTokens, usage.OutputTokens)
+			row.Model = modelStr
 		}
 		if err := s.deps.Msgs.Add(ctx, row); err != nil {
 			return idMap, err
@@ -348,11 +363,11 @@ func rawOf(idMap map[string]string, persisted string) string {
 	return ""
 }
 
-func (s *Server) finishRun(ctx context.Context, userID, convID string, outcome chat.Outcome, sink *sseSink) {
-	if _, err := s.persistRunMessages(ctx, userID, convID, outcome.Messages, outcome.Usage, outcome.Requests, false, nil); err != nil {
+func (s *Server) finishRun(ctx context.Context, userID, convID string, spec chat.RunSpec, outcome chat.Outcome, sink *sseSink) {
+	if _, err := s.persistRunMessages(ctx, userID, convID, spec.Model, outcome.Messages, outcome.Usage, outcome.Requests, false, nil); err != nil {
 		s.deps.Log.Error("persist assistant messages", "err", err)
 	}
-	if err := s.deps.Usage.Add(ctx, usageEventFor(userID, convID, s.deps.Cfg.GeminiModel, outcome.Usage, outcome.Requests, s.deps.Rates)); err != nil {
+	if err := s.deps.Usage.Add(ctx, usageEventFor(userID, convID, spec.Model, outcome.Usage, outcome.Requests, s.deps.Rates)); err != nil {
 		s.deps.Log.Error("record usage", "err", err)
 	}
 	_ = s.deps.Convos.Touch(ctx, convID)
@@ -369,6 +384,7 @@ func (s *Server) finishRun(ctx context.Context, userID, convID string, outcome c
 		"outputTokens": outcome.Usage.OutputTokens,
 		"requests":     outcome.Requests,
 		"costUsd":      math.Round(float64(cost)/10) / 1e5, // 5 decimal places
+		"model":        spec.Model,
 	})
 }
 

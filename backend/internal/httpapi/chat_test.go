@@ -25,6 +25,20 @@ import (
 
 const testSecret = "0123456789abcdef0123456789abcdef"
 
+// newTestAgent builds the chat Agent over a registry that serves m for
+// every model, so handler tests run offline against scripted responses.
+func newTestAgent(t *testing.T, m model.StreamingModel) *chat.Agent {
+	t.Helper()
+	reg := chat.NewModelRegistryWithFactory(chat.ProviderKeys{Gemini: "test"}, func(string, string, *float64) (model.StreamingModel, error) {
+		return m, nil
+	})
+	agent, err := chat.New(reg, golem.UsageLimit{}, chat.DefaultToolEnv())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return agent
+}
+
 // newHandlerServer wires NewServer with the scripted-model agent and the
 // in-memory fakes; it also mints a bearer token for user u-1.
 func newHandlerServer(t *testing.T, agent *chat.Agent, convs ConvoStore, msgs MsgStore, usage UsageStore) (http.Handler, string) {
@@ -42,16 +56,17 @@ func newHandlerServerWithTools(t *testing.T, agent *chat.Agent, convs ConvoStore
 		t.Fatal(err)
 	}
 	h := NewServer(ServerDeps{
-		Cfg:    config.Config{},
-		Log:    slog.New(slog.NewTextHandler(io.Discard, nil)),
-		Auth:   authtest.NewService(testSecret),
-		Tokens: tm,
-		Convos: convs,
-		Msgs:   msgs,
-		Usage:  usage,
-		Tools:  tools,
-		Agent:  agent,
-		Rates:  cost.Rates{ChatInputPerM: 0.3, ChatOutputPerM: 2.5},
+		Cfg:       config.Config{},
+		Log:       slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Auth:      authtest.NewService(testSecret),
+		Tokens:    tm,
+		Convos:    convs,
+		Msgs:      msgs,
+		Usage:     usage,
+		Tools:     tools,
+		Agent:     agent,
+		Rates:     cost.Rates{ChatInputPerM: 0.3, ChatOutputPerM: 2.5},
+		ModelKeys: chat.ProviderKeys{Gemini: "test"},
 	})
 	token, _, err := tm.Issue("u-1", time.Now())
 	if err != nil {
@@ -206,10 +221,7 @@ func TestSendMessageStreamsAndPersists(t *testing.T) {
 		Message: model.Message{Role: model.RoleAssistant, Content: "Hi there!"},
 		Usage:   model.Usage{InputTokens: 12, OutputTokens: 7},
 	})
-	agent, err := chat.New(m, golem.UsageLimit{}, chat.DefaultToolEnv())
-	if err != nil {
-		t.Fatal(err)
-	}
+	agent := newTestAgent(t, m)
 	msgs := newFakeMsgs()
 	convs := newFakeConvos(msgs)
 	usage := newFakeUsage()
@@ -247,10 +259,7 @@ func TestFailedRunEmitsErrorEvent(t *testing.T) {
 		_ = testmodel.Emit(onDelta, model.Delta{Content: "partial "})
 		return model.Response{}, errors.New("boom")
 	})
-	agent, err := chat.New(m, golem.UsageLimit{}, chat.DefaultToolEnv())
-	if err != nil {
-		t.Fatal(err)
-	}
+	agent := newTestAgent(t, m)
 	msgs := newFakeMsgs()
 	convs := newFakeConvos(msgs)
 	usage := newFakeUsage()

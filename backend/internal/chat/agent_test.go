@@ -69,8 +69,15 @@ func deferringTool(name string, onApproved func() string) tool.Tool[Deps] {
 	})
 }
 
+// testSpec is the RunSpec every chat-package test runs under: the fake
+// registry serves the scripted model for any catalog model ID.
+var testSpec = RunSpec{Model: "gemini-2.5-flash"}
+
 func newTestAgent(m *testmodel.Scripted) *Agent {
-	a, err := New(m, golem.UsageLimit{}, DefaultToolEnv())
+	reg := NewModelRegistryWithFactory(ProviderKeys{Gemini: "test"}, func(string, string, *float64) (model.StreamingModel, error) {
+		return m, nil
+	})
+	a, err := New(reg, golem.UsageLimit{}, DefaultToolEnv())
 	if err != nil {
 		panic(err)
 	}
@@ -81,7 +88,7 @@ func TestRunStreamsAndCounts(t *testing.T) {
 	m := testmodel.New().Respond(respond("hello "))
 	a := newTestAgent(m)
 	sink := &recordingSink{}
-	out, err := a.Run(context.Background(), Deps{UserID: "u", ConversationID: "c"}, nil, "hi", sink, nil)
+	out, err := a.Run(context.Background(), Deps{UserID: "u", ConversationID: "c"}, nil, "hi", nil, sink, nil, testSpec)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -98,9 +105,12 @@ func TestRunStreamsAndCounts(t *testing.T) {
 
 func TestUsageLimitSurfacesStage(t *testing.T) {
 	m := testmodel.New().Respond(respond("big"))
-	a, _ := New(m, golem.UsageLimit{TotalTokens: 3}, DefaultToolEnv())
+	reg := NewModelRegistryWithFactory(ProviderKeys{Gemini: "test"}, func(string, string, *float64) (model.StreamingModel, error) {
+		return m, nil
+	})
+	a, _ := New(reg, golem.UsageLimit{TotalTokens: 3}, DefaultToolEnv())
 	sink := &recordingSink{}
-	_, err := a.Run(context.Background(), Deps{}, nil, "hi", sink, nil)
+	_, err := a.Run(context.Background(), Deps{}, nil, "hi", nil, sink, nil, testSpec)
 	var runErr *golem.RunError
 	if !errors.As(err, &runErr) || runErr.Stage != golem.StageUsage {
 		t.Fatalf("expected usage-stage RunError, got %v", err)
@@ -113,8 +123,8 @@ func TestRunExecutesToolCalls(t *testing.T) {
 		Respond(respond("done"))
 	a := newTestAgent(m)
 	sink := &recordingSink{}
-	out, err := a.Run(context.Background(), Deps{}, nil, "temp?", sink,
-		[]tool.Tool[Deps]{stubTool("get_temp", "21C")})
+	out, err := a.Run(context.Background(), Deps{}, nil, "temp?", nil, sink,
+		[]tool.Tool[Deps]{stubTool("get_temp", "21C")}, testSpec)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -147,8 +157,8 @@ func TestRunPausesOnApproval(t *testing.T) {
 		Respond(toolCallResponse("call-1", "risky", json.RawMessage(`{}`)))
 	a := newTestAgent(m)
 	sink := &recordingSink{}
-	out, err := a.Run(context.Background(), Deps{}, nil, "go", sink,
-		[]tool.Tool[Deps]{deferringTool("risky", func() string { return "acted" })})
+	out, err := a.Run(context.Background(), Deps{}, nil, "go", nil, sink,
+		[]tool.Tool[Deps]{deferringTool("risky", func() string { return "acted" })}, testSpec)
 	if err != nil {
 		t.Fatalf("paused run must succeed: %v", err)
 	}
@@ -176,7 +186,7 @@ func TestRunDeferredResumes(t *testing.T) {
 	}
 	out, err := a.RunDeferred(context.Background(), Deps{}, paused,
 		golem.DeferredResults{Approvals: map[string]golem.Approval{"call-1": {Approved: true}}},
-		sink, []tool.Tool[Deps]{deferringTool("risky", func() string { return "acted" })})
+		sink, []tool.Tool[Deps]{deferringTool("risky", func() string { return "acted" })}, testSpec)
 	if err != nil {
 		t.Fatalf("RunDeferred: %v", err)
 	}
@@ -198,7 +208,7 @@ func TestRunDeferredDenial(t *testing.T) {
 	}
 	out, err := a.RunDeferred(context.Background(), Deps{}, paused,
 		golem.DeferredResults{Approvals: map[string]golem.Approval{"call-1": {Approved: false, Reason: "user denied"}}},
-		sink, []tool.Tool[Deps]{deferringTool("risky", func() string { return "acted" })})
+		sink, []tool.Tool[Deps]{deferringTool("risky", func() string { return "acted" })}, testSpec)
 	if err != nil {
 		t.Fatalf("RunDeferred: %v", err)
 	}
@@ -210,5 +220,26 @@ func TestRunDeferredDenial(t *testing.T) {
 		if msg.Role == model.RoleTool && msg.ToolCallID == "call-1" && msg.Content == "acted" {
 			t.Fatal("denied call executed its side effect")
 		}
+	}
+}
+
+func TestRunUsesSpecSystemPrompt(t *testing.T) {
+	var got model.Request
+	m := testmodel.StreamFunc(func(_ context.Context, req model.Request, onDelta func(model.Delta) error) (model.Response, error) {
+		got = req
+		_ = testmodel.Emit(onDelta, model.Delta{Content: "ok"})
+		return respond("ok"), nil
+	})
+	reg := NewModelRegistryWithFactory(ProviderKeys{Gemini: "test"}, func(string, string, *float64) (model.StreamingModel, error) {
+		return m, nil
+	})
+	a, _ := New(reg, golem.UsageLimit{}, DefaultToolEnv())
+	const pirate = "Answer like a pirate."
+	sink := &recordingSink{}
+	if _, err := a.Run(context.Background(), Deps{}, nil, "hi", nil, sink, nil, RunSpec{Model: "gemini-2.5-flash", SystemPrompt: pirate}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(got.Messages) == 0 || got.Messages[0].Role != model.RoleSystem || got.Messages[0].Content != pirate {
+		t.Fatalf("custom system prompt not applied: %+v", got.Messages)
 	}
 }

@@ -17,7 +17,6 @@ import (
 	"github.com/abubakarsiddik31/golem-chatbot/internal/cost"
 	"github.com/abubakarsiddik31/golem-chatbot/internal/httpapi"
 	"github.com/abubakarsiddik31/golem-chatbot/internal/storage"
-	golemgemini "github.com/abubakarsiddik31/golem/providers/gemini"
 )
 
 func main() {
@@ -54,14 +53,9 @@ func main() {
 		os.Exit(1)
 	}
 
-	gemini, err := golemgemini.New(golemgemini.Config{
-		APIKey: cfg.GeminiAPIKey, Model: cfg.GeminiModel, BaseURL: cfg.GeminiBaseURL,
-	})
-	if err != nil {
-		log.Error("gemini", "err", err)
-		os.Exit(1)
-	}
-	agent, err := chat.New(gemini, golem.UsageLimit{Requests: 12, TotalTokens: 100_000}, chat.ToolEnv{
+	modelKeys := chat.ProviderKeys{Gemini: cfg.GeminiAPIKey, GeminiBaseURL: cfg.GeminiBaseURL}
+	registry := chat.NewModelRegistry(modelKeys)
+	agent, err := chat.New(registry, golem.UsageLimit{Requests: 12, TotalTokens: 100_000}, chat.ToolEnv{
 		HTTPTimeout:       cfg.ToolHTTPTimeout,
 		HTTPMaxBytes:      cfg.ToolHTTPMaxBytes,
 		ResultMaxBytes:    cfg.ToolResultMaxBytes,
@@ -73,17 +67,18 @@ func main() {
 	}
 
 	handler := httpapi.NewServer(httpapi.ServerDeps{
-		Cfg:     cfg,
-		Log:     log,
-		Auth:    svc,
-		Tokens:  tokens,
-		Convos:  storage.NewConversations(pool),
-		Msgs:    storage.NewMessages(pool),
-		Usage:   storage.NewUsage(pool),
-		Tools:   storage.NewTools(pool),
-		Pending: storage.NewPendingCalls(pool),
-		Agent:   agent,
-		Rates:   cost.Rates{ChatInputPerM: cfg.ChatInputRate, ChatOutputPerM: cfg.ChatOutputRate},
+		Cfg:       cfg,
+		Log:       log,
+		Auth:      svc,
+		Tokens:    tokens,
+		Convos:    storage.NewConversations(pool),
+		Msgs:      storage.NewMessages(pool),
+		Usage:     storage.NewUsage(pool),
+		Tools:     storage.NewTools(pool),
+		Pending:   storage.NewPendingCalls(pool),
+		Agent:     agent,
+		Rates:     cost.Rates{ChatInputPerM: cfg.ChatInputRate, ChatOutputPerM: cfg.ChatOutputRate},
+		ModelKeys: modelKeys,
 	})
 	srv := &http.Server{Addr: ":" + cfg.Port, Handler: handler, ReadHeaderTimeout: 10 * time.Second}
 

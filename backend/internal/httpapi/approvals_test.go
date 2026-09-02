@@ -9,8 +9,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/abubakarsiddik31/golem"
-	"github.com/abubakarsiddik31/golem-chatbot/internal/chat"
 	"github.com/abubakarsiddik31/golem-chatbot/internal/storage"
 	"github.com/abubakarsiddik31/golem/model"
 	"github.com/abubakarsiddik31/golem/testmodel"
@@ -27,11 +25,10 @@ func pausedConversation(t *testing.T, gatedHits *int) (*fakeConvos, *fakeMsgs, *
 	}))
 	t.Cleanup(gated.Close)
 
-	agent, _ := chat.New(testmodel.New().
+	agent := newTestAgent(t, testmodel.New().
 		Respond(toolCallResponse("call-1", "get_weather", json.RawMessage(`{"city":"x"}`))).
 		Respond(model.Response{Message: model.Message{Role: model.RoleAssistant, Content: "done after approval"},
-			Usage: model.Usage{InputTokens: 4, OutputTokens: 2}}),
-		golem.UsageLimit{}, chat.DefaultToolEnv())
+			Usage: model.Usage{InputTokens: 4, OutputTokens: 2}}))
 
 	msgs := newFakeMsgs()
 	convs := newFakeConvos(msgs)
@@ -108,10 +105,9 @@ func TestApprovalsResume(t *testing.T) {
 // two runs in one conversation both synthesize "call-1". The earlier run's
 // call was answered; the paused run's call must still be resumable.
 func TestApprovalsResumeWithCollidingCallIDs(t *testing.T) {
-	agent, _ := chat.New(testmodel.New().
+	agent := newTestAgent(t, testmodel.New().
 		Respond(model.Response{Message: model.Message{Role: model.RoleAssistant, Content: "hn results"},
-			Usage: model.Usage{InputTokens: 4, OutputTokens: 2}}),
-		golem.UsageLimit{}, chat.DefaultToolEnv())
+			Usage: model.Usage{InputTokens: 4, OutputTokens: 2}}))
 	msgs := newFakeMsgs()
 	convs := newFakeConvos(msgs)
 	pending := &fakePending{}
@@ -225,9 +221,9 @@ func TestApprovalsValidation(t *testing.T) {
 func TestApprovalsNoPending(t *testing.T) {
 	msgs := newFakeMsgs()
 	convs := newFakeConvos(msgs)
-	agent, _ := chat.New(testmodel.New().Respond(model.Response{
+	agent := newTestAgent(t, testmodel.New().Respond(model.Response{
 		Message: model.Message{Role: model.RoleAssistant, Content: "hi"},
-	}), golem.UsageLimit{}, chat.DefaultToolEnv())
+	}))
 	h, token := newHandlerServerFull(t, agent, convs, msgs, newFakeUsage(), newFakeToolStore(), &fakePending{})
 	conv := convs.mustCreate("u-1", "")
 

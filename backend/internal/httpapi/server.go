@@ -13,17 +13,18 @@ import (
 // ServerDeps carries the wired collaborators. Stores are narrow interfaces
 // (chat.go) so handler tests run offline; *storage.* types satisfy them.
 type ServerDeps struct {
-	Cfg     config.Config
-	Log     *slog.Logger
-	Auth    *auth.Service
-	Tokens  *auth.TokenMaker
-	Convos  ConvoStore
-	Msgs    MsgStore
-	Usage   UsageStore
-	Tools   ToolStore
-	Pending PendingStore
-	Agent   *chat.Agent
-	Rates   cost.Rates
+	Cfg       config.Config
+	Log       *slog.Logger
+	Auth      *auth.Service
+	Tokens    *auth.TokenMaker
+	Convos    ConvoStore
+	Msgs      MsgStore
+	Usage     UsageStore
+	Tools     ToolStore
+	Pending   PendingStore
+	Agent     *chat.Agent
+	Rates     cost.Rates
+	ModelKeys chat.ProviderKeys
 }
 
 type Server struct {
