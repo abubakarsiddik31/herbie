@@ -34,6 +34,25 @@ type Config struct {
 	ToolResultMaxBytes    int64
 	ToolAllowPrivateHosts bool
 	MaxToolsPerUser       int
+
+	// RAGConfig gates the retrieval stack. Enabled is an explicit opt-in
+	// so a running stack never requires the rag compose profile.
+	RAG RAGConfig
+}
+
+type RAGConfig struct {
+	Enabled            bool
+	WeaviateURL        string
+	MinIOEndpoint      string
+	MinIOAccessKey     string
+	MinIOSecretKey     string
+	MinIOUseSSL        bool
+	DocumentsBucket    string
+	EmbeddingModel     string
+	EmbeddingDims      int
+	EmbedBatchSize     int
+	EmbeddingInputRate float64
+	MaxUploadBytes     int64
 }
 
 // dotenvPaths are where a repo-root .env may sit relative to the working
@@ -64,6 +83,18 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	dims, err := envInt("EMBEDDING_DIMS", 768)
+	if err != nil {
+		return Config{}, err
+	}
+	batch, err := envInt("EMBEDDING_BATCH", 96)
+	if err != nil {
+		return Config{}, err
+	}
+	embedRate, err := envFloat("EMBEDDING_INPUT_USD_PER_MTOK", 0.15)
+	if err != nil {
+		return Config{}, err
+	}
 	cfg := Config{
 		Port:             env("APP_PORT", "8080"),
 		DatabaseURL:      os.Getenv("DATABASE_URL"),
@@ -84,6 +115,21 @@ func Load() (Config, error) {
 		ToolResultMaxBytes:    envInt64("TOOL_RESULT_MAX_BYTES", 32<<10),
 		ToolAllowPrivateHosts: envBool("TOOL_ALLOW_PRIVATE_HOSTS", false),
 		MaxToolsPerUser:       maxTools,
+
+		RAG: RAGConfig{
+			Enabled:            envBool("RAG_ENABLED", false),
+			WeaviateURL:        env("WEAVIATE_URL", "http://localhost:8080"),
+			MinIOEndpoint:      env("MINIO_ENDPOINT", "localhost:9000"),
+			MinIOAccessKey:     env("MINIO_ACCESS_KEY", "golem"),
+			MinIOSecretKey:     env("MINIO_SECRET_KEY", "golem1234"),
+			MinIOUseSSL:        envBool("MINIO_USE_SSL", false),
+			DocumentsBucket:    env("DOCUMENTS_BUCKET", "golem-chatbot-documents"),
+			EmbeddingModel:     env("EMBEDDING_MODEL", "gemini-embedding-001"),
+			EmbeddingDims:      dims,
+			EmbedBatchSize:     batch,
+			EmbeddingInputRate: embedRate,
+			MaxUploadBytes:     envInt64("MAX_UPLOAD_BYTES", 20<<20),
+		},
 	}
 	var errs []error
 	if cfg.DatabaseURL == "" {

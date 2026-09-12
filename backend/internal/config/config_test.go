@@ -125,3 +125,60 @@ func TestLoadRejectsMissingProviderKeys(t *testing.T) {
 		t.Fatal("expected error when no provider key is configured")
 	}
 }
+
+func TestRAGDefaultsDisabled(t *testing.T) {
+	os.Unsetenv("RAG_ENABLED")
+	t.Setenv("DATABASE_URL", "postgres://localhost/gc")
+	t.Setenv("JWT_SECRET", "0123456789abcdef0123456789abcdef")
+	t.Setenv("GEMINI_API_KEY", "k")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.RAG.Enabled {
+		t.Fatal("RAG must default to disabled")
+	}
+	if cfg.RAG.EmbeddingModel != "gemini-embedding-001" {
+		t.Fatalf("EmbeddingModel = %q", cfg.RAG.EmbeddingModel)
+	}
+	if cfg.RAG.EmbeddingDims != 768 || cfg.RAG.EmbedBatchSize != 96 {
+		t.Fatalf("dims/batch: %d %d", cfg.RAG.EmbeddingDims, cfg.RAG.EmbedBatchSize)
+	}
+	if cfg.RAG.MaxUploadBytes != 20<<20 {
+		t.Fatalf("MaxUploadBytes = %d", cfg.RAG.MaxUploadBytes)
+	}
+	if cfg.RAG.EmbeddingInputRate != 0.15 {
+		t.Fatalf("EmbeddingInputRate = %f", cfg.RAG.EmbeddingInputRate)
+	}
+	if cfg.RAG.DocumentsBucket != "golem-chatbot-documents" || cfg.RAG.WeaviateURL != "http://localhost:8080" {
+		t.Fatalf("infra defaults: %+v", cfg.RAG)
+	}
+}
+
+func TestRAGEnabledParsesEnv(t *testing.T) {
+	t.Setenv("RAG_ENABLED", "true")
+	t.Setenv("EMBEDDING_MODEL", "gemini-embedding-001")
+	t.Setenv("EMBEDDING_DIMS", "768")
+	t.Setenv("MINIO_ENDPOINT", "localhost:9000")
+	t.Setenv("DATABASE_URL", "postgres://localhost/gc")
+	t.Setenv("JWT_SECRET", "0123456789abcdef0123456789abcdef")
+	t.Setenv("GEMINI_API_KEY", "k")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.RAG.Enabled || cfg.RAG.MinIOEndpoint != "localhost:9000" {
+		t.Fatalf("env not parsed: %+v", cfg.RAG)
+	}
+}
+
+func TestRAGBadDimsFails(t *testing.T) {
+	t.Setenv("RAG_ENABLED", "true")
+	t.Setenv("EMBEDDING_DIMS", "zero")
+	t.Setenv("DATABASE_URL", "postgres://localhost/gc")
+	t.Setenv("JWT_SECRET", "0123456789abcdef0123456789abcdef")
+	t.Setenv("GEMINI_API_KEY", "k")
+	if _, err := Load(); err == nil {
+		t.Fatal("want error for bad dims")
+	}
+}
