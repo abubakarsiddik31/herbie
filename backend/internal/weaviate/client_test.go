@@ -198,14 +198,17 @@ func TestHybridSearch(t *testing.T) {
 	if len(got) != 2 || got[0].Chunk.Content != "alpha" || got[0].Score != 0.87 || got[1].Score != 0.10 {
 		t.Fatalf("rows: %+v", got)
 	}
-	gql := rec.bodies[0]
+	var sent struct{ Query string }
+	if err := json.Unmarshal([]byte(rec.bodies[0]), &sent); err != nil {
+		t.Fatal(err)
+	}
 	for _, want := range []string{
 		`hybrid:{query:"say \"hello\" world" alpha:0.5}`,
 		`path:["user_id"] operator:Equal valueText:"u1"`,
 		`limit:5`,
 	} {
-		if !strings.Contains(gql, want) {
-			t.Fatalf("graphql missing %q: %s", want, gql)
+		if !strings.Contains(sent.Query, want) {
+			t.Fatalf("graphql missing %q: %s", want, sent.Query)
 		}
 	}
 }
