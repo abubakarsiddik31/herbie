@@ -126,13 +126,13 @@ func TestUsageSummaryEmptyIsJSONNotNull(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatalf("decode: %v (%s)", err, rec.Body.String())
 	}
-	for _, key := range []string{"totals", "daily"} {
+	for _, key := range []string{"totals", "daily", "documents"} {
 		raw, ok := got[key]
 		if !ok || string(raw) != "[]" {
 			t.Fatalf("key %q must be an empty JSON array, got %q (present=%v)", key, raw, ok)
 		}
 	}
-	if len(got) != 2 {
+	if len(got) != 3 {
 		t.Fatalf("unexpected keys: %v", got)
 	}
 }
