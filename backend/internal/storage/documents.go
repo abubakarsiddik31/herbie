@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -41,10 +42,15 @@ func scanDocument(row pgx.Row) (Document, error) {
 }
 
 func (d *Documents) Create(ctx context.Context, doc Document) (Document, error) {
+	// An empty ID gets a database-generated one; the HTTP layer supplies
+	// its own so the object key can carry the id before insert.
+	if doc.ID == "" {
+		doc.ID = uuid.NewString()
+	}
 	row := d.pool.QueryRow(ctx,
-		`INSERT INTO documents (user_id, object_key, filename, mime, size_bytes) VALUES ($1, $2, $3, $4, $5)
+		`INSERT INTO documents (id, user_id, object_key, filename, mime, size_bytes) VALUES ($1, $2, $3, $4, $5, $6)
 		 RETURNING `+documentColumns,
-		doc.UserID, doc.ObjectKey, doc.Filename, doc.Mime, doc.SizeBytes)
+		doc.ID, doc.UserID, doc.ObjectKey, doc.Filename, doc.Mime, doc.SizeBytes)
 	out, err := scanDocument(row)
 	if err != nil {
 		return Document{}, fmt.Errorf("create document: %w", err)

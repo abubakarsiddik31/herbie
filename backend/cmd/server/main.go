@@ -75,6 +75,9 @@ func main() {
 	// The RAG stack boots only when explicitly enabled: embedder, vector
 	// store, and object store all need the rag compose profile running.
 	var ragSearch httpapi.RagSearchFunc
+	var ragRunner httpapi.RagRunner
+	var vectors rag.VectorStore
+	var objects storage.ObjectStore
 	if cfg.RAG.Enabled {
 		if cfg.GeminiAPIKey == "" {
 			log.Error("rag", "err", "RAG_ENABLED requires GEMINI_API_KEY for embeddings")
@@ -90,14 +93,17 @@ func main() {
 			log.Error("rag weaviate", "err", err)
 			os.Exit(1)
 		}
-		objects, err := storage.NewMinIOStore(cfg.RAG.MinIOEndpoint, cfg.RAG.MinIOAccessKey,
+		objs, err := storage.NewMinIOStore(cfg.RAG.MinIOEndpoint, cfg.RAG.MinIOAccessKey,
 			cfg.RAG.MinIOSecretKey, cfg.RAG.DocumentsBucket, cfg.RAG.MinIOUseSSL)
 		if err != nil {
 			log.Error("rag minio", "err", err)
 			os.Exit(1)
 		}
-		svc := rag.NewService(embedder, vs, objects)
+		svc := rag.NewService(embedder, vs, objs)
 		ragSearch = svc.Search
+		ragRunner = svc
+		vectors = vs
+		objects = objs
 		log.Info("rag enabled", "model", cfg.RAG.EmbeddingModel, "weaviate", cfg.RAG.WeaviateURL, "minio", cfg.RAG.MinIOEndpoint)
 	}
 
@@ -129,6 +135,10 @@ func main() {
 		Rates:     rates,
 		ModelKeys: modelKeys,
 		RagSearch: ragSearch,
+		RAG:       ragRunner,
+		Docs:      storage.NewDocuments(pool),
+		Vectors:   vectors,
+		Objects:   objects,
 	})
 	srv := &http.Server{Addr: ":" + cfg.Port, Handler: handler, ReadHeaderTimeout: 10 * time.Second}
 

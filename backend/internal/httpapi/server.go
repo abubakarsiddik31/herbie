@@ -10,6 +10,7 @@ import (
 	"github.com/abubakarsiddik31/golem-chatbot/internal/config"
 	"github.com/abubakarsiddik31/golem-chatbot/internal/cost"
 	"github.com/abubakarsiddik31/golem-chatbot/internal/rag"
+	"github.com/abubakarsiddik31/golem-chatbot/internal/storage"
 	"github.com/abubakarsiddik31/golem/model"
 )
 
@@ -32,6 +33,12 @@ type ServerDeps struct {
 	// embedding's exact usage for metering. Nil = RAG disabled: no
 	// search tool is registered and the documents API answers 503.
 	RagSearch RagSearchFunc
+	// The retrieval stack's collaborators for the documents API. All nil
+	// when RAG is disabled.
+	RAG     RagRunner
+	Docs    DocStore
+	Vectors rag.VectorStore
+	Objects storage.ObjectStore
 }
 
 // RagSearchFunc is rag.Service.Search narrowed to what the chat path
@@ -79,6 +86,9 @@ func NewServer(deps ServerDeps) http.Handler {
 	authed.HandleFunc("PATCH /api/tools/{id}", s.handlePatchTool)
 	authed.HandleFunc("DELETE /api/tools/{id}", s.handleDeleteTool)
 	authed.HandleFunc("GET /api/usage/summary", s.handleUsageSummary)
+	authed.HandleFunc("POST /api/documents", s.handleUploadDocument)
+	authed.HandleFunc("GET /api/documents", s.handleListDocuments)
+	authed.HandleFunc("DELETE /api/documents/{id}", s.handleDeleteDocument)
 	s.mux.Handle("/api/", requireAuth(deps.Tokens, authed))
 
 	return withCORS(deps.Cfg.FrontendOrigin, logRequests(deps.Log, s.mux))
