@@ -253,6 +253,10 @@ table "usage_events" {
     type = uuid
     null = true
   }
+  column "document_id" {
+    type = uuid
+    null = true
+  }
   column "input_tokens" {
     type    = integer
     null    = false
@@ -294,6 +298,11 @@ table "usage_events" {
   foreign_key "usage_events_conversation_id_fkey" {
     columns     = [column.conversation_id]
     ref_columns = [table.conversations.column.id]
+    on_delete   = SET_NULL
+  }
+  foreign_key "usage_events_document_id_fkey" {
+    columns     = [column.document_id]
+    ref_columns = [table.documents.column.id]
     on_delete   = SET_NULL
   }
   index "idx_usage_events_user_time" {
@@ -436,5 +445,64 @@ table "pending_tool_calls" {
   }
   index "idx_pending_tool_calls_conversation" {
     columns = [column.conversation_id, column.status]
+  }
+}
+
+table "documents" {
+  schema = schema.public
+  column "id" {
+    type    = uuid
+    null    = false
+    default = sql("gen_random_uuid()")
+  }
+  column "user_id" {
+    type = uuid
+    null = false
+  }
+  column "object_key" {
+    type = text
+    null = false
+  }
+  column "filename" {
+    type = text
+    null = false
+  }
+  column "mime" {
+    type = text
+    null = false
+  }
+  column "size_bytes" {
+    type = bigint
+    null = false
+  }
+  column "status" {
+    type    = text
+    null    = false
+    default = "processing"
+  }
+  column "error" {
+    type = text
+    null = true
+  }
+  column "chunk_count" {
+    type    = integer
+    null    = false
+    default = 0
+  }
+  column "created_at" {
+    type    = timestamptz
+    null    = false
+    default = sql("now()")
+  }
+  primary_key {
+    columns = [column.id]
+  }
+  foreign_key "documents_user_id_fkey" {
+    columns     = [column.user_id]
+    ref_columns = [table.users.column.id]
+    on_delete   = CASCADE
+  }
+  index "idx_documents_user" {
+    columns = [column.user_id, column.created_at]
   }
 }
