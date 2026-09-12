@@ -25,13 +25,14 @@ services:
       QUERY_DEFAULTS_LIMIT: 20
       CLUSTER_HOSTNAME: node1
     ports:
-      - "8080:8080"
+      # Host 8081: the backend binds host 8080, so Weaviate must not collide.
+      - "8081:8080"
       - "50051:50051"
     volumes:
       - weaviate_data:/var/lib/weaviate
 
   minio:
-    image: minio/minio:latest
+    image: quay.io/minio/minio:latest
     profiles: [rag]
     command: server /data --console-address ":9001"
     environment:
@@ -44,7 +45,7 @@ services:
       - minio_data:/data
 
   minio-init:
-    image: minio/mc:latest
+    image: quay.io/minio/mc:latest
     profiles: [rag]
     depends_on: [minio]
     entrypoint: >

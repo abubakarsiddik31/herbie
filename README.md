@@ -121,7 +121,7 @@ RAG_ENABLED=true
 | Env var | Default | Purpose |
 |---|---|---|
 | `RAG_ENABLED` | `false` | Master switch; requires `GEMINI_API_KEY` |
-| `WEAVIATE_URL` | `http://localhost:8080` | Vector store |
+| `WEAVIATE_URL` | `http://localhost:8081` | Vector store (compose maps host **8081** — the backend owns 8080) |
 | `MINIO_ENDPOINT` | `localhost:9000` | Object store for originals |
 | `MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY` | `golem` / `golem1234` | MinIO creds |
 | `DOCUMENTS_BUCKET` | `golem-chatbot-documents` | Bucket (created by compose init) |
