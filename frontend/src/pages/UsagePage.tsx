@@ -119,6 +119,32 @@ export function UsagePage() {
                   </tbody>
                 </table>
               </div>
+
+              {data.documents && data.documents.length > 0 && (
+                <div className="overflow-hidden rounded-xl border">
+                  <div className="bg-muted/50 px-4 py-2.5 text-sm font-medium">
+                    Embedding spend by document — last 30 days
+                  </div>
+                  <table className="w-full text-sm">
+                    <thead className="bg-muted/50 text-left text-muted-foreground">
+                      <tr>
+                        {["Document", "Embedding tokens", "Cost"].map((h) => (
+                          <th key={h} className="px-4 py-2.5 font-medium">{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {data.documents.map((d) => (
+                        <tr key={d.documentId} className="border-t">
+                          <td className="px-4 py-2.5 font-medium">{d.filename}</td>
+                          <td className="px-4 py-2.5 tabular-nums">{d.inputTokens.toLocaleString()}</td>
+                          <td className="px-4 py-2.5 tabular-nums">{money(d.costUsd)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </>
           )}
         </>

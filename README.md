@@ -53,7 +53,7 @@ Note: the compose Postgres is mapped to host port **5433** (not 5432), so it can
 
 ## Cost model
 
-Chat token counts are exact — taken from golem's per-run `Usage` — and prices are computed from rate-card env vars, overridable in `.env`: `CHAT_INPUT_USD_PER_MTOK` / `CHAT_OUTPUT_USD_PER_MTOK` (defaults **$0.30 / $2.50 per 1M tokens**, Gemini 2.5 Flash class). Costs are stored rounded to 5 decimal places; the dashboard shows 4. Phase 2 will add embedding costs to the same ledger.
+Chat token counts are exact — taken from golem's per-run `Usage` — and prices are computed from rate-card env vars, overridable in `.env`: `CHAT_INPUT_USD_PER_MTOK` / `CHAT_OUTPUT_USD_PER_MTOK` (defaults **$0.30 / $2.50 per 1M tokens**, Gemini 2.5 Flash class). Costs are stored rounded to 5 decimal places; the dashboard shows 4. Embedding costs (RAG) land in the same ledger as exact `embedding` rows, priced by `EMBEDDING_INPUT_USD_PER_MTOK` (default **$0.15 per 1M tokens**).
 
 ## Development
 
@@ -106,6 +106,29 @@ startup:
   --dev-url "docker://postgres/16/dev?search_path=public"
 ```
 
-## Phase 2
+## RAG (Phase 2c)
 
-RAG — document upload to MinIO, ingestion into Weaviate, an app-owned Gemini embedding client, and a `search_documents` retrieval tool on the agent — is design-complete. See `docs/superpowers/specs/2026-08-30-golem-chatbot-design.md`.
+Upload documents (txt, md, pdf, docx — 20 MB cap) on the **Documents** page; they are stored in MinIO, extracted, chunked (~1000 chars, paragraph-aware, ~150 char overlap), and embedded with **golem v0.7.5's embeddings port** (`gemini-embedding-001`, 768 dims) into Weaviate. The chat agent gets a `search_documents` tool and decides when to retrieve; answers cite `[n]` sources, rendered as collapsible source cards. Every query embedding is metered exactly (`kind=embedding`, `estimated=false`) and the usage page breaks spend down per document.
+
+**Enable it** — the infra ships dormant behind the compose `rag` profile:
+
+```bash
+docker compose -f deploy/docker-compose.yml --profile rag up -d
+# then set in .env:
+RAG_ENABLED=true
+```
+
+| Env var | Default | Purpose |
+|---|---|---|
+| `RAG_ENABLED` | `false` | Master switch; requires `GEMINI_API_KEY` |
+| `WEAVIATE_URL` | `http://localhost:8080` | Vector store |
+| `MINIO_ENDPOINT` | `localhost:9000` | Object store for originals |
+| `MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY` | `golem` / `golem1234` | MinIO creds |
+| `DOCUMENTS_BUCKET` | `golem-chatbot-documents` | Bucket (created by compose init) |
+| `EMBEDDING_MODEL` | `gemini-embedding-001` | Embedding model |
+| `EMBEDDING_DIMS` | `768` | Vector width |
+| `EMBEDDING_BATCH` | `96` | Texts per embed call |
+| `EMBEDDING_INPUT_USD_PER_MTOK` | `0.15` | Ledger rate |
+| `MAX_UPLOAD_BYTES` | `20971520` | Upload cap (20 MB) |
+
+API: `GET /api/documents`, `POST /api/documents` (multipart `file`), `DELETE /api/documents/{id}`; all 503 with `rag_disabled` when the stack is off. Ingestion is idempotent per document (stale vectors are deleted before re-upsert); a failed ingest keeps the row (`status=failed`) and the original object.
