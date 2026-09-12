@@ -136,3 +136,37 @@ func TestUsageSummaryEmptyIsJSONNotNull(t *testing.T) {
 		t.Fatalf("unexpected keys: %v", got)
 	}
 }
+
+func TestUsageSummaryIncludesDocumentSpend(t *testing.T) {
+	store := &fakeSummaryStore{summary: storage.Summary{
+		Documents: []storage.DocumentSpend{
+			{DocumentID: "d1", Filename: "notes.md", InputTokens: 700, CostMicros: 105},
+		},
+	}}
+	h, token := newHandlerServer(t, nil, newFakeConvos(newFakeMsgs()), newFakeMsgs(), store)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/usage/summary?days=7", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Documents []struct {
+			DocumentID  string  `json:"documentId"`
+			Filename    string  `json:"filename"`
+			InputTokens int     `json:"inputTokens"`
+			CostUsd     float64 `json:"costUsd"`
+		} `json:"documents"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Documents) != 1 || body.Documents[0].Filename != "notes.md" || body.Documents[0].InputTokens != 700 {
+		t.Fatalf("documents: %+v", body.Documents)
+	}
+	if body.Documents[0].CostUsd != microsToUSD(105) {
+		t.Fatalf("costUsd: %v", body.Documents[0].CostUsd)
+	}
+}

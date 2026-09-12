@@ -41,5 +41,15 @@ func (s *Server) handleUsageSummary(w http.ResponseWriter, r *http.Request) {
 	for _, d := range sum.Daily {
 		dailies = append(dailies, daily{d.Day.Format("2006-01-02"), d.InputTokens, d.OutputTokens, microsToUSD(d.CostMicros)})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"totals": totals, "daily": dailies})
+	type docRow struct {
+		DocumentID  string  `json:"documentId"`
+		Filename    string  `json:"filename"`
+		InputTokens int     `json:"inputTokens"`
+		CostUsd     float64 `json:"costUsd"`
+	}
+	docs := make([]docRow, 0, len(sum.Documents))
+	for _, d := range sum.Documents {
+		docs = append(docs, docRow{d.DocumentID, d.Filename, d.InputTokens, microsToUSD(d.CostMicros)})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"totals": totals, "daily": dailies, "documents": docs})
 }

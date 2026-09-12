@@ -56,6 +56,16 @@ type DailyRow struct {
 type Summary struct {
 	Totals []KindModelRow
 	Daily  []DailyRow
+	// Documents carries per-document embedding spend (empty without RAG).
+	Documents []DocumentSpend
+}
+
+// DocumentSpend is one document's embedding ledger rollup.
+type DocumentSpend struct {
+	DocumentID  string
+	Filename    string
+	InputTokens int
+	CostMicros  int64
 }
 
 func (u *Usage) Summary(ctx context.Context, userID string, days int) (Summary, error) {
@@ -97,5 +107,26 @@ func (u *Usage) Summary(ctx context.Context, userID string, days int) (Summary, 
 		}
 		sum.Daily = append(sum.Daily, r)
 	}
-	return sum, rows2.Err()
+	if err := rows2.Err(); err != nil {
+		return sum, err
+	}
+	rows3, err := u.pool.Query(ctx,
+		`SELECT u.document_id, COALESCE(MIN(d.filename), '(deleted)'),
+		        COALESCE(SUM(u.input_tokens),0)::int, COALESCE(SUM(u.cost_micro_usd),0)
+		 FROM usage_events u LEFT JOIN documents d ON d.id = u.document_id
+		 WHERE u.user_id = $1 AND u.kind = 'embedding' AND u.document_id IS NOT NULL
+		   AND u.created_at > now() - make_interval(days => $2)
+		 GROUP BY u.document_id ORDER BY 4 DESC`, userID, days)
+	if err != nil {
+		return sum, fmt.Errorf("usage documents: %w", err)
+	}
+	defer rows3.Close()
+	for rows3.Next() {
+		var r DocumentSpend
+		if err := rows3.Scan(&r.DocumentID, &r.Filename, &r.InputTokens, &r.CostMicros); err != nil {
+			return sum, err
+		}
+		sum.Documents = append(sum.Documents, r)
+	}
+	return sum, rows3.Err()
 }
