@@ -180,16 +180,41 @@ func (s *Server) runTurn(ctx context.Context, userID, convID string, spec chat.R
 		writeError(w, http.StatusInternalServerError, "internal", "streaming unsupported")
 		return
 	}
+	var sources []rag.Scored
 	outcome, err := s.deps.Agent.Run(ctx, chat.Deps{
 		UserID:         userID,
 		ConversationID: convID,
-		Search:         s.searchDeps(userID, convID),
+		Search:         s.searchDeps(userID, convID, &sources),
 	}, history, prompt, parts, sink, tools, spec)
 	if err != nil {
 		s.persistFailure(ctx, userID, convID, spec, err, sink)
 		return
 	}
+	emitSources(sink, sources)
 	s.settleRun(ctx, userID, convID, spec, outcome, sink, known)
+}
+
+// emitSources tells the client which document chunks the run retrieved, so
+// the answer can render its source cards. Nothing emits when the run never
+// searched.
+func emitSources(sink *sseSink, sources []rag.Scored) {
+	if len(sources) == 0 {
+		return
+	}
+	rows := make([]map[string]any, len(sources))
+	for i, sc := range sources {
+		snippet := sc.Chunk.Content
+		if len(snippet) > 160 {
+			snippet = strings.TrimSpace(snippet[:160]) + "…"
+		}
+		rows[i] = map[string]any{
+			"documentId": sc.Chunk.DocumentID,
+			"title":      sc.Chunk.DocTitle,
+			"snippet":    snippet,
+			"score":      sc.Score,
+		}
+	}
+	_ = sink.event("sources", map[string]any{"sources": rows})
 }
 
 // runSpecFor resolves a conversation's model settings into a RunSpec: an
@@ -230,10 +255,11 @@ func (s *Server) userTools(ctx context.Context, userID string) ([]tool.Tool[chat
 	return tools, nil
 }
 
-// searchDeps wraps the raw RagSearch with embedding metering: every
-// query embed is an exact-token `embedding` usage event priced from the
-// rate table. Nil when RAG is disabled.
-func (s *Server) searchDeps(userID, convID string) chat.SearchFunc {
+// searchDeps wraps the raw RagSearch with embedding metering (every query
+// embed is an exact-token `embedding` usage event priced from the rate
+// table) and per-run source collection for the sources SSE event. Nil when
+// RAG is disabled.
+func (s *Server) searchDeps(userID, convID string, sources *[]rag.Scored) chat.SearchFunc {
 	if s.deps.RagSearch == nil {
 		return nil
 	}
@@ -242,6 +268,7 @@ func (s *Server) searchDeps(userID, convID string) chat.SearchFunc {
 		if err != nil {
 			return nil, err
 		}
+		*sources = append(*sources, scored...)
 		if usage.InputTokens > 0 {
 			model := s.deps.Cfg.RAG.EmbeddingModel
 			_ = s.deps.Usage.Add(ctx, storage.UsageEvent{

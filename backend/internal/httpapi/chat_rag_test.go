@@ -80,7 +80,8 @@ func TestSendMessageSearchesDocumentsAndMetersEmbedding(t *testing.T) {
 
 	for _, want := range []string{
 		`"type":"tool_start"`, `"name":"search_documents"`,
-		`"type":"tool_end"`, "event: done", "The capital is Paris [1].",
+		`"type":"tool_end"`, "event: sources", `"title":"notes.md"`,
+		"event: done", "The capital is Paris [1].",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("missing %q in SSE:\n%s", want, body)

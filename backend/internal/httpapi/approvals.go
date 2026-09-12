@@ -8,6 +8,7 @@ import (
 
 	"github.com/abubakarsiddik31/golem"
 	"github.com/abubakarsiddik31/golem-chatbot/internal/chat"
+	"github.com/abubakarsiddik31/golem-chatbot/internal/rag"
 	"github.com/abubakarsiddik31/golem-chatbot/internal/storage"
 )
 
@@ -109,8 +110,9 @@ func (s *Server) handleApprovals(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal", "streaming unsupported")
 		return
 	}
+	var sources []rag.Scored
 	outcome, err := s.deps.Agent.RunDeferred(ctx,
-		chat.Deps{UserID: userID, ConversationID: convID, Search: s.searchDeps(userID, convID)},
+		chat.Deps{UserID: userID, ConversationID: convID, Search: s.searchDeps(userID, convID, &sources)},
 		pausedRunHistory(msgs), golem.DeferredResults{Approvals: resolutions},
 		sink, tools, spec)
 	if err != nil {
