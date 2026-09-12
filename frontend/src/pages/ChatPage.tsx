@@ -17,6 +17,7 @@ import {
   Plus,
   Paperclip,
   RefreshCw,
+  FileUp,
   Search,
   Send,
   ShieldCheck,
@@ -50,6 +51,7 @@ import { RunLoader } from "@/components/ai/RunLoader";
 import { StreamingText } from "@/components/ai/StreamingText";
 import { ThinkingTrace } from "@/components/ai/ThinkingTrace";
 import { ConversationSettingsDialog } from "@/features/chat/ConversationSettingsDialog";
+import { SourceCards } from "@/features/chat/SourceCards";
 import { useChat } from "@/features/chat/useChat";
 import { useModels } from "@/features/chat/useModels";
 import { useVoiceInput } from "@/features/chat/useVoiceInput";
@@ -534,6 +536,11 @@ export function ChatPage() {
             {activeConversation?.title || (selectedId ? "Conversation" : "New chat")}
           </h1>
           <Button variant="ghost" size="sm" asChild>
+            <Link to="/documents">
+              <FileUp /> Documents
+            </Link>
+          </Button>
+          <Button variant="ghost" size="sm" asChild>
             <Link to="/tools">
               <Wrench /> Tools
             </Link>
@@ -651,6 +658,9 @@ export function ChatPage() {
                               <RunLoader />
                             ) : (
                               <StreamingText content={m.content} streaming={m.streaming} />
+                            )}
+                            {!m.streaming && m.sources && m.sources.length > 0 && (
+                              <SourceCards sources={m.sources} />
                             )}
                             {m.error && <p className="text-destructive text-sm">{m.error}</p>}
                             {m.truncated && (

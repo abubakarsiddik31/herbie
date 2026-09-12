@@ -13,10 +13,18 @@ export interface ChatMessage {
   streaming?: boolean; error?: string;
   images?: { mediaType: string; dataUrl: string }[];
   usage?: MessageUsage;
+  sources?: Source[];
+}
+
+export interface Source {
+  documentId: string;
+  title: string;
+  snippet: string;
+  score: number;
 }
 export interface UsageTotalsRow { kind: string; model: string; inputTokens: number; outputTokens: number; requests: number; costUsd: number }
 export interface UsageDailyRow { day: string; inputTokens: number; outputTokens: number; costUsd: number }
-export interface UsageSummary { totals: UsageTotalsRow[]; daily: UsageDailyRow[] }
+export interface UsageSummary { totals: UsageTotalsRow[]; daily: UsageDailyRow[]; documents?: UsageDocumentRow[] }
 
 export interface ToolParam {
   name: string;
@@ -46,4 +54,22 @@ export interface PendingApproval {
   toolName: string;
   args: unknown;
   reason: string;
+}
+
+export interface DocumentRec {
+  id: string;
+  filename: string;
+  mime: string;
+  sizeBytes: number;
+  status: "processing" | "ready" | "failed";
+  error?: string;
+  chunkCount: number;
+  createdAt: string;
+}
+
+export interface UsageDocumentRow {
+  documentId: string;
+  filename: string;
+  inputTokens: number;
+  costUsd: number;
 }

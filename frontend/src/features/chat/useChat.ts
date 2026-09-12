@@ -2,12 +2,22 @@ import { useCallback, useRef, useState } from "react";
 import { BASE, ApiError, tryRefresh } from "@/lib/api";
 import { parseSSE } from "@/lib/sse";
 import { useAuth } from "@/stores/auth";
-import type { ChatMessage, PendingApproval } from "@/lib/types";
+import type { ChatMessage, PendingApproval, Source } from "@/lib/types";
 
 export type RunStatus = "idle" | "running" | "error";
 
 interface DonePayload { messageId: string; inputTokens: number; outputTokens: number; requests: number; costUsd: number; model?: string }
 interface MetaPayload { type: string; inputTokens?: number; outputTokens?: number; name?: string; ok?: boolean }
+interface SourcesPayload { sources: Source[] }
+
+// Model-facing tool names become human phrases in the run trace.
+const toolLabels: Record<string, string> = {
+  search_documents: "searching documents",
+};
+
+function toolLabel(name?: string): string {
+  return (name && toolLabels[name]) || name || "tool";
+}
 
 export interface ApprovalDecision { callId: string; approved: boolean; reason?: string }
 
@@ -44,10 +54,13 @@ export function useChat(onDone?: () => void) {
         if (meta.type === "model_end") {
           setTrace((t) => [...t, `model call · ${meta.inputTokens ?? 0} in / ${meta.outputTokens ?? 0} out`]);
         } else if (meta.type === "tool_start") {
-          setTrace((t) => [...t, `calling ${meta.name}…`]);
+          setTrace((t) => [...t, `${toolLabel(meta.name)}…`]);
         } else if (meta.type === "tool_end") {
           setTrace((t) => [...t, `${meta.name} ${meta.ok === false ? "failed" : "finished"}`]);
         }
+      } else if (frame.event === "sources") {
+        const { sources } = payload as SourcesPayload;
+        setMessages((m) => m.map((msg) => msg.id === assistantId ? { ...msg, sources } : msg));
       } else if (frame.event === "approval_request") {
         setPending((payload.calls ?? []) as PendingApproval[]);
       } else if (frame.event === "done") {

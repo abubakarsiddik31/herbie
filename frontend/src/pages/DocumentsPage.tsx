@@ -1,0 +1,202 @@
+import { useRef, useState } from "react";
+import { Link } from "react-router";
+import {
+  CircleAlert,
+  FileText,
+  FileUp,
+  Gauge,
+  Loader2,
+  MessageSquare,
+  Trash2,
+  Wrench,
+} from "lucide-react";
+import { cn } from "@/lib/utils";
+import type { DocumentRec } from "@/lib/types";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Skeleton } from "@/components/ui/skeleton";
+import { useDocumentActions, useDocuments } from "@/features/documents/useDocuments";
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+const STATUS_STYLES: Record<DocumentRec["status"], string> = {
+  processing: "border-amber-600/25 bg-amber-600/10 text-amber-700 dark:text-amber-400",
+  ready: "border-emerald-600/25 bg-emerald-600/10 text-emerald-700 dark:text-emerald-400",
+  failed: "border-rose-600/25 bg-rose-600/10 text-rose-700 dark:text-rose-400",
+};
+
+export function DocumentsPage() {
+  const { data: docs, isLoading } = useDocuments();
+  const { upload, remove, progress, accepting } = useDocumentActions();
+  const [dragging, setDragging] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<DocumentRec | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const pick = (files: FileList | null) => {
+    if (!files) return;
+    for (const f of files) void upload(f);
+  };
+
+  return (
+    <div className="flex h-dvh flex-col bg-background">
+      <header className="flex items-center gap-1 border-b px-4 py-2.5">
+        <h1 className="min-w-0 flex-1 truncate text-sm font-medium">Documents</h1>
+        <Button variant="ghost" size="sm" asChild>
+          <Link to="/chat">
+            <MessageSquare /> Chat
+          </Link>
+        </Button>
+        <Button variant="ghost" size="sm" asChild>
+          <Link to="/tools">
+            <Wrench /> Tools
+          </Link>
+        </Button>
+        <Button variant="ghost" size="sm" asChild>
+          <Link to="/usage">
+            <Gauge /> Usage
+          </Link>
+        </Button>
+      </header>
+
+      <div className="mx-auto w-full max-w-3xl space-y-4 overflow-y-auto p-4">
+        <div
+          role="button"
+          tabIndex={0}
+          aria-label="Upload documents"
+          onClick={() => inputRef.current?.click()}
+          onKeyDown={(e) => e.key === "Enter" && inputRef.current?.click()}
+          onDragOver={(e) => {
+            e.preventDefault();
+            setDragging(true);
+          }}
+          onDragLeave={() => setDragging(false)}
+          onDrop={(e) => {
+            e.preventDefault();
+            setDragging(false);
+            pick(e.dataTransfer.files);
+          }}
+          className={cn(
+            "flex cursor-pointer flex-col items-center gap-2 rounded-xl border-2 border-dashed p-8 text-center outline-none transition-colors",
+            dragging ? "border-primary bg-primary/5" : "border-border hover:border-primary/50 hover:bg-muted/40",
+          )}
+        >
+          <FileUp className="text-muted-foreground" />
+          <p className="text-sm font-medium">Drop files here or click to upload</p>
+          <p className="text-muted-foreground text-xs">
+            txt, md, pdf, docx — up to 20 MB. Documents are chunked, embedded, and searchable
+            from chat.
+          </p>
+          <input
+            ref={inputRef}
+            type="file"
+            accept={accepting}
+            multiple
+            hidden
+            onChange={(e) => {
+              pick(e.target.files);
+              e.target.value = "";
+            }}
+          />
+        </div>
+
+        {progress !== null && (
+          <div className="space-y-1">
+            <div className="h-2 overflow-hidden rounded-full bg-muted">
+              <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${progress}%` }} />
+            </div>
+            <p className="text-muted-foreground text-right text-xs">Uploading… {progress}%</p>
+          </div>
+        )}
+
+        {isLoading && (
+          <div className="space-y-2">
+            {[0, 1, 2].map((i) => (
+              <Skeleton key={i} className="h-14 w-full" />
+            ))}
+          </div>
+        )}
+
+        {docs && docs.length === 0 && (
+          <p className="py-8 text-center text-muted-foreground text-sm">
+            No documents yet. Upload one and ask the chat about it.
+          </p>
+        )}
+
+        {docs && docs.length > 0 && (
+          <ul className="divide-y rounded-xl border">
+            {docs.map((d) => (
+              <li key={d.id} className="flex items-center gap-3 p-3">
+                <FileText className="shrink-0 text-muted-foreground" />
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium" title={d.filename}>
+                    {d.filename}
+                  </p>
+                  <p className="text-muted-foreground text-xs">
+                    {formatBytes(d.sizeBytes)} · {new Date(d.createdAt).toLocaleDateString()}
+                    {d.status === "ready" && ` · ${d.chunkCount} chunks`}
+                  </p>
+                  {d.status === "failed" && d.error && (
+                    <p className="mt-0.5 flex items-center gap-1 text-destructive text-xs">
+                      <CircleAlert className="size-3" /> {d.error}
+                    </p>
+                  )}
+                </div>
+                <Badge variant="outline" className={cn("gap-1", STATUS_STYLES[d.status])}>
+                  {d.status === "processing" && <Loader2 className="size-3 animate-spin" />}
+                  {d.status}
+                </Badge>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={`Delete ${d.filename}`}
+                  className="text-destructive hover:text-destructive"
+                  onClick={() => setPendingDelete(d)}
+                >
+                  <Trash2 />
+                </Button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      <Dialog open={pendingDelete !== null} onOpenChange={(open) => !open && setPendingDelete(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete document?</DialogTitle>
+            <DialogDescription>
+              {pendingDelete?.filename} and its searchable chunks will be removed. This cannot be
+              undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPendingDelete(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                if (pendingDelete) remove.mutate(pendingDelete.id);
+                setPendingDelete(null);
+              }}
+            >
+              Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
