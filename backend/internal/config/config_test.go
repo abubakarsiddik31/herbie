@@ -150,7 +150,7 @@ func TestRAGDefaultsDisabled(t *testing.T) {
 	if cfg.RAG.EmbeddingInputRate != 0.15 {
 		t.Fatalf("EmbeddingInputRate = %f", cfg.RAG.EmbeddingInputRate)
 	}
-	if cfg.RAG.DocumentsBucket != "golem-chatbot-documents" || cfg.RAG.WeaviateURL != "http://localhost:8080" {
+	if cfg.RAG.DocumentsBucket != "golem-chatbot-documents" || cfg.RAG.WeaviateURL != "http://localhost:8081" {
 		t.Fatalf("infra defaults: %+v", cfg.RAG)
 	}
 }

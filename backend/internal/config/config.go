@@ -118,7 +118,7 @@ func Load() (Config, error) {
 
 		RAG: RAGConfig{
 			Enabled:            envBool("RAG_ENABLED", false),
-			WeaviateURL:        env("WEAVIATE_URL", "http://localhost:8080"),
+			WeaviateURL:        env("WEAVIATE_URL", "http://localhost:8081"),
 			MinIOEndpoint:      env("MINIO_ENDPOINT", "localhost:9000"),
 			MinIOAccessKey:     env("MINIO_ACCESS_KEY", "golem"),
 			MinIOSecretKey:     env("MINIO_SECRET_KEY", "golem1234"),

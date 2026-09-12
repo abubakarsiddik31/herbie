@@ -82,7 +82,7 @@ func TestEnsureCollectionNoopWhenExists(t *testing.T) {
 func TestUpsertChunks(t *testing.T) {
 	rec := &recorder{t: t}
 	rec.reply = func(_ int, w http.ResponseWriter, _ *http.Request) {
-		w.Write([]byte(`{"objects":[{"result":{}},{"result":{}}]}`))
+		w.Write([]byte(`[{"result":{}},{"result":{}}]`))
 	}
 	srv := rec.server()
 	defer srv.Close()
@@ -96,7 +96,8 @@ func TestUpsertChunks(t *testing.T) {
 	if err := c.UpsertChunks(context.Background(), "u1", "d1", "a.txt", chunks, vectors); err != nil {
 		t.Fatalf("UpsertChunks: %v", err)
 	}
-	var body struct {
+	// The request body carries the objects wrapper; assert what we sent.
+	var sent struct {
 		Objects []struct {
 			Class  string         `json:"class"`
 			ID     string         `json:"id"`
@@ -104,21 +105,21 @@ func TestUpsertChunks(t *testing.T) {
 			Props  map[string]any `json:"properties"`
 		} `json:"objects"`
 	}
-	if err := json.Unmarshal([]byte(rec.bodies[0]), &body); err != nil {
+	if err := json.Unmarshal([]byte(rec.bodies[0]), &sent); err != nil {
 		t.Fatal(err)
 	}
-	if len(body.Objects) != 2 {
-		t.Fatalf("objects: %d", len(body.Objects))
+	if len(sent.Objects) != 2 {
+		t.Fatalf("objects: %d", len(sent.Objects))
 	}
-	o := body.Objects[0]
+	o := sent.Objects[0]
 	if o.Class != "DocumentChunk" || len(o.Vector) != 4 {
 		t.Fatalf("object 0: %+v", o)
 	}
-	if o.ID == body.Objects[1].ID {
+	if o.ID == sent.Objects[1].ID {
 		t.Fatal("chunk ids must be deterministic but distinct")
 	}
 	// deterministic: same id on a second run
-	o2id := body.Objects[0].ID
+	o2id := sent.Objects[0].ID
 	c2 := New(srv.URL, 4, srv.Client())
 	_ = c2.UpsertChunks(context.Background(), "u1", "d1", "a.txt", chunks, vectors)
 	var again struct {
@@ -138,7 +139,7 @@ func TestUpsertChunks(t *testing.T) {
 func TestUpsertChunksSurfacesObjectErrors(t *testing.T) {
 	rec := &recorder{t: t}
 	rec.reply = func(_ int, w http.ResponseWriter, _ *http.Request) {
-		w.Write([]byte(`{"objects":[{"result":{}},{"result":{"errors":{"error":[{"message":"vector width mismatch"}]}}}]}`))
+		w.Write([]byte(`[{"result":{}},{"result":{"errors":{"error":[{"message":"vector width mismatch"}]}}}]`))
 	}
 	srv := rec.server()
 	defer srv.Close()
@@ -161,8 +162,13 @@ func TestUpsertChunksLengthMismatch(t *testing.T) {
 
 func TestDeleteDocument(t *testing.T) {
 	rec := &recorder{t: t}
-	rec.reply = func(_ int, w http.ResponseWriter, _ *http.Request) {
-		w.Write([]byte(`{"results":{"matches":2}}`))
+	rec.reply = func(call int, w http.ResponseWriter, r *http.Request) {
+		switch {
+		case call == 1: // GraphQL id lookup
+			w.Write([]byte(`{"data":{"Get":{"DocumentChunk":[{"_additional":{"id":"id-a"}},{"_additional":{"id":"id-b"}}]}}}`))
+		default: // per-object deletes
+			w.WriteHeader(http.StatusNoContent)
+		}
 	}
 	srv := rec.server()
 	defer srv.Close()
@@ -171,11 +177,22 @@ func TestDeleteDocument(t *testing.T) {
 	if err := c.DeleteDocument(context.Background(), "d1"); err != nil {
 		t.Fatalf("DeleteDocument: %v", err)
 	}
-	body := rec.bodies[0]
-	for _, want := range []string{`"class":"DocumentChunk"`, `"document_id"`, `"Equal"`, `"d1"`} {
-		if !strings.Contains(body, want) {
-			t.Fatalf("delete body missing %s: %s", want, body)
+	var gql struct {
+		Query string
+	}
+	if err := json.Unmarshal([]byte(rec.bodies[0]), &gql); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`path:["document_id"] operator:Equal valueText:"d1"`} {
+		if !strings.Contains(gql.Query, want) {
+			t.Fatalf("lookup missing %s: %s", want, gql.Query)
 		}
+	}
+	if rec.paths[1] != "/v1/objects/DocumentChunk/id-a" || rec.paths[2] != "/v1/objects/DocumentChunk/id-b" {
+		t.Fatalf("delete paths: %v", rec.paths[1:])
+	}
+	if rec.methods[1] != "DELETE" || rec.methods[2] != "DELETE" {
+		t.Fatalf("delete methods: %v", rec.methods)
 	}
 }
 

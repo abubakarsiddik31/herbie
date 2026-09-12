@@ -111,21 +111,21 @@ func (c *Client) UpsertChunks(ctx context.Context, userID, documentID, docTitle 
 			},
 		}
 	}
-	var batchResp struct {
-		Objects []struct {
-			Result struct {
-				Errors struct {
-					Error []struct {
-						Message string `json:"message"`
-					} `json:"error"`
-				} `json:"errors"`
-			} `json:"result"`
-		} `json:"objects"`
+	// Weaviate 1.28 answers a bare array of per-object results (no
+	// wrapper object).
+	var batchResp []struct {
+		Result struct {
+			Errors struct {
+				Error []struct {
+					Message string `json:"message"`
+				} `json:"error"`
+			} `json:"errors"`
+		} `json:"result"`
 	}
 	if err := c.post(ctx, "/v1/batch/objects", map[string]any{"objects": objects}, &batchResp); err != nil {
 		return fmt.Errorf("weaviate upsert: %w", err)
 	}
-	for i, o := range batchResp.Objects {
+	for i, o := range batchResp {
 		if len(o.Result.Errors.Error) > 0 {
 			return fmt.Errorf("weaviate upsert: object %d: %s", i, o.Result.Errors.Error[0].Message)
 		}
@@ -133,23 +133,61 @@ func (c *Client) UpsertChunks(ctx context.Context, userID, documentID, docTitle 
 	return nil
 }
 
-// DeleteDocument removes every vector of one document.
+// DeleteDocument removes every vector of one document. Weaviate 1.28
+// dropped the batch-delete REST route, so the ids come back from a
+// filtered GraphQL query and each object is deleted individually.
 func (c *Client) DeleteDocument(ctx context.Context, documentID string) error {
-	body := map[string]any{
-		"match": map[string]any{
-			"class": collection,
-			"where": map[string]any{
-				"path":      []string{"document_id"},
-				"operator":  "Equal",
-				"valueText": documentID,
-			},
-		},
-		"output": "minimal",
-	}
-	if err := c.post(ctx, "/v1/batch/delete", body, nil); err != nil {
+	ids, err := c.documentChunkIDs(ctx, documentID)
+	if err != nil {
 		return fmt.Errorf("weaviate delete: %w", err)
 	}
+	for _, id := range ids {
+		req, err := http.NewRequestWithContext(ctx, http.MethodDelete,
+			c.base+"/v1/objects/"+collection+"/"+id, nil)
+		if err != nil {
+			return fmt.Errorf("weaviate delete: %w", err)
+		}
+		resp, err := c.http.Do(req)
+		if err != nil {
+			return fmt.Errorf("weaviate delete: %w", err)
+		}
+		io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+		// 204 deleted; 404 already gone — both fine.
+		if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusNotFound {
+			return fmt.Errorf("weaviate delete: object %s: %s", id, resp.Status)
+		}
+	}
 	return nil
+}
+
+func (c *Client) documentChunkIDs(ctx context.Context, documentID string) ([]string, error) {
+	gql := fmt.Sprintf(`{Get{%s(where:{path:["document_id"] operator:Equal valueText:%s},limit:10000){_additional{id}}}}`,
+		collection, graphqlQuote(documentID))
+	var payload struct {
+		Data struct {
+			Get map[string][]struct {
+				Additional struct {
+					ID string `json:"id"`
+				} `json:"_additional"`
+			}
+		} `json:"data"`
+		Errors []struct {
+			Message string `json:"message"`
+		} `json:"errors"`
+	}
+	if err := c.post(ctx, "/v1/graphql", map[string]any{"query": gql}, &payload); err != nil {
+		return nil, err
+	}
+	if len(payload.Errors) > 0 {
+		return nil, fmt.Errorf("%s", payload.Errors[0].Message)
+	}
+	rows := payload.Data.Get[collection]
+	ids := make([]string, 0, len(rows))
+	for _, row := range rows {
+		ids = append(ids, row.Additional.ID)
+	}
+	return ids, nil
 }
 
 // HybridSearch runs a BM25+vector hybrid query (alpha 0.5) scoped to
