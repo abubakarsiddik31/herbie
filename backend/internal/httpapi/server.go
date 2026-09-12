@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 
@@ -8,6 +9,8 @@ import (
 	"github.com/abubakarsiddik31/golem-chatbot/internal/chat"
 	"github.com/abubakarsiddik31/golem-chatbot/internal/config"
 	"github.com/abubakarsiddik31/golem-chatbot/internal/cost"
+	"github.com/abubakarsiddik31/golem-chatbot/internal/rag"
+	"github.com/abubakarsiddik31/golem/model"
 )
 
 // ServerDeps carries the wired collaborators. Stores are narrow interfaces
@@ -25,7 +28,15 @@ type ServerDeps struct {
 	Agent     *chat.Agent
 	Rates     cost.Table
 	ModelKeys chat.ProviderKeys
+	// RagSearch retrieves document chunks and returns the query
+	// embedding's exact usage for metering. Nil = RAG disabled: no
+	// search tool is registered and the documents API answers 503.
+	RagSearch RagSearchFunc
 }
+
+// RagSearchFunc is rag.Service.Search narrowed to what the chat path
+// needs (the score rows plus the query-embedding usage).
+type RagSearchFunc func(ctx context.Context, userID, query string, k int) ([]rag.Scored, model.Usage, error)
 
 type Server struct {
 	deps ServerDeps

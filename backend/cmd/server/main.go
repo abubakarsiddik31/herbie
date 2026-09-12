@@ -16,7 +16,9 @@ import (
 	"github.com/abubakarsiddik31/golem-chatbot/internal/config"
 	"github.com/abubakarsiddik31/golem-chatbot/internal/cost"
 	"github.com/abubakarsiddik31/golem-chatbot/internal/httpapi"
+	"github.com/abubakarsiddik31/golem-chatbot/internal/rag"
 	"github.com/abubakarsiddik31/golem-chatbot/internal/storage"
+	"github.com/abubakarsiddik31/golem-chatbot/internal/weaviate"
 )
 
 func main() {
@@ -70,11 +72,43 @@ func main() {
 		os.Exit(1)
 	}
 
+	// The RAG stack boots only when explicitly enabled: embedder, vector
+	// store, and object store all need the rag compose profile running.
+	var ragSearch httpapi.RagSearchFunc
+	if cfg.RAG.Enabled {
+		if cfg.GeminiAPIKey == "" {
+			log.Error("rag", "err", "RAG_ENABLED requires GEMINI_API_KEY for embeddings")
+			os.Exit(1)
+		}
+		embedder, err := rag.NewEmbedder(cfg.GeminiAPIKey, cfg.RAG.EmbeddingModel, cfg.RAG.EmbeddingDims, cfg.RAG.EmbedBatchSize)
+		if err != nil {
+			log.Error("rag embedder", "err", err)
+			os.Exit(1)
+		}
+		vs := weaviate.New(cfg.RAG.WeaviateURL, cfg.RAG.EmbeddingDims, nil)
+		if err := vs.EnsureCollection(ctx); err != nil {
+			log.Error("rag weaviate", "err", err)
+			os.Exit(1)
+		}
+		objects, err := storage.NewMinIOStore(cfg.RAG.MinIOEndpoint, cfg.RAG.MinIOAccessKey,
+			cfg.RAG.MinIOSecretKey, cfg.RAG.DocumentsBucket, cfg.RAG.MinIOUseSSL)
+		if err != nil {
+			log.Error("rag minio", "err", err)
+			os.Exit(1)
+		}
+		svc := rag.NewService(embedder, vs, objects)
+		ragSearch = svc.Search
+		log.Info("rag enabled", "model", cfg.RAG.EmbeddingModel, "weaviate", cfg.RAG.WeaviateURL, "minio", cfg.RAG.MinIOEndpoint)
+	}
+
 	// Per-model ledger rates from the catalog; the env rates stay as the
 	// fallback for models without a catalog entry.
-	byModel := make(map[string]cost.Rates, len(chat.Catalog()))
+	byModel := make(map[string]cost.Rates, len(chat.Catalog())+1)
 	for _, m := range chat.Catalog() {
 		byModel[m.ID] = cost.Rates{ChatInputPerM: m.InputPerM, ChatOutputPerM: m.OutputPerM}
+	}
+	if cfg.RAG.Enabled {
+		byModel[cfg.RAG.EmbeddingModel] = cost.Rates{ChatInputPerM: cfg.RAG.EmbeddingInputRate}
 	}
 	rates := cost.Table{
 		Default: cost.Rates{ChatInputPerM: cfg.ChatInputRate, ChatOutputPerM: cfg.ChatOutputRate},
@@ -94,6 +128,7 @@ func main() {
 		Agent:     agent,
 		Rates:     rates,
 		ModelKeys: modelKeys,
+		RagSearch: ragSearch,
 	})
 	srv := &http.Server{Addr: ":" + cfg.Port, Handler: handler, ReadHeaderTimeout: 10 * time.Second}
 

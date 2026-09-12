@@ -15,6 +15,7 @@ import (
 	"github.com/abubakarsiddik31/golem"
 	"github.com/abubakarsiddik31/golem-chatbot/internal/chat"
 	"github.com/abubakarsiddik31/golem-chatbot/internal/cost"
+	"github.com/abubakarsiddik31/golem-chatbot/internal/rag"
 	"github.com/abubakarsiddik31/golem-chatbot/internal/storage"
 	"github.com/abubakarsiddik31/golem/model"
 	"github.com/abubakarsiddik31/golem/tool"
@@ -179,7 +180,11 @@ func (s *Server) runTurn(ctx context.Context, userID, convID string, spec chat.R
 		writeError(w, http.StatusInternalServerError, "internal", "streaming unsupported")
 		return
 	}
-	outcome, err := s.deps.Agent.Run(ctx, chat.Deps{UserID: userID, ConversationID: convID}, history, prompt, parts, sink, tools, spec)
+	outcome, err := s.deps.Agent.Run(ctx, chat.Deps{
+		UserID:         userID,
+		ConversationID: convID,
+		Search:         s.searchDeps(userID, convID),
+	}, history, prompt, parts, sink, tools, spec)
 	if err != nil {
 		s.persistFailure(ctx, userID, convID, spec, err, sink)
 		return
@@ -199,21 +204,56 @@ func (s *Server) runSpecFor(conv storage.Conversation) chat.RunSpec {
 	return spec
 }
 
-// userTools builds the caller's enabled golem tools. A nil Tools store (tests
-// without the tools feature) means no tools.
+// userTools builds the caller's enabled golem tools plus the built-in
+// document search when RAG is enabled. A nil Tools store (tests without
+// the tools feature) means user tools only. Every run path (send, edit,
+// regenerate, approvals resume) loads tools through here.
 func (s *Server) userTools(ctx context.Context, userID string) ([]tool.Tool[chat.Deps], error) {
-	if s.deps.Tools == nil {
-		return nil, nil
+	var tools []tool.Tool[chat.Deps]
+	if s.deps.Tools != nil {
+		rows, err := s.deps.Tools.ListEnabled(ctx, userID)
+		if err != nil {
+			return nil, fmt.Errorf("list enabled tools: %w", err)
+		}
+		cfgs, derr := chat.DecodeConfigs(rows)
+		if derr != nil {
+			s.deps.Log.Error("skip broken tool config", "err", derr)
+		}
+		tools, err = chat.BuildTools(cfgs, s.toolEnv())
+		if err != nil {
+			return nil, fmt.Errorf("build tools: %w", err)
+		}
 	}
-	rows, err := s.deps.Tools.ListEnabled(ctx, userID)
-	if err != nil {
-		return nil, fmt.Errorf("list enabled tools: %w", err)
+	if s.deps.RagSearch != nil {
+		tools = append(tools, chat.SearchTool())
 	}
-	cfgs, derr := chat.DecodeConfigs(rows)
-	if derr != nil {
-		s.deps.Log.Error("skip broken tool config", "err", derr)
+	return tools, nil
+}
+
+// searchDeps wraps the raw RagSearch with embedding metering: every
+// query embed is an exact-token `embedding` usage event priced from the
+// rate table. Nil when RAG is disabled.
+func (s *Server) searchDeps(userID, convID string) chat.SearchFunc {
+	if s.deps.RagSearch == nil {
+		return nil
 	}
-	return chat.BuildTools(cfgs, s.toolEnv())
+	return func(ctx context.Context, query string, k int) ([]rag.Scored, error) {
+		scored, usage, err := s.deps.RagSearch(ctx, userID, query, k)
+		if err != nil {
+			return nil, err
+		}
+		if usage.InputTokens > 0 {
+			model := s.deps.Cfg.RAG.EmbeddingModel
+			_ = s.deps.Usage.Add(ctx, storage.UsageEvent{
+				UserID: userID, Kind: "embedding", Model: model,
+				ConversationID: &convID,
+				InputTokens:    usage.InputTokens,
+				Estimated:      false,
+				CostMicros:     s.deps.Rates.RatesFor(model).ChatCostMicros(usage.InputTokens, 0),
+			})
+		}
+		return scored, nil
+	}
 }
 
 // toolEnv derives the execution bounds from config, filling the unset

@@ -110,7 +110,7 @@ func (s *Server) handleApprovals(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	outcome, err := s.deps.Agent.RunDeferred(ctx,
-		chat.Deps{UserID: userID, ConversationID: convID},
+		chat.Deps{UserID: userID, ConversationID: convID, Search: s.searchDeps(userID, convID)},
 		pausedRunHistory(msgs), golem.DeferredResults{Approvals: resolutions},
 		sink, tools, spec)
 	if err != nil {
