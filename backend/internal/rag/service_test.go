@@ -94,13 +94,13 @@ func newTestService(vs VectorStore, objects ObjectUploader) *Service {
 func TestIngestHappy(t *testing.T) {
 	vs, objs := &fakeVS{}, &fakeObjects{}
 	svc := newTestService(vs, objs)
-	content := []byte("first paragraph\n\nsecond paragraph\n\nthird paragraph")
+	content := []byte(strings.Repeat("first block of text. ", 40) + "\n\n" + strings.Repeat("second block of text. ", 40))
 	n, err := svc.Ingest(context.Background(), "u1", "d1", "notes.md", "text/markdown", content, "text/markdown")
 	if err != nil {
 		t.Fatalf("Ingest: %v", err)
 	}
-	if n != 3 {
-		t.Fatalf("chunk count = %d, want 3", n)
+	if n != 2 {
+		t.Fatalf("chunk count = %d, want 2", n)
 	}
 	if len(vs.upserts) != 1 {
 		t.Fatalf("upserts: %d", len(vs.upserts))
@@ -151,7 +151,7 @@ func TestIngestExtractFails(t *testing.T) {
 func TestIngestEmptyText(t *testing.T) {
 	vs, objs := &fakeVS{}, &fakeObjects{}
 	svc := newTestService(vs, objs)
-	_, err := svc.Ingest(context.Background(), "u1", "d1", "scan.pdf", "application/pdf", []byte("   "), "application/pdf")
+	_, err := svc.Ingest(context.Background(), "u1", "d1", "scan.txt", "text/plain", []byte("   \n   "), "text/plain")
 	if err == nil || !strings.Contains(err.Error(), "no text extracted") {
 		t.Fatalf("want no-text error, got %v", err)
 	}
