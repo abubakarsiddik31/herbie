@@ -45,7 +45,7 @@ func (f *fakeVS) DeleteDocument(_ context.Context, documentID string) error {
 	return nil
 }
 
-func (f *fakeVS) HybridSearch(_ context.Context, userID, query string, k int) ([]Scored, error) {
+func (f *fakeVS) HybridSearch(_ context.Context, userID, query string, _ []float32, k int) ([]Scored, error) {
 	f.searchCall = append(f.searchCall, searchCall{userID, query, k})
 	return f.results, nil
 }
@@ -95,7 +95,7 @@ func TestIngestHappy(t *testing.T) {
 	vs, objs := &fakeVS{}, &fakeObjects{}
 	svc := newTestService(vs, objs)
 	content := []byte(strings.Repeat("first block of text. ", 40) + "\n\n" + strings.Repeat("second block of text. ", 40))
-	n, err := svc.Ingest(context.Background(), "u1", "d1", "notes.md", "text/markdown", content, "text/markdown")
+	n, _, err := svc.Ingest(context.Background(), "u1", "d1", "notes.md", "text/markdown", content, "text/markdown")
 	if err != nil {
 		t.Fatalf("Ingest: %v", err)
 	}
@@ -122,10 +122,10 @@ func TestIngestDeletesBeforeUpsert(t *testing.T) {
 	vs, objs := &fakeVS{}, &fakeObjects{}
 	svc := newTestService(vs, objs)
 	content := []byte("hello world")
-	if _, err := svc.Ingest(context.Background(), "u1", "d1", "a.txt", "text/plain", content, "text/plain"); err != nil {
+	if _, _, err := svc.Ingest(context.Background(), "u1", "d1", "a.txt", "text/plain", content, "text/plain"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.Ingest(context.Background(), "u1", "d1", "a.txt", "text/plain", content, "text/plain"); err != nil {
+	if _, _, err := svc.Ingest(context.Background(), "u1", "d1", "a.txt", "text/plain", content, "text/plain"); err != nil {
 		t.Fatal(err)
 	}
 	if len(vs.upserts) != 2 || len(vs.deletes) != 2 {
@@ -139,7 +139,7 @@ func TestIngestDeletesBeforeUpsert(t *testing.T) {
 func TestIngestExtractFails(t *testing.T) {
 	vs, objs := &fakeVS{}, &fakeObjects{}
 	svc := newTestService(vs, objs)
-	_, err := svc.Ingest(context.Background(), "u1", "d1", "x.bin", "application/zip", []byte{1}, "application/zip")
+	_, _, err := svc.Ingest(context.Background(), "u1", "d1", "x.bin", "application/zip", []byte{1}, "application/zip")
 	if err == nil {
 		t.Fatal("want extract error")
 	}
@@ -151,7 +151,7 @@ func TestIngestExtractFails(t *testing.T) {
 func TestIngestEmptyText(t *testing.T) {
 	vs, objs := &fakeVS{}, &fakeObjects{}
 	svc := newTestService(vs, objs)
-	_, err := svc.Ingest(context.Background(), "u1", "d1", "scan.txt", "text/plain", []byte("   \n   "), "text/plain")
+	_, _, err := svc.Ingest(context.Background(), "u1", "d1", "scan.txt", "text/plain", []byte("   \n   "), "text/plain")
 	if err == nil || !strings.Contains(err.Error(), "no text extracted") {
 		t.Fatalf("want no-text error, got %v", err)
 	}
@@ -164,7 +164,7 @@ func TestIngestUpsertFailure(t *testing.T) {
 	vs, objs := &fakeVS{}, &fakeObjects{}
 	vs.failUpsert = true
 	svc := newTestService(vs, objs)
-	_, err := svc.Ingest(context.Background(), "u1", "d1", "a.txt", "text/plain", []byte("text"), "text/plain")
+	_, _, err := svc.Ingest(context.Background(), "u1", "d1", "a.txt", "text/plain", []byte("text"), "text/plain")
 	if err == nil {
 		t.Fatal("want upsert error")
 	}

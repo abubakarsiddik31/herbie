@@ -208,7 +208,7 @@ func TestHybridSearch(t *testing.T) {
 	defer srv.Close()
 
 	c := New(srv.URL, 768, srv.Client())
-	got, err := c.HybridSearch(context.Background(), "u1", `say "hello" world`, 5)
+	got, err := c.HybridSearch(context.Background(), "u1", `say "hello" world`, []float32{0.25, -1.5}, 5)
 	if err != nil {
 		t.Fatalf("HybridSearch: %v", err)
 	}
@@ -220,7 +220,7 @@ func TestHybridSearch(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		`hybrid:{query:"say \"hello\" world" alpha:0.5}`,
+		`hybrid:{query:"say \"hello\" world" vector:[0.25,-1.5] alpha:0.5}`,
 		`path:["user_id"] operator:Equal valueText:"u1"`,
 		`limit:5`,
 	} {
@@ -239,7 +239,7 @@ func TestHybridSearchGraphQLError(t *testing.T) {
 	defer srv.Close()
 
 	c := New(srv.URL, 768, srv.Client())
-	if _, err := c.HybridSearch(context.Background(), "u1", "q", 5); err == nil {
+	if _, err := c.HybridSearch(context.Background(), "u1", "q", nil, 5); err == nil {
 		t.Fatal("want graphql error surfaced")
 	}
 }

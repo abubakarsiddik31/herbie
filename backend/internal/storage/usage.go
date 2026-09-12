@@ -13,6 +13,7 @@ type UsageEvent struct {
 	Kind           string
 	Model          string
 	ConversationID *string
+	DocumentID     *string
 	InputTokens    int
 	OutputTokens   int
 	Requests       int
@@ -27,9 +28,9 @@ func NewUsage(pool *pgxpool.Pool) *Usage { return &Usage{pool: pool} }
 func (u *Usage) Add(ctx context.Context, e UsageEvent) error {
 	_, err := u.pool.Exec(ctx,
 		`INSERT INTO usage_events
-		 (user_id, kind, model, conversation_id, input_tokens, output_tokens, requests, estimated, cost_micro_usd)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-		e.UserID, e.Kind, e.Model, e.ConversationID,
+		 (user_id, kind, model, conversation_id, document_id, input_tokens, output_tokens, requests, estimated, cost_micro_usd)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+		e.UserID, e.Kind, e.Model, e.ConversationID, e.DocumentID,
 		e.InputTokens, e.OutputTokens, e.Requests, e.Estimated, e.CostMicros)
 	if err != nil {
 		return fmt.Errorf("add usage event: %w", err)

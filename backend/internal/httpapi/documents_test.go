@@ -17,7 +17,6 @@ import (
 	"github.com/abubakarsiddik31/golem-chatbot/internal/config"
 	"github.com/abubakarsiddik31/golem-chatbot/internal/rag"
 	"github.com/abubakarsiddik31/golem-chatbot/internal/storage"
-	"github.com/abubakarsiddik31/golem/model"
 )
 
 // --- fakes ---
@@ -79,13 +78,14 @@ func (f *fakeDocs) Delete(_ context.Context, id, userID string) error {
 
 type fakeRag struct {
 	chunks int
+	usage  rag.EmbedUsage
 	err    error
 	calls  int
 }
 
-func (f *fakeRag) Ingest(_ context.Context, _, _, _, _ string, _ []byte, _ string) (int, error) {
+func (f *fakeRag) Ingest(_ context.Context, _, _, _, _ string, _ []byte, _ string) (int, rag.EmbedUsage, error) {
 	f.calls++
-	return f.chunks, f.err
+	return f.chunks, f.usage, f.err
 }
 
 type fakeVectors struct{ deleted []string }
@@ -97,7 +97,7 @@ func (f *fakeVectors) DeleteDocument(_ context.Context, documentID string) error
 	f.deleted = append(f.deleted, documentID)
 	return nil
 }
-func (f *fakeVectors) HybridSearch(_ context.Context, _, _ string, _ int) ([]rag.Scored, error) {
+func (f *fakeVectors) HybridSearch(_ context.Context, _, _ string, _ []float32, _ int) ([]rag.Scored, error) {
 	return nil, nil
 }
 
@@ -131,8 +131,8 @@ func newDocsServer(t *testing.T, maxUpload int64) (http.Handler, string, *fakeDo
 		Cfg:    cfg,
 		Usage:  newFakeUsage(),
 		Agent:  nil,
-		RagSearch: func(_ context.Context, _, _ string, _ int) ([]rag.Scored, model.Usage, error) {
-			return nil, model.Usage{}, nil
+		RagSearch: func(_ context.Context, _, _ string, _ int) ([]rag.Scored, rag.EmbedUsage, error) {
+			return nil, rag.EmbedUsage{}, nil
 		},
 		RAG:     fr,
 		Docs:    docs,

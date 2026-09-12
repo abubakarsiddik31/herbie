@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/abubakarsiddik31/golem-chatbot/internal/rag"
@@ -191,11 +192,12 @@ func (c *Client) documentChunkIDs(ctx context.Context, documentID string) ([]str
 }
 
 // HybridSearch runs a BM25+vector hybrid query (alpha 0.5) scoped to
-// one user's chunks and returns up to k scored hits.
-func (c *Client) HybridSearch(ctx context.Context, userID, query string, k int) ([]rag.Scored, error) {
-	gql := fmt.Sprintf(`{Get{%s(hybrid:{query:%s alpha:0.5},where:{path:["user_id"] operator:Equal valueText:%s},limit:%d})
-		{content doc_title document_id chunk_index _additional{score}}}}`,
-		collection, graphqlQuote(query), graphqlQuote(userID), k)
+// one user's chunks and returns up to k scored hits. The query vector
+// rides in the request: a vectorizer:none collection cannot vectorize
+// the text server-side.
+func (c *Client) HybridSearch(ctx context.Context, userID, query string, queryVector []float32, k int) ([]rag.Scored, error) {
+	gql := fmt.Sprintf(`{Get{%s(hybrid:{query:%s vector:%s alpha:0.5},where:{path:["user_id"] operator:Equal valueText:%s},limit:%d){content doc_title document_id chunk_index _additional{score}}}}`,
+		collection, graphqlQuote(query), graphqlVector(queryVector), graphqlQuote(userID), k)
 	var payload struct {
 		Data struct {
 			Get map[string][]struct {
@@ -276,4 +278,16 @@ func (c *Client) post(ctx context.Context, path string, body, out any) error {
 func graphqlQuote(s string) string {
 	b, _ := json.Marshal(s)
 	return string(b)
+}
+
+// graphqlVector renders a vector as a GraphQL list of floats.
+func graphqlVector(v []float32) string {
+	if len(v) == 0 {
+		return "[]"
+	}
+	parts := make([]string, len(v))
+	for i, f := range v {
+		parts[i] = strconv.FormatFloat(float64(f), 'g', -1, 32)
+	}
+	return "[" + strings.Join(parts, ",") + "]"
 }

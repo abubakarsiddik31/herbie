@@ -275,7 +275,7 @@ func (s *Server) searchDeps(userID, convID string, sources *[]rag.Scored) chat.S
 				UserID: userID, Kind: "embedding", Model: model,
 				ConversationID: &convID,
 				InputTokens:    usage.InputTokens,
-				Estimated:      false,
+				Estimated:      usage.Estimated,
 				CostMicros:     s.deps.Rates.RatesFor(model).ChatCostMicros(usage.InputTokens, 0),
 			})
 		}

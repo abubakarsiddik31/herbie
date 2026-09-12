@@ -27,7 +27,7 @@ type DocStore interface {
 // RagRunner is the ingestion entry point; *rag.Service satisfies it.
 // Nil ServerDeps fields of this shape mean RAG is disabled.
 type RagRunner interface {
-	Ingest(ctx context.Context, userID, documentID, docTitle, mime string, content []byte, contentType string) (int, error)
+	Ingest(ctx context.Context, userID, documentID, docTitle, mime string, content []byte, contentType string) (int, rag.EmbedUsage, error)
 }
 
 // allowedUploadTypes maps the filename extension to the extraction mime.
@@ -117,7 +117,18 @@ func (s *Server) handleUploadDocument(w http.ResponseWriter, r *http.Request) {
 	// Row created (status=processing), now run the pipeline; a failure
 	// marks the row failed and keeps object and row so the upload is
 	// diagnosable and re-ingestion stays possible.
-	chunks, ingestErr := s.deps.RAG.Ingest(r.Context(), userID, docID, header.Filename, mime, content, mime)
+	chunks, embedUsage, ingestErr := s.deps.RAG.Ingest(r.Context(), userID, docID, header.Filename, mime, content, mime)
+	if ingestErr == nil && embedUsage.InputTokens > 0 {
+		model := s.deps.Cfg.RAG.EmbeddingModel
+		docIDRef := docID
+		_ = s.deps.Usage.Add(r.Context(), storage.UsageEvent{
+			UserID: userID, Kind: "embedding", Model: model,
+			DocumentID:  &docIDRef,
+			InputTokens: embedUsage.InputTokens,
+			Estimated:   embedUsage.Estimated,
+			CostMicros:  s.deps.Rates.RatesFor(model).ChatCostMicros(embedUsage.InputTokens, 0),
+		})
+	}
 	if ingestErr != nil {
 		s.deps.Log.Error("ingest failed", "document", docID, "err", ingestErr)
 		_ = s.deps.Docs.SetStatus(r.Context(), docID, userID, "failed", ingestErr.Error(), 0)

@@ -11,7 +11,6 @@ import (
 	"github.com/abubakarsiddik31/golem-chatbot/internal/cost"
 	"github.com/abubakarsiddik31/golem-chatbot/internal/rag"
 	"github.com/abubakarsiddik31/golem-chatbot/internal/storage"
-	"github.com/abubakarsiddik31/golem/model"
 )
 
 // ServerDeps carries the wired collaborators. Stores are narrow interfaces
@@ -43,7 +42,7 @@ type ServerDeps struct {
 
 // RagSearchFunc is rag.Service.Search narrowed to what the chat path
 // needs (the score rows plus the query-embedding usage).
-type RagSearchFunc func(ctx context.Context, userID, query string, k int) ([]rag.Scored, model.Usage, error)
+type RagSearchFunc func(ctx context.Context, userID, query string, k int) ([]rag.Scored, rag.EmbedUsage, error)
 
 type Server struct {
 	deps ServerDeps

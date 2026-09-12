@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"io"
 	"strings"
-
-	"github.com/abubakarsiddik31/golem/model"
 )
 
 // Scored pairs a chunk with its retrieval score (hybrid BM25+vector).
@@ -21,7 +19,7 @@ type Scored struct {
 type VectorStore interface {
 	UpsertChunks(ctx context.Context, userID, documentID, docTitle string, chunks []Chunk, vectors [][]float32) error
 	DeleteDocument(ctx context.Context, documentID string) error
-	HybridSearch(ctx context.Context, userID, query string, k int) ([]Scored, error)
+	HybridSearch(ctx context.Context, userID, query string, queryVector []float32, k int) ([]Scored, error)
 }
 
 // ObjectUploader is the slice of the object store the pipeline needs:
@@ -36,6 +34,14 @@ const (
 	maxK        = 20
 	maxKeyBytes = 9000 // sane cap so odd filenames cannot break the store
 )
+
+// EmbedUsage is the embedding ledger entry for one call: exact provider
+// tokens when the API reports them, an estimate flagged Estimated when it
+// does not (Gemini's embeddings endpoints return no usage metadata).
+type EmbedUsage struct {
+	InputTokens int
+	Estimated   bool
+}
 
 // Service is the RAG vertical: ingest (extract → chunk → embed → index)
 // and search (embed query → hybrid search). It owns no storage rows; the
@@ -53,38 +59,39 @@ func NewService(embed *Embedder, vs VectorStore, objects ObjectUploader) *Servic
 // Ingest keeps the original bytes in the object store, then indexes the
 // extracted text. Idempotent per document: stale vectors are deleted
 // before the fresh upsert. Returns the chunk count.
-func (s *Service) Ingest(ctx context.Context, userID, documentID, docTitle, mime string, content []byte, contentType string) (int, error) {
+func (s *Service) Ingest(ctx context.Context, userID, documentID, docTitle, mime string, content []byte, contentType string) (int, EmbedUsage, error) {
 	key := ObjectKey(userID, documentID, docTitle)
 	if err := s.objects.Put(ctx, key, contentType, bytes.NewReader(content), int64(len(content))); err != nil {
-		return 0, fmt.Errorf("store original: %w", err)
+		return 0, EmbedUsage{}, fmt.Errorf("store original: %w", err)
 	}
 	text, err := ExtractText(mime, bytes.NewReader(content))
 	if err != nil {
-		return 0, fmt.Errorf("extract text: %w", err)
+		return 0, EmbedUsage{}, fmt.Errorf("extract text: %w", err)
 	}
 	if strings.TrimSpace(text) == "" {
-		return 0, fmt.Errorf("no text extracted from %q", docTitle)
+		return 0, EmbedUsage{}, fmt.Errorf("no text extracted from %q", docTitle)
 	}
 	chunks := ChunkText(documentID, docTitle, text)
 	if len(chunks) == 0 {
-		return 0, fmt.Errorf("no chunks produced from %q", docTitle)
+		return 0, EmbedUsage{}, fmt.Errorf("no chunks produced from %q", docTitle)
 	}
 	res, err := s.embed.EmbedDocuments(ctx, chunkTexts(chunks))
 	if err != nil {
-		return 0, fmt.Errorf("embed chunks: %w", err)
+		return 0, EmbedUsage{}, fmt.Errorf("embed chunks: %w", err)
 	}
 	if err := s.vs.DeleteDocument(ctx, documentID); err != nil {
-		return 0, fmt.Errorf("clear stale vectors: %w", err)
+		return 0, EmbedUsage{}, fmt.Errorf("clear stale vectors: %w", err)
 	}
 	if err := s.vs.UpsertChunks(ctx, userID, documentID, docTitle, chunks, res.Vectors); err != nil {
-		return 0, fmt.Errorf("index chunks: %w", err)
+		return 0, EmbedUsage{}, fmt.Errorf("index chunks: %w", err)
 	}
-	return len(chunks), nil
+	total := strings.Join(chunkTexts(chunks), "")
+	return len(chunks), embedUsage(res.Usage.InputTokens, total), nil
 }
 
 // Search embeds the query and hybrid-searches the index. The returned
-// Usage carries the query embedding's exact token count for the ledger.
-func (s *Service) Search(ctx context.Context, userID, query string, k int) ([]Scored, model.Usage, error) {
+// EmbedUsage carries the query embedding's token count for the ledger.
+func (s *Service) Search(ctx context.Context, userID, query string, k int) ([]Scored, EmbedUsage, error) {
 	if k <= 0 {
 		k = defaultK
 	}
@@ -93,13 +100,26 @@ func (s *Service) Search(ctx context.Context, userID, query string, k int) ([]Sc
 	}
 	res, err := s.embed.EmbedQuery(ctx, query)
 	if err != nil {
-		return nil, model.Usage{}, fmt.Errorf("embed query: %w", err)
+		return nil, EmbedUsage{}, fmt.Errorf("embed query: %w", err)
 	}
-	scored, err := s.vs.HybridSearch(ctx, userID, query, k)
+	scored, err := s.vs.HybridSearch(ctx, userID, query, res.Vectors[0], k)
 	if err != nil {
-		return nil, model.Usage{}, fmt.Errorf("search index: %w", err)
+		return nil, EmbedUsage{}, fmt.Errorf("search index: %w", err)
 	}
-	return scored, res.Usage, nil
+	return scored, embedUsage(res.Usage.InputTokens, query), nil
+}
+
+// embedUsage trusts provider-reported tokens; absent them it falls back
+// to the classic len/4 estimate, flagged so the ledger stays honest.
+func embedUsage(providerTokens int, text string) EmbedUsage {
+	if providerTokens > 0 {
+		return EmbedUsage{InputTokens: providerTokens}
+	}
+	n := len(text) / 4
+	if n == 0 {
+		n = 1
+	}
+	return EmbedUsage{InputTokens: n, Estimated: true}
 }
 
 func chunkTexts(chunks []Chunk) []string {

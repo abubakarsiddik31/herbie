@@ -66,11 +66,11 @@ func TestSendMessageSearchesDocumentsAndMetersEmbedding(t *testing.T) {
 
 	var queries []string
 	var gotK int
-	ragSearch := func(_ context.Context, userID, query string, k int) ([]rag.Scored, model.Usage, error) {
+	ragSearch := func(_ context.Context, userID, query string, k int) ([]rag.Scored, rag.EmbedUsage, error) {
 		queries = append(queries, userID+":"+query)
 		gotK = k
 		return []rag.Scored{{Chunk: rag.Chunk{DocumentID: "d1", DocTitle: "notes.md", Content: "Paris is the capital of France"}, Score: 0.9}},
-			model.Usage{InputTokens: 7}, nil
+			rag.EmbedUsage{InputTokens: 7}, nil
 	}
 
 	h, token := newRagHandlerServer(t, agent, convs, msgs, usage, ragSearch)
