@@ -38,11 +38,12 @@ func BuildTools(cfgs []ToolConfig, env ToolEnv) ([]tool.Tool[Deps], error) {
 			// over the HTTP client's own per-request budget.
 			Timeout:    env.HTTPTimeout + 10*time.Second,
 			MaxRetries: tool.RetryLimit(2),
-			Exec: func(ctx context.Context, deps Deps, args json.RawMessage) (string, error) {
+			Exec: func(ctx context.Context, deps Deps, args json.RawMessage) (tool.Result, error) {
 				if created.RequireApproval && !tool.CallApproved(ctx) {
-					return "", &tool.Deferred{Kind: tool.DeferApproval, Reason: "user approval required"}
+					return tool.Result{}, &tool.Deferred{Kind: tool.DeferApproval, Reason: "user approval required"}
 				}
-				return executeHTTPTool(ctx, created, env, httpAgent, args)
+				out, err := executeHTTPTool(ctx, created, env, httpAgent, args)
+				return tool.Text(out), err
 			},
 		})
 	}

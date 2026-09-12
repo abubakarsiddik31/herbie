@@ -69,8 +69,8 @@ func TestBuildToolsApprovalGate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("approved re-run: %v", err)
 	}
-	if out != "{}" || hits != 1 {
-		t.Fatalf("out = %q hits = %d", out, hits)
+	if out.Text != "{}" || hits != 1 {
+		t.Fatalf("out = %q hits = %d", out.Text, hits)
 	}
 }
 
@@ -86,7 +86,7 @@ func TestBuildToolsUngatedExecutesImmediately(t *testing.T) {
 		t.Fatalf("BuildTools: %v", err)
 	}
 	out, err := tools[0].Exec(context.Background(), Deps{}, json.RawMessage(`{"city":"x","latitude":1}`))
-	if err != nil || out != `{"ok":true}` {
-		t.Fatalf("out = %q err = %v", out, err)
+	if err != nil || out.Text != `{"ok":true}` {
+		t.Fatalf("out = %q err = %v", out.Text, err)
 	}
 }

@@ -48,8 +48,8 @@ func stubTool(name, result string) tool.Tool[Deps] {
 		Name:        name,
 		Description: "stub",
 		Schema:      json.RawMessage(`{"type":"object"}`),
-		Exec: func(ctx context.Context, deps Deps, args json.RawMessage) (string, error) {
-			return result, nil
+		Exec: func(ctx context.Context, deps Deps, args json.RawMessage) (tool.Result, error) {
+			return tool.Text(result), nil
 		},
 	})
 }
@@ -60,11 +60,11 @@ func deferringTool(name string, onApproved func() string) tool.Tool[Deps] {
 		Name:        name,
 		Description: "stub",
 		Schema:      json.RawMessage(`{"type":"object"}`),
-		Exec: func(ctx context.Context, deps Deps, args json.RawMessage) (string, error) {
+		Exec: func(ctx context.Context, deps Deps, args json.RawMessage) (tool.Result, error) {
 			if !tool.CallApproved(ctx) {
-				return "", &tool.Deferred{Kind: tool.DeferApproval, Reason: "needs sign-off"}
+				return tool.Result{}, &tool.Deferred{Kind: tool.DeferApproval, Reason: "needs sign-off"}
 			}
-			return onApproved(), nil
+			return tool.Text(onApproved()), nil
 		},
 	})
 }
