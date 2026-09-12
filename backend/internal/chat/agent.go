@@ -11,10 +11,12 @@ import (
 	"github.com/abubakarsiddik31/golem/tool"
 )
 
-// Deps is the per-run identity flowing to every tool (search joins in Phase 2).
+// Deps is the per-run identity flowing to every tool. Search is wired by
+// the HTTP layer when the RAG stack is enabled (nil = no documents).
 type Deps struct {
 	UserID         string
 	ConversationID string
+	Search         SearchFunc
 }
 
 // PendingApproval is one deferred tool call waiting on the user's decision.
@@ -63,12 +65,8 @@ func (a *Agent) build(spec RunSpec, tools []tool.Tool[Deps]) (*golem.Agent[Deps,
 	passthrough := golem.DecodeFunc[string](func(_ context.Context, r model.Response) (string, error) {
 		return r.Message.Content, nil
 	})
-	prompt := spec.SystemPrompt
-	if prompt == "" {
-		prompt = systemPrompt
-	}
 	opts := []golem.Option[Deps, string]{
-		golem.WithInstructions[Deps, string](prompt),
+		golem.WithInstructions[Deps, string](promptFor(spec, tools)),
 		golem.WithHistoryProcessor[Deps, string](golem.TrimHistory(40)),
 		golem.WithMaxAttempts[Deps, string](2),
 		golem.WithUsageLimit[Deps, string](a.limit),
@@ -83,6 +81,22 @@ func (a *Agent) build(spec RunSpec, tools []tool.Tool[Deps]) (*golem.Agent[Deps,
 		return nil, fmt.Errorf("build chat agent: %w", err)
 	}
 	return agent, nil
+}
+
+// promptFor resolves the run's system prompt: the conversation's prompt,
+// else the built-in one, plus citation rules when document search is
+// registered.
+func promptFor(spec RunSpec, tools []tool.Tool[Deps]) string {
+	prompt := spec.SystemPrompt
+	if prompt == "" {
+		prompt = systemPrompt
+	}
+	for _, t := range tools {
+		if t.Name == SearchToolName {
+			return prompt + citationRules
+		}
+	}
+	return prompt
 }
 
 type Outcome struct {
