@@ -9,11 +9,36 @@ export function useDocuments() {
   return useQuery({
     queryKey: ["documents"],
     queryFn: async () => {
-      const res = await documentsFetch("GET");
+      let res = await documentsFetch("GET");
+      if (res.status === 401 && (await tryRefresh())) {
+        res = await documentsFetch("GET");
+      }
+      if (!res.ok) {
+        // Error bodies mirror apiFetch: { error: { code, message } }.
+        let code = "error";
+        let message = `failed to load documents (${res.status})`;
+        try {
+          const body = (await res.json()) as { error?: { code?: string; message?: string } };
+          if (body.error?.message) {
+            if (body.error.code) code = body.error.code;
+            message = body.error.message;
+          }
+        } catch { /* non-JSON error body */ }
+        throw new ApiError(res.status, code, message);
+      }
       const body = (await res.json()) as { documents: DocumentRec[] };
       return body.documents;
     },
+    // Ingestion runs async after upload: keep refetching while anything is
+    // still processing so badges settle to ready/failed on their own.
+    refetchInterval: (query) => pollIntervalFor(query.state.data),
   });
+}
+
+// How often the documents list refetches: every 2s while ingestion is still
+// running somewhere, otherwise not at all.
+export function pollIntervalFor(docs: DocumentRec[] | undefined): number | false {
+  return docs?.some((d) => d.status === "processing") ? 2000 : false;
 }
 
 async function documentsFetch(method: string, path = "", body?: FormData): Promise<Response> {
