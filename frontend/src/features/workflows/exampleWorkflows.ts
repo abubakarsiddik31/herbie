@@ -139,7 +139,9 @@ export const EXAMPLE_WORKFLOWS: WorkflowExample[] = [
         type: "manual",
         name: "Topic Input",
         position: { x: 80, y: 150 },
-        data: {},
+        data: {
+          query: "Artificial Intelligence",
+        },
       },
       {
         id: "search-hn",
