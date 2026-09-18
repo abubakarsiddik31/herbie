@@ -12,10 +12,11 @@ import (
 )
 
 type Conversation struct {
-	ID     string
-	UserID string
-	Title  string
-	Model  string // "" = server default
+	ID        string
+	UserID    string
+	ProjectID *string
+	Title     string
+	Model     string // "" = server default
 	// Temperature nil = provider default.
 	Temperature  *float64
 	SystemPrompt string // "" = built-in prompt
@@ -34,26 +35,27 @@ type ConversationPatch struct {
 	SystemPrompt     *string
 	RagEnabled       *bool
 	ClearTemperature bool
+	ProjectID        *string
 }
 
 type Conversations struct{ pool *pgxpool.Pool }
 
 func NewConversations(pool *pgxpool.Pool) *Conversations { return &Conversations{pool: pool} }
 
-const conversationColumns = `id, user_id::text, title, model, temperature, system_prompt, rag_enabled, created_at, updated_at`
+const conversationColumns = `id, user_id::text, title, model, temperature, system_prompt, rag_enabled, created_at, updated_at, project_id::text`
 
 func scanConversation(row pgx.Row) (Conversation, error) {
 	var conv Conversation
 	err := row.Scan(&conv.ID, &conv.UserID, &conv.Title, &conv.Model, &conv.Temperature,
-		&conv.SystemPrompt, &conv.RagEnabled, &conv.CreatedAt, &conv.UpdatedAt)
+		&conv.SystemPrompt, &conv.RagEnabled, &conv.CreatedAt, &conv.UpdatedAt, &conv.ProjectID)
 	return conv, err
 }
 
 func (c *Conversations) Create(ctx context.Context, userID, title string, patch ConversationPatch) (Conversation, error) {
 	row := c.pool.QueryRow(ctx,
-		`INSERT INTO conversations (user_id, title, model, temperature, system_prompt, rag_enabled) VALUES ($1, $2, $3, $4, $5, $6)
+		`INSERT INTO conversations (user_id, title, model, temperature, system_prompt, rag_enabled, project_id) VALUES ($1, $2, $3, $4, $5, $6, $7)
 		 RETURNING `+conversationColumns,
-		userID, title, derefString(patch.Model), patch.Temperature, derefString(patch.SystemPrompt), derefBool(patch.RagEnabled, true))
+		userID, title, derefString(patch.Model), patch.Temperature, derefString(patch.SystemPrompt), derefBool(patch.RagEnabled, true), patch.ProjectID)
 	conv, err := scanConversation(row)
 	if err != nil {
 		return Conversation{}, fmt.Errorf("create conversation: %w", err)
@@ -75,6 +77,26 @@ func (c *Conversations) List(ctx context.Context, userID, q string) ([]Conversat
 		conv, err := scanConversation(rows)
 		if err != nil {
 			return nil, err
+		}
+		out = append(out, conv)
+	}
+	return out, rows.Err()
+}
+
+func (c *Conversations) ListByProject(ctx context.Context, projectID, userID string) ([]Conversation, error) {
+	rows, err := c.pool.Query(ctx,
+		`SELECT `+conversationColumns+` FROM conversations
+		 WHERE user_id = $1 AND project_id = $2
+		 ORDER BY updated_at DESC`, userID, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("list project conversations: %w", err)
+	}
+	defer rows.Close()
+	var out []Conversation
+	for rows.Next() {
+		conv, err := scanConversation(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan conversation: %w", err)
 		}
 		out = append(out, conv)
 	}

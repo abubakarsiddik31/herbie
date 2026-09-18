@@ -173,6 +173,7 @@ func main() {
 		Compactor: compactor,
 		RAG:       ragRunner,
 		Docs:      storage.NewDocuments(pool),
+		Projects:  storage.NewProjects(pool),
 		Vectors:   vectors,
 		Objects:   objects,
 	})

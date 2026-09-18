@@ -49,10 +49,11 @@ type ServerDeps struct {
 	Compactor *chat.Compactor
 	// The retrieval stack's collaborators for the documents API. All nil
 	// when RAG is disabled.
-	RAG     RagRunner
-	Docs    DocStore
-	Vectors rag.VectorStore
-	Objects storage.ObjectStore
+	RAG      RagRunner
+	Docs     DocStore
+	Projects ProjectStore
+	Vectors  rag.VectorStore
+	Objects  storage.ObjectStore
 }
 
 // RagSearchFunc is rag.Service.Search narrowed to what the chat path
@@ -119,6 +120,16 @@ func NewServer(deps ServerDeps) http.Handler {
 	authed.HandleFunc("POST /api/documents", s.handleUploadDocument)
 	authed.HandleFunc("GET /api/documents", s.handleListDocuments)
 	authed.HandleFunc("DELETE /api/documents/{id}", s.handleDeleteDocument)
+	authed.HandleFunc("POST /api/extract-text", s.handleExtractText)
+	authed.HandleFunc("GET /api/projects", s.handleListProjects)
+	authed.HandleFunc("POST /api/projects", s.handleCreateProject)
+	authed.HandleFunc("GET /api/projects/{id}", s.handleGetProject)
+	authed.HandleFunc("PATCH /api/projects/{id}", s.handlePatchProject)
+	authed.HandleFunc("DELETE /api/projects/{id}", s.handleDeleteProject)
+	authed.HandleFunc("POST /api/projects/{id}/files", s.handleUploadProjectFile)
+	authed.HandleFunc("GET /api/projects/{id}/files", s.handleListProjectFiles)
+	authed.HandleFunc("POST /api/projects/{id}/conversations", s.handleCreateProjectConversation)
+	authed.HandleFunc("GET /api/projects/{id}/conversations", s.handleListProjectConversations)
 	s.mux.Handle("/api/", requireAuth(deps.Tokens, authed))
 
 	return withCORS(deps.Cfg.FrontendOrigin, logRequests(deps.Log, s.mux))

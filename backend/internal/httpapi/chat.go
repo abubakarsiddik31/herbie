@@ -30,6 +30,7 @@ import (
 type ConvoStore interface {
 	Create(ctx context.Context, userID, title string, patch storage.ConversationPatch) (storage.Conversation, error)
 	List(ctx context.Context, userID, q string) ([]storage.Conversation, error)
+	ListByProject(ctx context.Context, projectID, userID string) ([]storage.Conversation, error)
 	ByID(ctx context.Context, id, userID string) (storage.Conversation, error)
 	SetTitle(ctx context.Context, id, userID, title string) error
 	SetSettings(ctx context.Context, id, userID string, patch storage.ConversationPatch) error
@@ -391,7 +392,19 @@ func (s *Server) searchDeps(userID, convID string, sources *[]rag.Scored) chat.S
 		return nil
 	}
 	return func(ctx context.Context, query string, k int, docIDs []string) ([]rag.Scored, int, error) {
-		scored, rep, err := s.deps.RagSearch(ctx, userID, query, k, docIDs)
+		effectiveDocIDs := docIDs
+		if len(effectiveDocIDs) == 0 && s.deps.Convos != nil && s.deps.Docs != nil {
+			if conv, err := s.deps.Convos.ByID(ctx, convID, userID); err == nil && conv.ProjectID != nil {
+				if pdocs, err := s.deps.Docs.ListByProject(ctx, *conv.ProjectID, userID); err == nil && len(pdocs) > 0 {
+					ids := make([]string, len(pdocs))
+					for i, pd := range pdocs {
+						ids[i] = pd.ID
+					}
+					effectiveDocIDs = ids
+				}
+			}
+		}
+		scored, rep, err := s.deps.RagSearch(ctx, userID, query, k, effectiveDocIDs)
 		if err != nil {
 			return nil, 0, err
 		}

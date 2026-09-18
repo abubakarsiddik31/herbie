@@ -12,7 +12,8 @@ import { SharedPage } from "@/pages/SharedPage";
 import { ChatPage } from "@/pages/ChatPage";
 import { ToolsPage } from "@/pages/ToolsPage";
 import { UsagePage } from "@/pages/UsagePage";
-import { DocumentsPage } from "@/pages/DocumentsPage";
+import { ProjectsPage } from "@/pages/ProjectsPage";
+import { ProjectWorkspacePage } from "@/pages/ProjectWorkspacePage";
 
 const queryClient = new QueryClient();
 
@@ -29,10 +30,12 @@ export default function App() {
           <Route element={<RequireAuth />}>
             <Route element={<AppLayout />}>
               <Route path="/chat/:conversationId?" element={<ChatPage />} />
+              <Route path="/projects" element={<ProjectsPage />} />
+              <Route path="/projects/:projectId" element={<ProjectWorkspacePage />} />
               <Route path="/tools" element={<ToolsPage />} />
               <Route path="/usage" element={<UsagePage />} />
               <Route path="/preferences" element={<PreferencesPage />} />
-              <Route path="/documents" element={<DocumentsPage />} />
+              <Route path="/documents" element={<Navigate to="/projects" replace />} />
             </Route>
           </Route>
           <Route path="*" element={<Navigate to="/chat" replace />} />

@@ -18,6 +18,7 @@ import (
 type Document struct {
 	ID         string
 	UserID     string
+	ProjectID  *string
 	ObjectKey  string
 	Filename   string
 	Mime       string
@@ -32,12 +33,12 @@ type Documents struct{ pool *pgxpool.Pool }
 
 func NewDocuments(pool *pgxpool.Pool) *Documents { return &Documents{pool: pool} }
 
-const documentColumns = `id, user_id::text, object_key, filename, mime, size_bytes, status, COALESCE(error, ''), chunk_count, created_at`
+const documentColumns = `id, user_id::text, object_key, filename, mime, size_bytes, status, COALESCE(error, ''), chunk_count, created_at, project_id::text`
 
 func scanDocument(row pgx.Row) (Document, error) {
 	var d Document
 	err := row.Scan(&d.ID, &d.UserID, &d.ObjectKey, &d.Filename, &d.Mime, &d.SizeBytes,
-		&d.Status, &d.Error, &d.ChunkCount, &d.CreatedAt)
+		&d.Status, &d.Error, &d.ChunkCount, &d.CreatedAt, &d.ProjectID)
 	return d, err
 }
 
@@ -48,9 +49,9 @@ func (d *Documents) Create(ctx context.Context, doc Document) (Document, error) 
 		doc.ID = uuid.NewString()
 	}
 	row := d.pool.QueryRow(ctx,
-		`INSERT INTO documents (id, user_id, object_key, filename, mime, size_bytes) VALUES ($1, $2, $3, $4, $5, $6)
+		`INSERT INTO documents (id, user_id, object_key, filename, mime, size_bytes, project_id) VALUES ($1, $2, $3, $4, $5, $6, $7)
 		 RETURNING `+documentColumns,
-		doc.ID, doc.UserID, doc.ObjectKey, doc.Filename, doc.Mime, doc.SizeBytes)
+		doc.ID, doc.UserID, doc.ObjectKey, doc.Filename, doc.Mime, doc.SizeBytes, doc.ProjectID)
 	out, err := scanDocument(row)
 	if err != nil {
 		return Document{}, fmt.Errorf("create document: %w", err)
@@ -76,6 +77,25 @@ func (d *Documents) List(ctx context.Context, userID string) ([]Document, error)
 		`SELECT `+documentColumns+` FROM documents WHERE user_id = $1 ORDER BY created_at DESC`, userID)
 	if err != nil {
 		return nil, fmt.Errorf("list documents: %w", err)
+	}
+	defer rows.Close()
+	var out []Document
+	for rows.Next() {
+		doc, err := scanDocument(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan document: %w", err)
+		}
+		out = append(out, doc)
+	}
+	return out, rows.Err()
+}
+
+func (d *Documents) ListByProject(ctx context.Context, projectID, userID string) ([]Document, error) {
+	rows, err := d.pool.Query(ctx,
+		`SELECT `+documentColumns+` FROM documents WHERE user_id = $1 AND project_id = $2 ORDER BY created_at DESC`,
+		userID, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("list project documents: %w", err)
 	}
 	defer rows.Close()
 	var out []Document

@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate } from "react-router";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
-  FileText,
+  FolderGit2,
   Gauge,
   LogOut,
   MessageSquare,
@@ -41,7 +41,7 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 import { ShareDialog } from "@/features/chat/ShareDialog";
 import { useConversations, useDeleteConversation } from "@/features/chat/useConversations";
 import { useTools } from "@/features/tools/useTools";
-import { useDocuments } from "@/features/documents/useDocuments";
+import { useProjects } from "@/features/projects/useProjects";
 import { useSidebar } from "./SidebarContext";
 
 const GROUP_ORDER = ["Today", "Yesterday", "Previous 7 days", "Older"] as const;
@@ -83,7 +83,7 @@ export function AppSidebar() {
 
   const { data: conversations, isLoading: conversationsLoading } = useConversations(debouncedFilter.trim());
   const { data: tools } = useTools();
-  const { data: docs } = useDocuments();
+  const { data: projects } = useProjects();
   const deleteConversation = useDeleteConversation();
 
   const renameMutation = useMutation({
@@ -242,22 +242,22 @@ export function AppSidebar() {
           </Link>
 
           <Link
-            to="/documents"
+            to="/projects"
             onClick={() => setMobileOpen(false)}
             className={cn(
               "flex items-center justify-between rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors",
-              isNavActive("/documents")
+              isNavActive("/projects")
                 ? "bg-sidebar-accent text-sidebar-accent-foreground font-semibold"
                 : "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
             )}
           >
             <span className="flex items-center gap-2.5">
-              <FileText className="size-3.5 shrink-0" />
-              <span>Documents</span>
+              <FolderGit2 className="size-3.5 shrink-0" />
+              <span>Projects</span>
             </span>
-            {docs && docs.length > 0 && (
+            {projects && projects.length > 0 && (
               <Badge variant="secondary" className="px-1.5 py-0 text-[10px] font-mono h-4">
-                {docs.length}
+                {projects.length}
               </Badge>
             )}
           </Link>

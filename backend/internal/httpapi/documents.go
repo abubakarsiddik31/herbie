@@ -20,6 +20,7 @@ type DocStore interface {
 	Create(ctx context.Context, d storage.Document) (storage.Document, error)
 	Get(ctx context.Context, id, userID string) (storage.Document, error)
 	List(ctx context.Context, userID string) ([]storage.Document, error)
+	ListByProject(ctx context.Context, projectID, userID string) ([]storage.Document, error)
 	SetStatus(ctx context.Context, id, userID, status, errMsg string, chunkCount int) error
 	Delete(ctx context.Context, id, userID string) error
 }
@@ -203,4 +204,33 @@ func (s *Server) handleDeleteDocument(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) handleExtractText(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseMultipartForm(10 << 20); err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "file too large or invalid multipart form")
+		return
+	}
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "missing file")
+		return
+	}
+	defer file.Close()
+
+	ext := strings.ToLower(filepath.Ext(header.Filename))
+	mime := allowedUploadTypes[ext]
+	if mime == "" {
+		mime = "text/plain"
+	}
+	text, err := rag.ExtractText(mime, file)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "extract_error", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"filename": header.Filename,
+		"text":     text,
+		"size":     header.Size,
+	})
 }

@@ -54,6 +54,16 @@ func (f *fakeDocs) List(_ context.Context, userID string) ([]storage.Document, e
 	return out, nil
 }
 
+func (f *fakeDocs) ListByProject(_ context.Context, projectID, userID string) ([]storage.Document, error) {
+	var out []storage.Document
+	for _, d := range f.rows {
+		if d.UserID == userID && d.ProjectID != nil && *d.ProjectID == projectID {
+			out = append(out, d)
+		}
+	}
+	return out, nil
+}
+
 func (f *fakeDocs) SetStatus(_ context.Context, id, _ string, status, errMsg string, chunkCount int) error {
 	for i := range f.rows {
 		if f.rows[i].ID == id {

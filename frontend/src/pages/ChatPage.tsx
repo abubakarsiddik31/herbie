@@ -9,9 +9,11 @@ import {
   ChevronDown,
   Copy,
   Download,
+  FileCode,
   Flame,
   Globe,
   HelpCircle,
+  Loader2,
   Mic,
   Paperclip,
   Pencil,
@@ -27,7 +29,14 @@ import {
   X,
 } from "lucide-react";
 import { ApiError, apiFetch } from "@/lib/api";
-import { MAX_IMAGES_PER_MESSAGE, readImageFiles, type PendingImage } from "@/lib/images";
+import { ALLOWED_IMAGE_TYPES, MAX_IMAGES_PER_MESSAGE, readImageFiles, type PendingImage } from "@/lib/images";
+import {
+  type AttachedFile,
+  MAX_ATTACHED_FILES,
+  isSupportedDocOrCodeFile,
+  processAttachedFile,
+  formatPromptWithFiles,
+} from "@/lib/files";
 import { cn, fmtTokens } from "@/lib/utils";
 import type { ChatMessage, Conversation, ConversationSettings } from "@/lib/types";
 import { Badge } from "@/components/ui/badge";
@@ -128,6 +137,8 @@ export function ChatPage() {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [editing, setEditing] = useState<{ id: string; draft: string } | null>(null);
   const [attachments, setAttachments] = useState<PendingImage[]>([]);
+  const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
+  const [extractingFiles, setExtractingFiles] = useState(false);
   const [citeJump, setCiteJump] = useState<(CiteJump & { msgId: string }) | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const { data: docs } = useDocuments();
@@ -195,15 +206,52 @@ export function ChatPage() {
     reset();
     setInput("");
     setAttachments([]);
+    setAttachedFiles([]);
     setEditing(null);
     setSendError(null);
   }
 
-  async function pickImages(files: FileList | null) {
+  async function pickFiles(files: FileList | null) {
     if (!files || files.length === 0) return;
-    const { images, errors } = await readImageFiles([...files]);
-    for (const message of errors) toast.error(message);
-    setAttachments((prev) => [...prev, ...images].slice(0, MAX_IMAGES_PER_MESSAGE));
+    const fileList = Array.from(files);
+    const imgFiles: File[] = [];
+    const docFiles: File[] = [];
+
+    for (const f of fileList) {
+      if ((ALLOWED_IMAGE_TYPES as readonly string[]).includes(f.type)) {
+        imgFiles.push(f);
+      } else if (isSupportedDocOrCodeFile(f)) {
+        docFiles.push(f);
+      } else {
+        toast.error(`Unsupported file type: ${f.name}`);
+      }
+    }
+
+    if (imgFiles.length > 0) {
+      const { images, errors } = await readImageFiles(imgFiles);
+      for (const message of errors) toast.error(message);
+      setAttachments((prev) => [...prev, ...images].slice(0, MAX_IMAGES_PER_MESSAGE));
+    }
+
+    if (docFiles.length > 0) {
+      setExtractingFiles(true);
+      try {
+        for (const df of docFiles) {
+          if (attachedFiles.length >= MAX_ATTACHED_FILES) {
+            toast.error(`Maximum ${MAX_ATTACHED_FILES} files per message`);
+            break;
+          }
+          const attached = await processAttachedFile(df);
+          setAttachedFiles((prev) => [...prev, attached]);
+          toast.success(`Attached ${df.name}`);
+        }
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Failed to attach file");
+      } finally {
+        setExtractingFiles(false);
+      }
+    }
+
     if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
@@ -211,14 +259,21 @@ export function ChatPage() {
     setAttachments((prev) => prev.filter((a) => a.previewUrl !== url));
   }
 
+  function removeAttachedFile(id: string) {
+    setAttachedFiles((prev) => prev.filter((a) => a.id !== id));
+  }
+
   async function submit(overrideText?: string) {
     const text = (overrideText ?? input).trim();
-    if ((!text && attachments.length === 0) || running || pending.length > 0) return;
+    const totalFiles = attachments.length + attachedFiles.length;
+    if ((!text && totalFiles === 0) || running || pending.length > 0 || extractingFiles) return;
     setSendError(null);
     const images = attachments.map(({ mediaType, data }) => ({ mediaType, data }));
+    const outgoingText = formatPromptWithFiles(text, attachedFiles);
     if (!overrideText) {
       setInput("");
       setAttachments([]);
+      setAttachedFiles([]);
     }
 
     try {
@@ -229,7 +284,7 @@ export function ChatPage() {
         seededRef.current = conversationId;
         navigate(`/chat/${conversationId}`, { replace: true });
       }
-      await send(text, conversationId, images);
+      await send(outgoingText, conversationId, images);
     } catch (err) {
       setSendError(err instanceof ApiError ? err.message : "Failed to send message");
     }
@@ -573,9 +628,25 @@ export function ChatPage() {
                               ))}
                             </div>
                           )}
+                          {/* Attached files badge in user message */}
+                          {m.content.includes("--- File:") && (
+                            <div className="flex flex-wrap justify-end gap-1.5 mb-1">
+                              {m.content.split("\n\n").filter((block) => block.startsWith("--- File:")).map((block, idx) => {
+                                const fname = block.match(/--- File: (.*?) ---/)?.[1] || "Attached file";
+                                return (
+                                  <div key={idx} className="flex items-center gap-1.5 rounded-xl border border-border/80 bg-muted/50 px-2.5 py-1 text-xs">
+                                    <FileCode className="size-3.5 text-primary" />
+                                    <span className="font-medium font-mono text-[11px]">{fname}</span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
                           {m.content && (
                             <div className="rounded-2xl rounded-br-md bg-primary px-4 py-2.5 whitespace-pre-wrap text-primary-foreground text-sm shadow-sm">
-                              {m.content}
+                              {m.content.includes("--- File:")
+                                ? m.content.split("\n\n").filter((block) => !block.startsWith("--- File:")).join("\n\n") || "Attached file(s)"
+                                : m.content}
                             </div>
                           )}
                           <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -738,6 +809,38 @@ export function ChatPage() {
             </div>
           )}
 
+          {attachedFiles.length > 0 && (
+            <div className="mb-2 flex flex-wrap gap-2">
+              {attachedFiles.map((doc) => (
+                <div
+                  key={doc.id}
+                  className="flex items-center gap-1.5 rounded-xl border border-border/80 bg-muted/50 px-2.5 py-1 text-xs shadow-xs"
+                >
+                  <FileCode className="size-3.5 text-primary shrink-0" />
+                  <span className="font-medium truncate max-w-[160px]">{doc.name}</span>
+                  <span className="text-[10px] text-muted-foreground font-mono">
+                    ({Math.ceil(doc.size / 1024)} KB)
+                  </span>
+                  <button
+                    type="button"
+                    aria-label={`Remove ${doc.name}`}
+                    onClick={() => removeAttachedFile(doc.id)}
+                    className="ml-1 rounded-full p-0.5 text-muted-foreground hover:text-destructive hover:bg-muted"
+                  >
+                    <X className="size-3" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {extractingFiles && (
+            <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground bg-muted/40 px-3 py-1.5 rounded-xl">
+              <Loader2 className="size-3.5 animate-spin text-primary" />
+              <span>Reading file content…</span>
+            </div>
+          )}
+
           <div
             className={cn(
               "rounded-2xl border border-border/80 bg-card/95 backdrop-blur-md shadow-md transition-all",
@@ -768,10 +871,10 @@ export function ChatPage() {
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept="image/png,image/jpeg,image/webp,image/gif"
+                  accept="image/png,image/jpeg,image/webp,image/gif,.pdf,.docx,.txt,.md,.json,.csv,.py,.js,.ts,.tsx,.jsx,.go,.rs,.sh,.sql,.yaml,.yml"
                   multiple
                   hidden
-                  onChange={(e) => void pickImages(e.target.files)}
+                  onChange={(e) => void pickFiles(e.target.files)}
                 />
                 <Button
                   type="button"
@@ -779,9 +882,9 @@ export function ChatPage() {
                   size="icon-xs"
                   className="rounded-lg text-muted-foreground hover:text-foreground"
                   onClick={() => fileInputRef.current?.click()}
-                  disabled={running || pending.length > 0 || attachments.length >= MAX_IMAGES_PER_MESSAGE}
-                  aria-label="Attach images"
-                  title="Attach images (up to 4)"
+                  disabled={running || pending.length > 0 || extractingFiles}
+                  aria-label="Attach files or images"
+                  title="Attach files (images, documents, code)"
                 >
                   <Paperclip className="size-3.5" />
                 </Button>

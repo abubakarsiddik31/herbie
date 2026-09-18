@@ -126,6 +126,16 @@ func (f *fakeConvos) List(_ context.Context, userID, q string) ([]storage.Conver
 	return out, nil
 }
 
+func (f *fakeConvos) ListByProject(_ context.Context, projectID, userID string) ([]storage.Conversation, error) {
+	var out []storage.Conversation
+	for _, c := range f.convs {
+		if c.UserID == userID && c.ProjectID != nil && *c.ProjectID == projectID {
+			out = append(out, c)
+		}
+	}
+	return out, nil
+}
+
 func (f *fakeConvos) mustCreate(userID, title string) storage.Conversation {
 	conv, _ := f.Create(context.Background(), userID, title, storage.ConversationPatch{})
 	return conv
