@@ -17,10 +17,10 @@ import (
 // ServerDeps carries the wired collaborators. Stores are narrow interfaces
 // (chat.go) so handler tests run offline; *storage.* types satisfy them.
 type ServerDeps struct {
-	Cfg       config.Config
-	Log       *slog.Logger
-	Auth      *auth.Service
-	Tokens    *auth.TokenMaker
+	Cfg    config.Config
+	Log    *slog.Logger
+	Auth   *auth.Service
+	Tokens *auth.TokenMaker
 	// OAuth lists the configured social-login providers in display
 	// order. Empty = password auth only; the login UI hides the
 	// provider buttons.
