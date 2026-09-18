@@ -7,6 +7,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/abubakarsiddik31/golem-chatbot/internal/chat"
@@ -66,7 +67,7 @@ func (s *Server) settingsPatch(modelID *string, temperature *float64, clearTempe
 
 func (s *Server) handleListConversations(w http.ResponseWriter, r *http.Request) {
 	userID, _ := userIDFrom(r.Context())
-	convs, err := s.deps.Convos.List(r.Context(), userID)
+	convs, err := s.deps.Convos.List(r.Context(), userID, strings.TrimSpace(r.URL.Query().Get("q")))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal", "could not list conversations")
 		return
