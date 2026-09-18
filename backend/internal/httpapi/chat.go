@@ -167,7 +167,7 @@ func knownRows(msgs []storage.Message) map[string]bool {
 // rows are not duplicated. The sink opens only after those steps so
 // failures stay plain HTTP errors.
 func (s *Server) runTurn(ctx context.Context, userID, convID string, spec chat.RunSpec, history []model.Message, prompt string, parts []model.Part, known map[string]bool, w http.ResponseWriter) {
-	spec, history = s.maybeCompact(ctx, userID, convID, spec, history)
+	spec, history, compacted := s.maybeCompact(ctx, userID, convID, spec, history)
 	// Tools load before the SSE sink goes out so failures can still be
 	// plain HTTP errors. One broken config skips that tool only (logged by
 	// DecodeConfigs's returned error).
@@ -180,6 +180,9 @@ func (s *Server) runTurn(ctx context.Context, userID, convID string, spec chat.R
 	if !ok {
 		writeError(w, http.StatusInternalServerError, "internal", "streaming unsupported")
 		return
+	}
+	if compacted {
+		_ = sink.event("meta", map[string]any{"type": "compacted"})
 	}
 	var sources []rag.Scored
 	outcome, err := s.deps.Agent.Run(ctx, chat.Deps{
@@ -200,13 +203,15 @@ func (s *Server) runTurn(ctx context.Context, userID, convID string, spec chat.R
 // and role alternation are untouched). The summarizer spend is metered as
 // a `compaction` usage event priced from the rate table. Fail-open: a nil
 // compactor, a cool history, or a model failure returns inputs unchanged.
-func (s *Server) maybeCompact(ctx context.Context, userID, convID string, spec chat.RunSpec, history []model.Message) (chat.RunSpec, []model.Message) {
+// The third return tells callers whether a summary landed, so they can
+// announce it on the stream.
+func (s *Server) maybeCompact(ctx context.Context, userID, convID string, spec chat.RunSpec, history []model.Message) (chat.RunSpec, []model.Message, bool) {
 	if s.deps.Compactor == nil {
-		return spec, history
+		return spec, history, false
 	}
 	recent, summary, cusage, did, _ := s.deps.Compactor.Compact(ctx, history)
 	if !did {
-		return spec, history
+		return spec, history, false
 	}
 	if spec.SystemPrompt == "" {
 		spec.SystemPrompt = chat.DefaultSystemPrompt
@@ -221,7 +226,7 @@ func (s *Server) maybeCompact(ctx context.Context, userID, convID string, spec c
 			Estimated: false, CostMicros: ccost,
 		})
 	}
-	return spec, recent
+	return spec, recent, true
 }
 
 // emitSources tells the client which document chunks the run retrieved, so

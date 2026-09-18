@@ -112,7 +112,10 @@ func (s *Server) handleApprovals(w http.ResponseWriter, r *http.Request) {
 	}
 	var sources []rag.Scored
 	history := pausedRunHistory(msgs)
-	spec, history = s.maybeCompact(ctx, userID, convID, spec, history)
+	spec, history, compacted := s.maybeCompact(ctx, userID, convID, spec, history)
+	if compacted {
+		_ = sink.event("meta", map[string]any{"type": "compacted"})
+	}
 	outcome, err := s.deps.Agent.RunDeferred(ctx,
 		chat.Deps{UserID: userID, ConversationID: convID, Search: s.searchDeps(userID, convID, &sources)},
 		history, golem.DeferredResults{Approvals: resolutions},

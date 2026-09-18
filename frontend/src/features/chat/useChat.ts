@@ -53,6 +53,8 @@ export function useChat(onDone?: () => void) {
         const meta = payload as MetaPayload;
         if (meta.type === "model_end") {
           setTrace((t) => [...t, `model call · ${meta.inputTokens ?? 0} in / ${meta.outputTokens ?? 0} out`]);
+        } else if (meta.type === "compacted") {
+          setTrace((t) => [...t, "earlier history summarized"]);
         } else if (meta.type === "tool_start") {
           setTrace((t) => [...t, `${toolLabel(meta.name)}…`]);
         } else if (meta.type === "tool_end") {

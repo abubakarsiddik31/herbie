@@ -309,6 +309,11 @@ func TestRunTurnCompactsHotHistory(t *testing.T) {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 	}
 
+	// The client is told the history was summarized, so it can say so.
+	if !strings.Contains(rec.Body.String(), `"type":"compacted"`) {
+		t.Fatalf("no compacted meta event in SSE:\n%s", rec.Body.String())
+	}
+
 	// The agent ran on the compacted window: 4 recent history messages
 	// plus the fresh prompt (golem carries instructions out of band).
 	reqs := m.Requests()
