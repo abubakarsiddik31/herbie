@@ -1,4 +1,4 @@
-import { ArrowRight, Sparkles } from "lucide-react";
+import { ArrowRight, Bot, Check } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -100,7 +100,7 @@ export function WorkflowTemplatePreviewDialog({
             {/* Special capabilities */}
             {template.exposeAsTool && (
               <div className="rounded-xl border border-primary/30 bg-primary/5 p-3 flex items-start gap-2.5">
-                <Sparkles className="size-4 text-primary shrink-0 mt-0.5" />
+                <Bot className="size-4 text-primary shrink-0 mt-0.5" />
                 <div>
                   <p className="font-semibold text-primary text-xs">Preconfigured Chatbot Tool</p>
                   <p className="text-[11px] text-muted-foreground mt-0.5">
@@ -122,7 +122,7 @@ export function WorkflowTemplatePreviewDialog({
             disabled={isCloning}
             className="gap-2 shadow-xs"
           >
-            <Sparkles className="size-3.5" />
+            <Check className="size-3.5" />
             <span>{isCloning ? "Cloning..." : "Use This Template"}</span>
           </Button>
         </DialogFooter>

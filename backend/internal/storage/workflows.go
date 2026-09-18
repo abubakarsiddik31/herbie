@@ -104,6 +104,9 @@ func (s *Workflows) Create(ctx context.Context, w Workflow) (Workflow, error) {
 	if w.TriggerType == "" {
 		w.TriggerType = "manual"
 	}
+	if w.WebhookSlug != nil && strings.TrimSpace(*w.WebhookSlug) == "" {
+		w.WebhookSlug = nil
+	}
 	row := s.pool.QueryRow(ctx,
 		`INSERT INTO workflows (id, user_id, name, description, trigger_type, webhook_slug, webhook_secret,
 		 nodes, edges, expose_as_tool, tool_name, tool_description, is_active)
@@ -213,7 +216,10 @@ func (s *Workflows) Update(ctx context.Context, id, userID string, patch Workflo
 		sets = append(sets, fmt.Sprintf("trigger_type = $%d", len(args)))
 	}
 	if patch.WebhookSlug != nil {
-		args = append(args, *patch.WebhookSlug)
+		if strings.TrimSpace(*patch.WebhookSlug) == "" {
+			patch.WebhookSlug = nil
+		}
+		args = append(args, patch.WebhookSlug)
 		sets = append(sets, fmt.Sprintf("webhook_slug = $%d", len(args)))
 	}
 	if patch.WebhookSecret != nil {

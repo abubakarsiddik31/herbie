@@ -186,6 +186,9 @@ func (s *Server) handleCreateWorkflow(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_argument", "workflow name is required")
 		return
 	}
+	if req.WebhookSlug != nil && strings.TrimSpace(*req.WebhookSlug) == "" {
+		req.WebhookSlug = nil
+	}
 
 	created, err := s.deps.Workflows.Create(r.Context(), storage.Workflow{
 		UserID:          userID,

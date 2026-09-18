@@ -8,7 +8,6 @@ import {
   Globe,
   MessageSquare,
   Play,
-  Sparkles,
   Webhook,
   Wrench,
   type LucideIcon,
@@ -145,7 +144,7 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     category: "ai",
     label: "LLM Prompt",
     description: "Prompt an AI model (Gemini, OpenAI, Anthropic) with inputs",
-    icon: Sparkles,
+    icon: Bot,
     color: "text-fuchsia-500",
     bgColor: "bg-fuchsia-500/10 border-fuchsia-500/30",
     defaultData: {

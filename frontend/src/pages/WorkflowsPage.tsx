@@ -2,11 +2,12 @@ import { useMemo, useState } from "react";
 import { useNavigate } from "react-router";
 import {
   ArrowRight,
+  Bot,
+  Boxes,
   Eye,
   Globe,
   Plus,
   Search,
-  Sparkles,
   Trash2,
   Workflow as WorkflowIcon,
 } from "lucide-react";
@@ -248,7 +249,7 @@ export function WorkflowsPage() {
                 : "border-transparent text-muted-foreground hover:text-foreground"
             )}
           >
-            <Sparkles className="size-3.5 text-primary" />
+            <Boxes className="size-3.5 text-primary" />
             <span>Example Templates</span>
             <Badge variant="secondary" className="px-1.5 py-0 text-[10px] font-mono h-4">
               {EXAMPLE_WORKFLOWS.length}
@@ -377,7 +378,7 @@ export function WorkflowsPage() {
                           )}
                           {w.exposeAsTool && (
                             <Badge variant="outline" className="px-1.5 py-0 text-[10px] font-mono flex items-center gap-1 border-primary/40 text-primary">
-                              <Sparkles className="size-2.5" />
+                              <Bot className="size-2.5" />
                               <span>Agent Tool</span>
                             </Badge>
                           )}
@@ -493,7 +494,7 @@ export function WorkflowsPage() {
                           disabled={isCloning}
                           className="h-7 text-xs gap-1 shadow-2xs"
                         >
-                          <Sparkles className="size-3" />
+                          <Plus className="size-3" />
                           <span>{isCloning ? "Cloning..." : "Use"}</span>
                         </Button>
                       </div>

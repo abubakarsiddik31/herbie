@@ -5,7 +5,7 @@ import {
   GitBranch,
   Globe,
   MessageSquare,
-  Sparkles,
+  Newspaper,
   Webhook,
   type LucideIcon,
 } from "lucide-react";
@@ -130,8 +130,8 @@ export const EXAMPLE_WORKFLOWS: WorkflowExample[] = [
     tagline: "Search tech news via API and synthesize key takeaways",
     description:
       "Queries the Hacker News search API for any keyword, feeds the top discussions into an LLM prompt, and returns a structured markdown brief.",
-    icon: Sparkles,
-    badge: "AI Powered",
+    icon: Newspaper,
+    badge: "Research",
     triggerType: "manual",
     nodes: [
       {
