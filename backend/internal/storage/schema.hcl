@@ -576,3 +576,28 @@ table "documents" {
     columns = [column.user_id, column.created_at]
   }
 }
+
+table "conversation_shares" {
+  schema = schema.public
+  column "conversation_id" {
+    type = uuid
+    null = false
+  }
+  column "token_hash" {
+    type = text
+    null = false
+  }
+  column "created_at" {
+    type    = timestamptz
+    null    = false
+    default = sql("now()")
+  }
+  primary_key {
+    columns = [column.conversation_id]
+  }
+  foreign_key "conversation_shares_conversation_id_fkey" {
+    columns     = [column.conversation_id]
+    ref_columns = [table.conversations.column.id]
+    on_delete   = CASCADE
+  }
+}

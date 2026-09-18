@@ -152,6 +152,7 @@ func main() {
 		OAuth:     oauthProviders(cfg),
 		Convos:    storage.NewConversations(pool),
 		Msgs:      storage.NewMessages(pool),
+		Shares:    storage.NewShares(pool),
 		Usage:     storage.NewUsage(pool),
 		Tools:     storage.NewTools(pool),
 		Pending:   storage.NewPendingCalls(pool),

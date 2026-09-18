@@ -63,6 +63,16 @@ type PendingStore interface {
 
 var _ PendingStore = (*storage.PendingCalls)(nil)
 
+// ShareStore bridges public conversation links to storage.
+type ShareStore interface {
+	Share(ctx context.Context, convID, userID, tokenHash string) (string, bool, error)
+	Unshare(ctx context.Context, convID, userID string) error
+	SharedHash(ctx context.Context, convID, userID string) (string, error)
+	Resolve(ctx context.Context, tokenHash string) (string, string, error)
+}
+
+var _ ShareStore = (*storage.Shares)(nil)
+
 const maxPromptChars = 8000
 
 func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
