@@ -51,7 +51,7 @@ import { RunLoader } from "@/components/ai/RunLoader";
 import { StreamingText } from "@/components/ai/StreamingText";
 import { ThinkingTrace } from "@/components/ai/ThinkingTrace";
 import { ConversationSettingsDialog } from "@/features/chat/ConversationSettingsDialog";
-import { SourceCards } from "@/features/chat/SourceCards";
+import { SourceCards, type CiteJump } from "@/features/chat/SourceCards";
 import { useChat } from "@/features/chat/useChat";
 import { useModels } from "@/features/chat/useModels";
 import { useVoiceInput } from "@/features/chat/useVoiceInput";
@@ -135,6 +135,9 @@ export function ChatPage() {
   const [editing, setEditing] = useState<{ id: string; draft: string } | null>(null);
   // Images picked for the next message (cleared on send).
   const [attachments, setAttachments] = useState<PendingImage[]>([]);
+  // The latest citation jump requested from an answer's bracket links, with
+  // the owning message id so only its source list reacts.
+  const [citeJump, setCiteJump] = useState<(CiteJump & { msgId: string }) | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   // Settings for a chat that does not exist yet; applied at create time.
   const [draftSettings, setDraftSettings] = useState<ConversationSettings>({
@@ -206,6 +209,7 @@ export function ChatPage() {
     seededRef.current = null;
     queryClient.removeQueries({ queryKey: ["conversation", id] });
     setSendError(null);
+    setCiteJump(null);
     navigate(`/chat/${id}`);
     setSidebarOpen(false);
   }
@@ -214,6 +218,7 @@ export function ChatPage() {
     reset();
     seededRef.current = null;
     setSendError(null);
+    setCiteJump(null);
     navigate("/chat");
     setSidebarOpen(false);
   }
@@ -657,10 +662,29 @@ export function ChatPage() {
                             {m.streaming && m.content === "" ? (
                               <RunLoader />
                             ) : (
-                              <StreamingText content={m.content} streaming={m.streaming} />
+                              <StreamingText
+                                content={m.content}
+                                streaming={m.streaming}
+                                citations={
+                                  m.sources && m.sources.length > 0
+                                    ? {
+                                        count: m.sources.length,
+                                        onCite: (n) =>
+                                          setCiteJump((j) => ({
+                                            msgId: m.id,
+                                            n,
+                                            seq: (j?.seq ?? 0) + 1,
+                                          })),
+                                      }
+                                    : undefined
+                                }
+                              />
                             )}
                             {!m.streaming && m.sources && m.sources.length > 0 && (
-                              <SourceCards sources={m.sources} />
+                              <SourceCards
+                                sources={m.sources}
+                                jump={citeJump?.msgId === m.id ? citeJump : null}
+                              />
                             )}
                             {m.error && <p className="text-destructive text-sm">{m.error}</p>}
                             {m.truncated && (

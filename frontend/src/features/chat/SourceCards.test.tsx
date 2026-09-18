@@ -42,4 +42,16 @@ describe("SourceCards", () => {
     expect(screen.queryByText(/§/)).toBeNull();
     expect(screen.queryByText(/p\./)).toBeNull();
   });
+
+  it("expands and flashes the jumped-to source", () => {
+    render(<SourceCards sources={sources} jump={{ n: 2, seq: 1 }} />);
+    // Collapsed by default, but a jump opens the list and highlights card 2.
+    expect(screen.getByText(/second fact/i)).toBeInTheDocument();
+    expect(screen.getByText(/second fact/i).closest("li")).toHaveClass("ring-primary");
+  });
+
+  it("ignores out-of-range jumps", () => {
+    render(<SourceCards sources={sources} jump={{ n: 9, seq: 1 }} />);
+    expect(screen.queryByText(/paris is the capital/i)).toBeNull();
+  });
 });
