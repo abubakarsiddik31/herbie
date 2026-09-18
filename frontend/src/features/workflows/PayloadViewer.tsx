@@ -52,9 +52,9 @@ export function PayloadViewer({
   const hasRichText = typeof data === "string" || isObjectWithText(data);
 
   return (
-    <div className={cn("flex flex-col rounded-xl border border-border bg-card shadow-2xs overflow-hidden", className)}>
+    <div className={cn("flex flex-col min-w-0 rounded-xl border border-border bg-card shadow-2xs overflow-hidden", className)}>
       {/* Header bar */}
-      <div className="flex items-center justify-between border-b border-border/70 bg-muted/30 px-3 py-2 text-xs">
+      <div className="flex items-center justify-between border-b border-border/70 bg-muted/30 px-3 py-2 text-xs gap-2 min-w-0">
         <div className="flex items-center gap-2 min-w-0">
           <span className="font-semibold text-foreground text-xs truncate">{title}</span>
           {typeof data === "object" && data !== null && (
@@ -122,7 +122,7 @@ export function PayloadViewer({
       </div>
 
       {/* Main Content Viewer */}
-      <div className="p-3">
+      <div className="p-3 min-w-0">
         {mode === "rich" && hasRichText ? (
           <RichPayloadRenderer data={data} />
         ) : (
@@ -132,7 +132,7 @@ export function PayloadViewer({
 
       {/* Expanded Fullscreen Dialog */}
       <Dialog open={fullscreen} onOpenChange={setFullscreen}>
-        <DialogContent className="max-w-4xl max-h-[88vh] flex flex-col p-0 overflow-hidden">
+        <DialogContent className="sm:max-w-4xl lg:max-w-5xl max-h-[88vh] flex flex-col p-0 overflow-hidden">
           <DialogHeader className="flex flex-row items-center justify-between border-b border-border p-4 bg-muted/20">
             <DialogTitle className="text-sm font-semibold tracking-tight">{title}</DialogTitle>
             <div className="flex items-center gap-2 pr-6">
@@ -194,7 +194,7 @@ function RichPayloadRenderer({ data, expanded }: { data: unknown; expanded?: boo
   // If data is directly a string
   if (typeof data === "string") {
     return (
-      <div className={cn("prose prose-xs dark:prose-invert max-w-none text-xs leading-relaxed break-words", expanded && "prose-sm")}>
+      <div className={cn("prose prose-xs dark:prose-invert max-w-none text-xs leading-relaxed break-words min-w-0 overflow-hidden", expanded && "prose-sm")}>
         <ReactMarkdown remarkPlugins={[remarkGfm]}>{data}</ReactMarkdown>
       </div>
     );
@@ -215,19 +215,19 @@ function RichPayloadRenderer({ data, expanded }: { data: unknown; expanded?: boo
     }
 
     return (
-      <div className="space-y-3.5">
+      <div className="space-y-3.5 min-w-0">
         {/* Render text/markdown content sections */}
         {textFields.map(({ key, value }) => (
-          <div key={key} className="rounded-lg border border-border/80 bg-muted/20 p-3.5 space-y-2">
-            <div className="flex items-center justify-between border-b border-border/50 pb-1.5">
-              <span className="text-[11px] font-semibold tracking-wider text-muted-foreground uppercase font-mono">
+          <div key={key} className="rounded-lg border border-border/80 bg-muted/20 p-3.5 space-y-2 min-w-0 overflow-hidden">
+            <div className="flex items-center justify-between border-b border-border/50 pb-1.5 min-w-0">
+              <span className="text-[11px] font-semibold tracking-wider text-muted-foreground uppercase font-mono truncate">
                 {key}
               </span>
-              <Badge variant="outline" className="text-[9px] font-mono">
+              <Badge variant="outline" className="text-[9px] font-mono shrink-0">
                 markdown
               </Badge>
             </div>
-            <div className="text-xs leading-relaxed break-words space-y-2 text-foreground font-normal [&_h1]:text-sm [&_h1]:font-bold [&_h2]:text-xs [&_h2]:font-bold [&_h3]:text-xs [&_h3]:font-semibold [&_p]:my-1.5 [&_ul]:list-disc [&_ul]:pl-4 [&_ol]:list-decimal [&_ol]:pl-4 [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[11px] [&_pre]:rounded [&_pre]:bg-muted/80 [&_pre]:p-2 [&_pre]:font-mono [&_pre]:text-[11px] [&_blockquote]:border-l-2 [&_blockquote]:border-primary/40 [&_blockquote]:pl-2.5 [&_blockquote]:italic">
+            <div className="text-xs leading-relaxed break-words space-y-2 text-foreground font-normal min-w-0 overflow-hidden [&_h1]:text-sm [&_h1]:font-bold [&_h2]:text-xs [&_h2]:font-bold [&_h3]:text-xs [&_h3]:font-semibold [&_p]:my-1.5 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_li]:my-1 [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[11px] [&_pre]:rounded [&_pre]:bg-muted/80 [&_pre]:p-2.5 [&_pre]:font-mono [&_pre]:text-[11px] [&_pre]:overflow-x-auto [&_blockquote]:border-l-2 [&_blockquote]:border-primary/40 [&_blockquote]:pl-2.5 [&_blockquote]:italic">
               <ReactMarkdown remarkPlugins={[remarkGfm]}>{value}</ReactMarkdown>
             </div>
           </div>
@@ -235,18 +235,18 @@ function RichPayloadRenderer({ data, expanded }: { data: unknown; expanded?: boo
 
         {/* Render metadata properties as clean structured badges/table */}
         {metaFields.length > 0 && (
-          <div className="rounded-lg border border-border/60 bg-muted/10 p-2.5 space-y-1.5">
+          <div className="rounded-lg border border-border/60 bg-muted/10 p-2.5 space-y-1.5 min-w-0">
             <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider font-mono">
               Fields & Parameters
             </p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs min-w-0">
               {metaFields.map(({ key, value }) => (
                 <div
                   key={key}
-                  className="flex items-center justify-between rounded border border-border/40 bg-background/50 px-2.5 py-1.5"
+                  className="flex items-center justify-between rounded border border-border/40 bg-background/50 px-2.5 py-1.5 min-w-0"
                 >
-                  <span className="text-muted-foreground font-mono text-[11px] truncate">{key}:</span>
-                  <span className="font-semibold text-foreground font-mono text-[11px] truncate ml-2">
+                  <span className="text-muted-foreground font-mono text-[11px] truncate shrink-0">{key}:</span>
+                  <span className="font-semibold text-foreground font-mono text-[11px] truncate ml-2 text-right">
                     {formatMetaValue(value)}
                   </span>
                 </div>
