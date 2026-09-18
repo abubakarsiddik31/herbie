@@ -47,6 +47,7 @@ import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
 import { BrandMark } from "@/components/BrandMark";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { RunLoader } from "@/components/ai/RunLoader";
 import { StreamingText } from "@/components/ai/StreamingText";
 import { ThinkingTrace } from "@/components/ai/ThinkingTrace";
@@ -524,6 +525,7 @@ export function ChatPage() {
             <Button variant="ghost" size="icon-sm" aria-label="Log out" onClick={() => void logout()}>
               <LogOut />
             </Button>
+            <ThemeToggle />
           </div>
         </div>
       </aside>
