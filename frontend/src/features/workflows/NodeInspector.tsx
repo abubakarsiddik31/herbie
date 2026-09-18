@@ -14,7 +14,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { useTools } from "@/features/tools/useTools";
 import { getNodeDefinition } from "./nodeTypes";
@@ -83,7 +82,7 @@ export function NodeInspector({
       )}
     >
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-border/60 p-3.5">
+      <div className="flex items-center justify-between border-b border-border/60 p-3.5 shrink-0">
         <div className="flex items-center gap-2 min-w-0">
           <div className="flex size-7 shrink-0 items-center justify-center rounded-md border border-border bg-muted">
             <def.icon className="size-4 text-primary" />
@@ -124,7 +123,7 @@ export function NodeInspector({
       </div>
 
       {/* Tabs */}
-      <div className="flex border-b border-border/60 px-3 pt-2 gap-2 text-xs">
+      <div className="flex border-b border-border/60 px-3 pt-2 gap-2 text-xs shrink-0">
         <button
           type="button"
           onClick={() => setActiveTab("config")}
@@ -157,7 +156,7 @@ export function NodeInspector({
       </div>
 
       {/* Content */}
-      <ScrollArea className="flex-1 min-w-0 p-4">
+      <div className="flex-1 min-h-0 min-w-0 overflow-y-auto p-4">
         {activeTab === "config" ? (
           <div className="space-y-4 text-xs min-w-0">
             {/* Step Name */}
@@ -558,7 +557,7 @@ export function NodeInspector({
             )}
           </div>
         )}
-      </ScrollArea>
+      </div>
     </aside>
   );
 }

@@ -33,3 +33,9 @@ Build in order. One branch per item, merge to `main` before starting the next.
 
 - Voice output / Read Aloud (dictation input only today).
 - Image generation tool (input-only today).
+- **One-Click OAuth Tool Integrations (GitHub, Slack, Google Workspace, Jira)**:
+  - OAuth 2.0 Authorization Code Flow for third-party integrations with interactive user consent screens.
+  - 1-click "Connect Account" buttons in the Credentials Vault to eliminate manual Personal Access Token (PAT) generation.
+  - User-scoped secure storage with AES-GCM token encryption and automated refresh token lifecycle management.
+  - Granular permission scope selection (e.g. `read:repo`, `write:issues`, `chat:write`) and per-workflow access revocation.
+  - Fine-grained audit logging tracking which workflow executions and AI agent turns invoked external tools on behalf of the user.

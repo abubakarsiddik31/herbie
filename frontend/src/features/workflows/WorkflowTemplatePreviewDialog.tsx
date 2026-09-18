@@ -9,7 +9,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { getNodeDefinition } from "./nodeTypes";
 import type { WorkflowExample } from "./exampleWorkflows";
 
@@ -34,8 +33,8 @@ export function WorkflowTemplatePreviewDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-2xl lg:max-w-3xl max-h-[85vh] flex flex-col p-0 overflow-hidden">
-        <DialogHeader className="p-5 pb-4 border-b border-border bg-muted/20">
+      <DialogContent className="sm:max-w-2xl lg:max-w-3xl h-[85vh] max-h-[85vh] flex flex-col p-0 overflow-hidden">
+        <DialogHeader className="p-5 pb-4 border-b border-border bg-muted/20 shrink-0">
           <div className="flex items-center gap-3">
             <div className="flex size-10 items-center justify-center rounded-xl bg-primary/10 border border-primary/20 text-primary shrink-0">
               <Icon className="size-5" />
@@ -52,7 +51,7 @@ export function WorkflowTemplatePreviewDialog({
           </div>
         </DialogHeader>
 
-        <ScrollArea className="flex-1 p-5">
+        <div className="flex-1 min-h-0 overflow-y-auto p-5">
           <div className="space-y-5 text-xs">
             {/* Description */}
             <div className="rounded-lg border border-border/70 bg-card p-3.5 leading-relaxed text-muted-foreground">
@@ -110,9 +109,9 @@ export function WorkflowTemplatePreviewDialog({
               </div>
             )}
           </div>
-        </ScrollArea>
+        </div>
 
-        <DialogFooter className="p-4 border-t border-border bg-card/60">
+        <DialogFooter className="p-4 border-t border-border bg-card/60 shrink-0">
           <Button variant="outline" size="sm" onClick={() => onOpenChange(false)}>
             Close
           </Button>
