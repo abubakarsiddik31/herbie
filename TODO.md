@@ -27,6 +27,7 @@ Build in order. One branch per item, merge to `main` before starting the next.
 - [x] **10. Cumulative citation numbering** (`36042e2`): `search_documents` citations maintain run-wide cumulative indices `[1]`, `[2]`, `[3]...` matching source cards across multi-search runs.
 - [x] **11. Artifacts & Code Preview** (`ca829ae`): Interactive code block previews for HTML (sandboxed iframe with reload), SVG (vector render), and Mermaid (flowcharts/diagrams with theme integration), with Code/Preview tabs, fullscreen modal expansion, and copy button.
 - [x] **12. Cross-Chat Memory** (`3a80e64`): Persistent long-term user memories table & migrations, automatic memory injection (`[User memory]`) into every conversation run, built-in `remember` tool, and memory management UI on `/preferences`.
+- [x] **13. Visual Workflows & Tool Automation**: n8n-style visual workflow builder with `@xyflow/react`, DAG execution engine in Go, universal HTTP/REST caller, external tool integration (GitHub, Slack, Discord, Golem tools), webhook triggers, condition branching, and agent tool bridge.
 
 ## Future roadmap / Bigger bets (each its own project)
 
