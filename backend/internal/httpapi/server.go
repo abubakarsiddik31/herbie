@@ -32,6 +32,9 @@ type ServerDeps struct {
 	// embedding's exact usage for metering. Nil = RAG disabled: no
 	// search tool is registered and the documents API answers 503.
 	RagSearch RagSearchFunc
+	// Compactor summarizes hot histories into the run instructions.
+	// Nil = compaction disabled: history passes through verbatim.
+	Compactor *chat.Compactor
 	// The retrieval stack's collaborators for the documents API. All nil
 	// when RAG is disabled.
 	RAG     RagRunner

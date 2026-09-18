@@ -167,6 +167,7 @@ func knownRows(msgs []storage.Message) map[string]bool {
 // rows are not duplicated. The sink opens only after those steps so
 // failures stay plain HTTP errors.
 func (s *Server) runTurn(ctx context.Context, userID, convID string, spec chat.RunSpec, history []model.Message, prompt string, parts []model.Part, known map[string]bool, w http.ResponseWriter) {
+	spec, history = s.maybeCompact(ctx, userID, convID, spec, history)
 	// Tools load before the SSE sink goes out so failures can still be
 	// plain HTTP errors. One broken config skips that tool only (logged by
 	// DecodeConfigs's returned error).
@@ -192,6 +193,35 @@ func (s *Server) runTurn(ctx context.Context, userID, convID string, spec chat.R
 	}
 	emitSources(sink, sources)
 	s.settleRun(ctx, userID, convID, spec, outcome, sink, known)
+}
+
+// maybeCompact trims a hot history into its recent window and folds the
+// older span's summary into the run instructions (ephemeral: history rows
+// and role alternation are untouched). The summarizer spend is metered as
+// a `compaction` usage event priced from the rate table. Fail-open: a nil
+// compactor, a cool history, or a model failure returns inputs unchanged.
+func (s *Server) maybeCompact(ctx context.Context, userID, convID string, spec chat.RunSpec, history []model.Message) (chat.RunSpec, []model.Message) {
+	if s.deps.Compactor == nil {
+		return spec, history
+	}
+	recent, summary, cusage, did, _ := s.deps.Compactor.Compact(ctx, history)
+	if !did {
+		return spec, history
+	}
+	if spec.SystemPrompt == "" {
+		spec.SystemPrompt = chat.DefaultSystemPrompt
+	}
+	spec.SystemPrompt += "\n\n[Compacted earlier context — summarized, not verbatim]\n" + summary
+	if cusage.InputTokens+cusage.OutputTokens > 0 {
+		cm := s.deps.Compactor.ModelName()
+		ccost := s.deps.Rates.RatesFor(cm).ChatCostMicros(cusage.InputTokens, cusage.OutputTokens)
+		_ = s.deps.Usage.Add(ctx, storage.UsageEvent{
+			UserID: userID, Kind: "compaction", Model: cm, ConversationID: &convID,
+			InputTokens: cusage.InputTokens, OutputTokens: cusage.OutputTokens,
+			Estimated: false, CostMicros: ccost,
+		})
+	}
+	return spec, recent
 }
 
 // emitSources tells the client which document chunks the run retrieved, so

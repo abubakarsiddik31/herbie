@@ -117,6 +117,18 @@ func main() {
 		log.Info("rag enabled", "model", cfg.RAG.EmbeddingModel, "weaviate", cfg.RAG.WeaviateURL, "minio", cfg.RAG.MinIOEndpoint)
 	}
 
+	// Compaction benefits every long thread, not just RAG runs, so the
+	// compactor builds whenever its model resolves — independent of the
+	// RAG-enabled gate above.
+	var compactor *chat.Compactor
+	if cfg.RAG.CompactionEnabled {
+		if client, err := registry.Resolve(chat.RunSpec{Model: cfg.RAG.CompactionModel}); err != nil {
+			log.Warn("compaction disabled: model unresolvable", "model", cfg.RAG.CompactionModel, "err", err)
+		} else {
+			compactor = chat.NewCompactor(client, cfg.RAG.CompactionModel, cfg.RAG.CompactionThreshold, cfg.RAG.CompactionKeepRecent, cfg.RAG.CompactionSummaryTokens)
+		}
+	}
+
 	// Per-model ledger rates from the catalog; the env rates stay as the
 	// fallback for models without a catalog entry.
 	byModel := make(map[string]cost.Rates, len(chat.Catalog())+1)
@@ -145,6 +157,7 @@ func main() {
 		Rates:     rates,
 		ModelKeys: modelKeys,
 		RagSearch: ragSearch,
+		Compactor: compactor,
 		RAG:       ragRunner,
 		Docs:      storage.NewDocuments(pool),
 		Vectors:   vectors,
