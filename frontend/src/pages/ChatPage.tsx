@@ -20,6 +20,7 @@ import {
   FileUp,
   Search,
   Send,
+  Share2,
   ShieldCheck,
   Sparkles,
   Square,
@@ -52,6 +53,7 @@ import { RunLoader } from "@/components/ai/RunLoader";
 import { StreamingText } from "@/components/ai/StreamingText";
 import { ThinkingTrace } from "@/components/ai/ThinkingTrace";
 import { ConversationSettingsDialog } from "@/features/chat/ConversationSettingsDialog";
+import { ShareDialog } from "@/features/chat/ShareDialog";
 import { SourceCards, type CiteJump } from "@/features/chat/SourceCards";
 import { useChat } from "@/features/chat/useChat";
 import { useModels } from "@/features/chat/useModels";
@@ -127,6 +129,7 @@ export function ChatPage() {
   const [input, setInput] = useState("");
   const [sendError, setSendError] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<Conversation | null>(null);
+  const [sharing, setSharing] = useState<Conversation | null>(null);
   const [renaming, setRenaming] = useState<Conversation | null>(null);
   const [renameTitle, setRenameTitle] = useState("");
   const [filter, setFilter] = useState("");
@@ -496,6 +499,14 @@ export function ChatPage() {
                         onClick={() => openRename(c)}
                       >
                         <Pencil />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon-xs"
+                        aria-label={`Share ${c.title || "conversation"}`}
+                        onClick={() => setSharing(c)}
+                      >
+                        <Share2 />
                       </Button>
                       <Button
                         variant="ghost"
@@ -910,6 +921,8 @@ export function ChatPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ShareDialog conversation={sharing} onOpenChange={(open) => { if (!open) setSharing(null); }} />
 
       <Dialog open={pendingDelete !== null} onOpenChange={(open) => { if (!open) setPendingDelete(null); }}>
         <DialogContent showCloseButton={false}>
