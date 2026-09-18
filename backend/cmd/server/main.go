@@ -153,6 +153,7 @@ func main() {
 		Convos:    storage.NewConversations(pool),
 		Msgs:      storage.NewMessages(pool),
 		Shares:    storage.NewShares(pool),
+		Profiles:  users,
 		Usage:     storage.NewUsage(pool),
 		Tools:     storage.NewTools(pool),
 		Pending:   storage.NewPendingCalls(pool),

@@ -39,7 +39,7 @@ func (s *Server) handleEditMessage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal", "could not load conversation")
 		return
 	}
-	spec := s.runSpecFor(conv)
+	spec := s.runSpecFor(ctx, conv)
 	if s.blockedByPendingApproval(w, ctx, convID, userID) {
 		return
 	}
@@ -115,7 +115,7 @@ func (s *Server) handleRegenerate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal", "could not load conversation")
 		return
 	}
-	spec := s.runSpecFor(conv)
+	spec := s.runSpecFor(ctx, conv)
 	if s.blockedByPendingApproval(w, ctx, convID, userID) {
 		return
 	}

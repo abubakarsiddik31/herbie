@@ -60,6 +60,7 @@ func newHandlerServerWithTools(t *testing.T, agent *chat.Agent, convs ConvoStore
 		Log:       slog.New(slog.NewTextHandler(io.Discard, nil)),
 		Auth:      authtest.NewService(testSecret),
 		Tokens:    tm,
+		Profiles:  newFakeProfiles(),
 		Convos:    convs,
 		Msgs:      msgs,
 		Usage:     usage,
@@ -273,6 +274,21 @@ func (f *fakeMsgs) DeleteMessage(_ context.Context, convID, msgID, userID string
 }
 
 type fakeUsage struct{ events []storage.UsageEvent }
+
+type fakeProfiles struct{ texts map[string]string }
+
+func newFakeProfiles() *fakeProfiles { return &fakeProfiles{texts: map[string]string{}} }
+
+var _ ProfileStore = (*fakeProfiles)(nil)
+
+func (f *fakeProfiles) Instructions(_ context.Context, userID string) (string, error) {
+	return f.texts[userID], nil
+}
+
+func (f *fakeProfiles) SetInstructions(_ context.Context, userID, text string) error {
+	f.texts[userID] = text
+	return nil
+}
 
 func newFakeUsage() *fakeUsage { return &fakeUsage{} }
 

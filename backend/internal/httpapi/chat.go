@@ -74,6 +74,15 @@ type ShareStore interface {
 
 var _ ShareStore = (*storage.Shares)(nil)
 
+// ProfileStore bridges user-level preferences (global instructions) to
+// the profile endpoints and the run builder.
+type ProfileStore interface {
+	Instructions(ctx context.Context, userID string) (string, error)
+	SetInstructions(ctx context.Context, userID, instructions string) error
+}
+
+var _ ProfileStore = (*storage.Users)(nil)
+
 const maxPromptChars = 8000
 
 func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
@@ -107,7 +116,7 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal", "could not load conversation")
 		return
 	}
-	spec := s.runSpecFor(conv)
+	spec := s.runSpecFor(ctx, conv)
 
 	// A paused conversation must be resolved before new turns.
 	if s.blockedByPendingApproval(w, ctx, convID, userID) {
@@ -287,11 +296,18 @@ func sourceRows(sources []rag.Scored) []map[string]any {
 // runSpecFor resolves a conversation's model settings into a RunSpec: an
 // unset model falls back to the server default (first catalog entry with a
 // configured key), an empty system prompt to the built-in one (applied at
-// agent build), and nil temperature to the provider default.
-func (s *Server) runSpecFor(conv storage.Conversation) chat.RunSpec {
+// agent build), and nil temperature to the provider default. Global user
+// instructions prepend the prompt; the per-conversation prompt follows so
+// it wins ties. Fail-open: instruction lookup errors behave as unset.
+func (s *Server) runSpecFor(ctx context.Context, conv storage.Conversation) chat.RunSpec {
 	spec := chat.RunSpec{Model: conv.Model, Temperature: conv.Temperature, SystemPrompt: conv.SystemPrompt, RagEnabled: conv.RagEnabled}
 	if spec.Model == "" {
 		spec.Model = chat.DefaultModel(s.deps.ModelKeys).ID
+	}
+	if s.deps.Profiles != nil {
+		if global, err := s.deps.Profiles.Instructions(ctx, conv.UserID); err == nil && global != "" {
+			spec.SystemPrompt = "[User preferences]\n" + global + "\n\n" + spec.SystemPrompt
+		}
 	}
 	return spec
 }

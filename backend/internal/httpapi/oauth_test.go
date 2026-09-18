@@ -45,11 +45,12 @@ func newOAuthTestServer(t *testing.T, idp *httptest.Server) http.Handler {
 		HTTPClient: idp.Client(),
 	}
 	return NewServer(ServerDeps{
-		Cfg:    config.Config{FrontendOrigin: "https://app.example", JWTSecret: oauthTestSecret},
-		Log:    slog.New(slog.NewTextHandler(io.Discard, nil)),
-		Auth:   authtest.NewService(oauthTestSecret),
-		Tokens: mustTokenMaker(t),
-		OAuth:  []*oauth.Provider{provider},
+		Cfg:      config.Config{FrontendOrigin: "https://app.example", JWTSecret: oauthTestSecret},
+		Log:      slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Auth:     authtest.NewService(oauthTestSecret),
+		Tokens:   mustTokenMaker(t),
+		Profiles: newFakeProfiles(),
+		OAuth:    []*oauth.Provider{provider},
 	})
 }
 

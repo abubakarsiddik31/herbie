@@ -65,6 +65,7 @@ func newHandlerServerFull(t *testing.T, agent *chat.Agent, convs ConvoStore, msg
 		Log:       slog.New(slog.NewTextHandler(io.Discard, nil)),
 		Auth:      authtest.NewService(testSecret),
 		Tokens:    tm,
+		Profiles:  newFakeProfiles(),
 		Convos:    convs,
 		Msgs:      msgs,
 		Usage:     usage,

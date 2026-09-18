@@ -37,7 +37,7 @@ func (s *Server) handleApprovals(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// The resume runs under the conversation's current model settings.
-	spec := s.runSpecFor(conv)
+	spec := s.runSpecFor(ctx, conv)
 
 	var req struct {
 		Decisions []approvalDecision `json:"decisions"`

@@ -128,12 +128,13 @@ func newDocsServer(t *testing.T, maxUpload int64) (http.Handler, string, *fakeDo
 	cfg.RAG.EmbeddingModel = "gemini-embedding-001"
 	docs, fr, fv, fo := &fakeDocs{}, &fakeRag{}, &fakeVectors{}, &fakeObjects{}
 	h := NewServer(ServerDeps{
-		Log:    slog.New(slog.NewTextHandler(io.Discard, nil)),
-		Auth:   authtest.NewService(testSecret),
-		Tokens: tm,
-		Cfg:    cfg,
-		Usage:  newFakeUsage(),
-		Agent:  nil,
+		Log:      slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Auth:     authtest.NewService(testSecret),
+		Tokens:   tm,
+		Profiles: newFakeProfiles(),
+		Cfg:      cfg,
+		Usage:    newFakeUsage(),
+		Agent:    nil,
 		RagSearch: func(_ context.Context, _, _ string, _ int, _ []string) ([]rag.Scored, rag.UsageReport, error) {
 			return nil, rag.UsageReport{}, nil
 		},
@@ -219,10 +220,11 @@ func TestUploadDocumentOversize(t *testing.T) {
 func TestUploadDocumentDisabled(t *testing.T) {
 	tm, _ := auth.NewTokenMaker(testSecret)
 	h := NewServer(ServerDeps{
-		Log:    slog.New(slog.NewTextHandler(io.Discard, nil)),
-		Auth:   authtest.NewService(testSecret),
-		Tokens: tm,
-		Usage:  newFakeUsage(),
+		Log:      slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Auth:     authtest.NewService(testSecret),
+		Tokens:   tm,
+		Profiles: newFakeProfiles(),
+		Usage:    newFakeUsage(),
 	})
 	token, _, _ := tm.Issue("u-1", time.Now())
 	rec := uploadDoc(t, h, token, "a.txt", "x")

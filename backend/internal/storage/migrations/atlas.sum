@@ -1,4 +1,4 @@
-h1:l8HvscNoyNU4H0VRdCVyNoJFynr3zuG1kDKYoirgq5c=
+h1:OO35k/dWK+VxluUde/HuRosKP9pnE6JC9JSGJkBesyQ=
 00001_init.sql h1:JzcSZ+hS8j4FBAEasJFC0KyqFe8QRjnFIzvK0l53Y8c=
 20260831070441_add_user_tools.sql h1:n33/K0eZGdHtRI+bx6ZatvlLEfNacVO1BPCCAkewmAE=
 20260831144933_pending_call_surrogate_id.sql h1:5IOIo7ZQte1f++QNHqs1eJrsPbsQdLaoi1kE0JyxefQ=
@@ -8,3 +8,4 @@ h1:l8HvscNoyNU4H0VRdCVyNoJFynr3zuG1kDKYoirgq5c=
 20260918220000_conversation_rag_toggle.sql h1:5HhqbH/drnT30NmXAyD1HVhmofGQJVKuOmDyMtcoMh8=
 20260918230000_oauth_login.sql h1:i12F4SkMblvpGzKMfqVrKlm/4kS7sSwtYR5WAKrSi2w=
 20260918240000_conversation_shares.sql h1:JnOB8fDbqkBgVhvPQ6DA63J6K2xeK413Q1v3uhgPtG0=
+20260918250000_user_instructions.sql h1:3ToE73IJN0WeLC2q51XPDkPAyVXmwizUROP4OmXDoG4=

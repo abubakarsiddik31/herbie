@@ -83,13 +83,14 @@ func newShareTestServer(t *testing.T) (http.Handler, string, *fakeConvos, *fakeM
 	msgs := newFakeMsgs()
 	convs := newFakeConvos(msgs)
 	h := NewServer(ServerDeps{
-		Cfg:    config.Config{},
-		Log:    slog.New(slog.NewTextHandler(io.Discard, nil)),
-		Auth:   authtest.NewService(testSecret),
-		Tokens: tm,
-		Convos: convs,
-		Msgs:   msgs,
-		Shares: newFakeShares(convs),
+		Cfg:      config.Config{},
+		Log:      slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Auth:     authtest.NewService(testSecret),
+		Tokens:   tm,
+		Profiles: newFakeProfiles(),
+		Convos:   convs,
+		Msgs:     msgs,
+		Shares:   newFakeShares(convs),
 	})
 	token, _, err := tm.Issue("u-1", time.Now())
 	if err != nil {
