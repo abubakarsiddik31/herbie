@@ -28,6 +28,7 @@ type ServerDeps struct {
 	OAuth     []*oauth.Provider
 	Shares    ShareStore
 	Profiles  ProfileStore
+	Memories  MemoryStore
 	Convos    ConvoStore
 	Msgs      MsgStore
 	Usage     UsageStore
@@ -92,6 +93,10 @@ func NewServer(deps ServerDeps) http.Handler {
 	authed.HandleFunc("GET /api/me", s.handleMe)
 	authed.HandleFunc("GET /api/profile", s.handleGetProfile)
 	authed.HandleFunc("PATCH /api/profile", s.handlePatchProfile)
+	authed.HandleFunc("GET /api/memories", s.handleListMemories)
+	authed.HandleFunc("POST /api/memories", s.handleCreateMemory)
+	authed.HandleFunc("DELETE /api/memories/{id}", s.handleDeleteMemory)
+	authed.HandleFunc("DELETE /api/memories", s.handleClearMemories)
 	authed.HandleFunc("GET /api/models", s.handleListModels)
 	authed.HandleFunc("GET /api/conversations", s.handleListConversations)
 	authed.HandleFunc("POST /api/conversations", s.handleCreateConversation)

@@ -61,6 +61,7 @@ func newHandlerServerWithTools(t *testing.T, agent *chat.Agent, convs ConvoStore
 		Auth:      authtest.NewService(testSecret),
 		Tokens:    tm,
 		Profiles:  newFakeProfiles(),
+		Memories:  newFakeMemories(),
 		Convos:    convs,
 		Msgs:      msgs,
 		Usage:     usage,
@@ -287,6 +288,48 @@ func (f *fakeProfiles) Instructions(_ context.Context, userID string) (string, e
 
 func (f *fakeProfiles) SetInstructions(_ context.Context, userID, text string) error {
 	f.texts[userID] = text
+	return nil
+}
+
+type fakeMemories struct {
+	items map[string][]storage.Memory
+}
+
+func newFakeMemories() *fakeMemories {
+	return &fakeMemories{items: make(map[string][]storage.Memory)}
+}
+
+var _ MemoryStore = (*fakeMemories)(nil)
+
+func (f *fakeMemories) List(_ context.Context, userID string) ([]storage.Memory, error) {
+	return f.items[userID], nil
+}
+
+func (f *fakeMemories) Create(_ context.Context, userID, content string) (storage.Memory, error) {
+	mem := storage.Memory{
+		ID:        fmt.Sprintf("mem-%d", len(f.items[userID])+1),
+		UserID:    userID,
+		Content:   content,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+	f.items[userID] = append([]storage.Memory{mem}, f.items[userID]...)
+	return mem, nil
+}
+
+func (f *fakeMemories) Delete(_ context.Context, userID, memoryID string) error {
+	list := f.items[userID]
+	for i, m := range list {
+		if m.ID == memoryID {
+			f.items[userID] = append(list[:i], list[i+1:]...)
+			return nil
+		}
+	}
+	return storage.ErrNotFound
+}
+
+func (f *fakeMemories) DeleteAll(_ context.Context, userID string) error {
+	delete(f.items, userID)
 	return nil
 }
 
