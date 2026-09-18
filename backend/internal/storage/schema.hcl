@@ -645,3 +645,281 @@ table "user_memories" {
   }
 }
 
+table "projects" {
+  schema = schema.public
+  column "id" {
+    type    = uuid
+    null    = false
+    default = sql("gen_random_uuid()")
+  }
+  column "user_id" {
+    type = uuid
+    null = false
+  }
+  column "name" {
+    type = text
+    null = false
+  }
+  column "description" {
+    type    = text
+    null    = false
+    default = ""
+  }
+  column "instructions" {
+    type    = text
+    null    = false
+    default = ""
+  }
+  column "created_at" {
+    type    = timestamptz
+    null    = false
+    default = sql("now()")
+  }
+  column "updated_at" {
+    type    = timestamptz
+    null    = false
+    default = sql("now()")
+  }
+  primary_key {
+    columns = [column.id]
+  }
+  foreign_key "projects_user_id_fkey" {
+    columns     = [column.user_id]
+    ref_columns = [table.users.column.id]
+    on_delete   = CASCADE
+  }
+  index "idx_projects_user" {
+    on {
+      column = column.user_id
+    }
+    on {
+      column = column.updated_at
+      desc   = true
+    }
+  }
+}
+
+table "workflows" {
+  schema = schema.public
+  column "id" {
+    type    = uuid
+    null    = false
+    default = sql("gen_random_uuid()")
+  }
+  column "user_id" {
+    type = uuid
+    null = false
+  }
+  column "name" {
+    type = text
+    null = false
+  }
+  column "description" {
+    type    = text
+    null    = false
+    default = ""
+  }
+  column "trigger_type" {
+    type    = text
+    null    = false
+    default = "manual"
+  }
+  column "webhook_slug" {
+    type = text
+    null = true
+  }
+  column "webhook_secret" {
+    type    = text
+    null    = false
+    default = ""
+  }
+  column "nodes" {
+    type    = jsonb
+    null    = false
+    default = sql("'[]'::jsonb")
+  }
+  column "edges" {
+    type    = jsonb
+    null    = false
+    default = sql("'[]'::jsonb")
+  }
+  column "expose_as_tool" {
+    type    = boolean
+    null    = false
+    default = false
+  }
+  column "tool_name" {
+    type    = text
+    null    = false
+    default = ""
+  }
+  column "tool_description" {
+    type    = text
+    null    = false
+    default = ""
+  }
+  column "is_active" {
+    type    = boolean
+    null    = false
+    default = false
+  }
+  column "created_at" {
+    type    = timestamptz
+    null    = false
+    default = sql("now()")
+  }
+  column "updated_at" {
+    type    = timestamptz
+    null    = false
+    default = sql("now()")
+  }
+  primary_key {
+    columns = [column.id]
+  }
+  foreign_key "workflows_user_id_fkey" {
+    columns     = [column.user_id]
+    ref_columns = [table.users.column.id]
+    on_delete   = CASCADE
+  }
+  index "workflows_webhook_slug_key" {
+    unique  = true
+    columns = [column.webhook_slug]
+  }
+  index "idx_workflows_user" {
+    on {
+      column = column.user_id
+    }
+    on {
+      column = column.updated_at
+      desc   = true
+    }
+  }
+}
+
+table "workflow_runs" {
+  schema = schema.public
+  column "id" {
+    type    = uuid
+    null    = false
+    default = sql("gen_random_uuid()")
+  }
+  column "workflow_id" {
+    type = uuid
+    null = false
+  }
+  column "user_id" {
+    type = uuid
+    null = false
+  }
+  column "status" {
+    type    = text
+    null    = false
+    default = "pending"
+  }
+  column "trigger_source" {
+    type    = text
+    null    = false
+    default = "manual"
+  }
+  column "input_data" {
+    type    = jsonb
+    null    = false
+    default = sql("'{}'::jsonb")
+  }
+  column "output_data" {
+    type    = jsonb
+    null    = false
+    default = sql("'{}'::jsonb")
+  }
+  column "node_results" {
+    type    = jsonb
+    null    = false
+    default = sql("'{}'::jsonb")
+  }
+  column "error" {
+    type = text
+    null = true
+  }
+  column "duration_ms" {
+    type    = bigint
+    null    = false
+    default = 0
+  }
+  column "created_at" {
+    type    = timestamptz
+    null    = false
+    default = sql("now()")
+  }
+  column "finished_at" {
+    type = timestamptz
+    null = true
+  }
+  primary_key {
+    columns = [column.id]
+  }
+  foreign_key "workflow_runs_workflow_id_fkey" {
+    columns     = [column.workflow_id]
+    ref_columns = [table.workflows.column.id]
+    on_delete   = CASCADE
+  }
+  foreign_key "workflow_runs_user_id_fkey" {
+    columns     = [column.user_id]
+    ref_columns = [table.users.column.id]
+    on_delete   = CASCADE
+  }
+  index "idx_workflow_runs_workflow" {
+    columns = [column.workflow_id, column.created_at]
+  }
+  index "idx_workflow_runs_user" {
+    columns = [column.user_id, column.created_at]
+  }
+}
+
+table "workflow_credentials" {
+  schema = schema.public
+  column "id" {
+    type    = uuid
+    null    = false
+    default = sql("gen_random_uuid()")
+  }
+  column "user_id" {
+    type = uuid
+    null = false
+  }
+  column "name" {
+    type = text
+    null = false
+  }
+  column "type" {
+    type = text
+    null = false
+  }
+  column "data" {
+    type    = jsonb
+    null    = false
+    default = sql("'{}'::jsonb")
+  }
+  column "created_at" {
+    type    = timestamptz
+    null    = false
+    default = sql("now()")
+  }
+  column "updated_at" {
+    type    = timestamptz
+    null    = false
+    default = sql("now()")
+  }
+  primary_key {
+    columns = [column.id]
+  }
+  foreign_key "workflow_credentials_user_id_fkey" {
+    columns     = [column.user_id]
+    ref_columns = [table.users.column.id]
+    on_delete   = CASCADE
+  }
+  index "workflow_credentials_user_name_key" {
+    unique  = true
+    columns = [column.user_id, column.name]
+  }
+}
+

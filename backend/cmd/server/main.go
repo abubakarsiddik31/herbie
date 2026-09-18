@@ -174,6 +174,7 @@ func main() {
 		RAG:       ragRunner,
 		Docs:      storage.NewDocuments(pool),
 		Projects:  storage.NewProjects(pool),
+		Workflows: storage.NewWorkflows(pool),
 		Vectors:   vectors,
 		Objects:   objects,
 	})
