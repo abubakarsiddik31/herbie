@@ -38,6 +38,11 @@ type Config struct {
 	// RAGConfig gates the retrieval stack. Enabled is an explicit opt-in
 	// so a running stack never requires the rag compose profile.
 	RAG RAGConfig
+
+	// OAuth carries social-login provider credentials. A provider is
+	// active only when both its client ID and secret are set; the login
+	// UI hides providers that are not configured.
+	OAuth OAuthConfig
 }
 
 type RAGConfig struct {
@@ -68,6 +73,21 @@ type RAGConfig struct {
 	CompactionThreshold     int
 	CompactionKeepRecent    int
 	CompactionSummaryTokens int
+}
+
+type OAuthProviderConfig struct {
+	ClientID string
+	Secret   string
+}
+
+func (c OAuthProviderConfig) Enabled() bool {
+	return c.ClientID != "" && c.Secret != ""
+}
+
+type OAuthConfig struct {
+	Google       OAuthProviderConfig
+	GitHub       OAuthProviderConfig
+	RedirectBase string
 }
 
 // dotenvPaths are where a repo-root .env may sit relative to the working
@@ -166,6 +186,18 @@ func Load() (Config, error) {
 		ChatInputRate:    inputRate,
 		ChatOutputRate:   outputRate,
 
+		OAuth: OAuthConfig{
+			Google: OAuthProviderConfig{
+				ClientID: os.Getenv("OAUTH_GOOGLE_CLIENT_ID"),
+				Secret:   os.Getenv("OAUTH_GOOGLE_CLIENT_SECRET"),
+			},
+			GitHub: OAuthProviderConfig{
+				ClientID: os.Getenv("OAUTH_GITHUB_CLIENT_ID"),
+				Secret:   os.Getenv("OAUTH_GITHUB_CLIENT_SECRET"),
+			},
+			RedirectBase: os.Getenv("OAUTH_REDIRECT_BASE"),
+		},
+
 		ToolHTTPTimeout:       time.Duration(toolTimeout) * time.Second,
 		ToolHTTPMaxBytes:      envInt64("TOOL_HTTP_MAX_BYTES", 1<<20),
 		ToolResultMaxBytes:    envInt64("TOOL_RESULT_MAX_BYTES", 32<<10),
@@ -203,6 +235,9 @@ func Load() (Config, error) {
 		},
 	}
 	var errs []error
+	if cfg.OAuth.RedirectBase == "" {
+		cfg.OAuth.RedirectBase = "http://localhost:" + cfg.Port
+	}
 	if cfg.DatabaseURL == "" {
 		errs = append(errs, errors.New("DATABASE_URL is required"))
 	}

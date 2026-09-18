@@ -27,7 +27,7 @@ table "users" {
   }
   column "password_hash" {
     type    = text
-    null    = false
+    null    = true
   }
   column "created_at" {
     type    = timestamptz
@@ -40,6 +40,66 @@ table "users" {
   index "users_email_key" {
     unique  = true
     columns = [column.email]
+  }
+}
+
+table "oauth_accounts" {
+  schema = schema.public
+  column "provider" {
+    type = text
+    null = false
+  }
+  column "provider_subject" {
+    type = text
+    null = false
+  }
+  column "user_id" {
+    type = uuid
+    null = false
+  }
+  column "created_at" {
+    type    = timestamptz
+    null    = false
+    default = sql("now()")
+  }
+  primary_key {
+    columns = [column.provider, column.provider_subject]
+  }
+  foreign_key "oauth_accounts_user_id_fkey" {
+    columns     = [column.user_id]
+    ref_columns = [table.users.column.id]
+    on_delete   = CASCADE
+  }
+  index "oauth_accounts_user_provider_key" {
+    unique  = true
+    columns = [column.user_id, column.provider]
+  }
+}
+
+table "oauth_codes" {
+  schema = schema.public
+  column "code_hash" {
+    type = text
+    null = false
+  }
+  column "user_id" {
+    type = uuid
+    null = false
+  }
+  column "expires_at" {
+    type = timestamptz
+    null = false
+  }
+  primary_key {
+    columns = [column.code_hash]
+  }
+  foreign_key "oauth_codes_user_id_fkey" {
+    columns     = [column.user_id]
+    ref_columns = [table.users.column.id]
+    on_delete   = CASCADE
+  }
+  index "idx_oauth_codes_user" {
+    columns = [column.user_id]
   }
 }
 

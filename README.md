@@ -49,6 +49,27 @@ make frontend          # vite dev server      (default :5173)
 
 Then open http://localhost:5173 and register an account.
 
+## Social login
+
+Google and GitHub sign-in are optional and off unless configured — the login
+UI only shows providers with both a client ID and secret set:
+
+```bash
+OAUTH_GOOGLE_CLIENT_ID=…      # Google Cloud console → Credentials → OAuth client
+OAUTH_GOOGLE_CLIENT_SECRET=…
+OAUTH_GITHUB_CLIENT_ID=…      # GitHub Settings → Developer settings → OAuth Apps
+OAUTH_GITHUB_CLIENT_SECRET=…
+# OAUTH_REDIRECT_BASE=https://chat.example.com  # defaults to http://localhost:$APP_PORT
+```
+
+Register each provider's callback URL (`<base>/api/auth/oauth/<google|github>/callback`)
+in its console. The flow is authorization-code + PKCE with a sealed `state`
+cookie; verified provider emails link to an existing password account or
+provision a passwordless one. The callback hands the SPA a single-use code
+(`POST /api/auth/oauth/consume`) — tokens never travel in the URL. With
+nothing configured, `GET /api/auth/providers` returns an empty list and auth
+stays email+password only.
+
 Note: the compose Postgres is mapped to host port **5433** (not 5432), so it can coexist with a local Postgres — `DATABASE_URL` in `.env` already points at 5433.
 
 ## Cost model

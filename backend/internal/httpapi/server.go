@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/abubakarsiddik31/golem-chatbot/internal/auth"
+	"github.com/abubakarsiddik31/golem-chatbot/internal/auth/oauth"
 	"github.com/abubakarsiddik31/golem-chatbot/internal/chat"
 	"github.com/abubakarsiddik31/golem-chatbot/internal/config"
 	"github.com/abubakarsiddik31/golem-chatbot/internal/cost"
@@ -16,10 +17,14 @@ import (
 // ServerDeps carries the wired collaborators. Stores are narrow interfaces
 // (chat.go) so handler tests run offline; *storage.* types satisfy them.
 type ServerDeps struct {
-	Cfg       config.Config
-	Log       *slog.Logger
-	Auth      *auth.Service
-	Tokens    *auth.TokenMaker
+	Cfg    config.Config
+	Log    *slog.Logger
+	Auth   *auth.Service
+	Tokens *auth.TokenMaker
+	// OAuth lists the configured social-login providers in display
+	// order. Empty = password auth only; the login UI hides the
+	// provider buttons.
+	OAuth     []*oauth.Provider
 	Convos    ConvoStore
 	Msgs      MsgStore
 	Usage     UsageStore
@@ -68,6 +73,10 @@ func NewServer(deps ServerDeps) http.Handler {
 	s.mux.HandleFunc("POST /api/auth/login", s.handleLogin)
 	s.mux.HandleFunc("POST /api/auth/refresh", s.handleRefresh)
 	s.mux.HandleFunc("POST /api/auth/logout", s.handleLogout)
+	s.mux.HandleFunc("GET /api/auth/providers", s.handleOAuthProviders)
+	s.mux.HandleFunc("GET /api/auth/oauth/{provider}", s.handleOAuthStart)
+	s.mux.HandleFunc("GET /api/auth/oauth/{provider}/callback", s.handleOAuthCallback)
+	s.mux.HandleFunc("POST /api/auth/oauth/consume", s.handleOAuthConsume)
 
 	// Authenticated API: more specific patterns above win over this
 	// catch-all, so /api/auth/* stays public while the rest of /api/

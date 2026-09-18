@@ -1,9 +1,10 @@
 import { useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router";
 import { toast } from "sonner";
-import { ApiError, apiFetch } from "@/lib/api";
+import { ApiError, BASE, apiFetch } from "@/lib/api";
 import type { User } from "@/lib/types";
 import { useAuth } from "@/stores/auth";
+import { useOAuthProviders } from "./useOAuthProviders";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -40,6 +41,7 @@ const copy = {
 export function AuthForm({ mode }: { mode: keyof typeof copy }) {
   const t = copy[mode];
   const navigate = useNavigate();
+  const providers = useOAuthProviders();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [pending, setPending] = useState(false);
@@ -69,6 +71,22 @@ export function AuthForm({ mode }: { mode: keyof typeof copy }) {
           <CardDescription>{t.subtitle}</CardDescription>
         </CardHeader>
         <CardContent>
+          {providers !== null && providers.length > 0 && (
+            <>
+              <div className="grid gap-2">
+                {providers.map((p) => (
+                  <Button key={p.id} variant="outline" asChild>
+                    <a href={`${BASE}/api/auth/oauth/${p.id}`}>Continue with {p.name}</a>
+                  </Button>
+                ))}
+              </div>
+              <div className="my-4 flex items-center gap-2 text-xs text-muted-foreground">
+                <span className="h-px flex-1 bg-border" />
+                or
+                <span className="h-px flex-1 bg-border" />
+              </div>
+            </>
+          )}
           <form onSubmit={onSubmit} className="grid gap-4">
             <div className="grid gap-2">
               <Label htmlFor="email">Email</Label>

@@ -4,6 +4,7 @@ import { Toaster } from "@/components/ui/sonner";
 import { RequireAuth } from "@/components/RequireAuth";
 import { LoginPage } from "@/pages/LoginPage";
 import { RegisterPage } from "@/pages/RegisterPage";
+import { OAuthCallbackPage } from "@/pages/OAuthCallbackPage";
 import { ChatPage } from "@/pages/ChatPage";
 import { ToolsPage } from "@/pages/ToolsPage";
 import { UsagePage } from "@/pages/UsagePage";
@@ -18,6 +19,7 @@ export default function App() {
         <Routes>
           <Route path="/login" element={<LoginPage />} />
           <Route path="/register" element={<RegisterPage />} />
+          <Route path="/auth/callback" element={<OAuthCallbackPage />} />
           <Route element={<RequireAuth />}>
             <Route path="/chat/:conversationId?" element={<ChatPage />} />
             <Route path="/tools" element={<ToolsPage />} />

@@ -80,3 +80,61 @@ func TestWrongAlgTokenRejected(t *testing.T) {
 		t.Fatal("alg=none forgery must be rejected")
 	}
 }
+
+func TestOAuthLoginProvisionLinkAndRelogin(t *testing.T) {
+	ctx := context.Background()
+	svc := newTestService()
+
+	first, err := svc.OAuthLogin(ctx, "google", "sub-1", "o@x.co")
+	if err != nil {
+		t.Fatalf("provision: %v", err)
+	}
+	if first.User.Email != "o@x.co" || first.AccessToken == "" {
+		t.Fatalf("bad provision result: %+v", first.User)
+	}
+	if _, err := svc.Login(ctx, "o@x.co", "anything"); !errors.Is(err, auth.ErrInvalidCredentials) {
+		t.Fatalf("password login on oauth-only account should fail, got %v", err)
+	}
+
+	second, err := svc.OAuthLogin(ctx, "google", "sub-1", "o@x.co")
+	if err != nil {
+		t.Fatalf("relogin: %v", err)
+	}
+	if second.User.ID != first.User.ID {
+		t.Fatal("relogin resolved a different user")
+	}
+
+	if _, err := svc.Register(ctx, "p@x.co", "longenough1"); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	linked, err := svc.OAuthLogin(ctx, "github", "gh-9", "p@x.co")
+	if err != nil {
+		t.Fatalf("link: %v", err)
+	}
+	pw, err := svc.Login(ctx, "p@x.co", "longenough1")
+	if err != nil || pw.User.ID != linked.User.ID {
+		t.Fatalf("password login after link: %v", err)
+	}
+}
+
+func TestOAuthCodeSingleUse(t *testing.T) {
+	ctx := context.Background()
+	svc := newTestService()
+	res, err := svc.OAuthLogin(ctx, "google", "sub-7", "c@x.co")
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, err := svc.IssueOAuthCode(ctx, res.User.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.ConsumeOAuthCode(ctx, code); err != nil {
+		t.Fatalf("consume: %v", err)
+	}
+	if _, err := svc.ConsumeOAuthCode(ctx, code); !errors.Is(err, auth.ErrInvalidOAuthCode) {
+		t.Fatalf("expected single use, got %v", err)
+	}
+	if _, err := svc.ConsumeOAuthCode(ctx, "bogus"); !errors.Is(err, auth.ErrInvalidOAuthCode) {
+		t.Fatalf("expected ErrInvalidOAuthCode, got %v", err)
+	}
+}
