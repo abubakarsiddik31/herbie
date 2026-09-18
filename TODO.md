@@ -25,10 +25,10 @@ Build in order. One branch per item, merge to `main` before starting the next.
 - [x] **7. Built-in web search tool** (`b32ecec`): Bundled `web_search` tool with Tavily and Brave Search providers, approval-gated by default, markdown link citations.
 - [x] **8. Keyboard shortcuts + command palette** (`689f820`): `Cmd/Ctrl+K` command palette with search/navigation/theme, `?` shortcuts cheat-sheet, Enter/Escape/Slash hotkeys.
 - [x] **10. Cumulative citation numbering** (`36042e2`): `search_documents` citations maintain run-wide cumulative indices `[1]`, `[2]`, `[3]...` matching source cards across multi-search runs.
+- [x] **11. Artifacts & Code Preview** (`ca829ae`): Interactive code block previews for HTML (sandboxed iframe with reload), SVG (vector render), and Mermaid (flowcharts/diagrams with theme integration), with Code/Preview tabs, fullscreen modal expansion, and copy button.
+- [x] **12. Cross-Chat Memory** (`3a80e64`): Persistent long-term user memories table & migrations, automatic memory injection (`[User memory]`) into every conversation run, built-in `remember` tool, and memory management UI on `/preferences`.
 
 ## Future roadmap / Bigger bets (each its own project)
 
-- Artifacts/canvas: code blocks render/run with preview for HTML/SVG/Mermaid.
+- Voice output / Read Aloud (dictation input only today).
 - Image generation tool (input-only today).
-- Cross-chat memory (only per-conversation and global prompts today).
-- Voice output (dictation input only today).
