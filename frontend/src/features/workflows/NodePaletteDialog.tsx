@@ -44,7 +44,7 @@ export function NodePaletteDialog({ open, onOpenChange, onSelectNode }: NodePale
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl gap-0 p-0 overflow-hidden">
+      <DialogContent className="sm:max-w-2xl gap-0 p-0 overflow-hidden">
         <DialogHeader className="p-4 pb-3 border-b border-border">
           <DialogTitle className="text-base tracking-tight">Add Workflow Step</DialogTitle>
           <DialogDescription className="text-xs">

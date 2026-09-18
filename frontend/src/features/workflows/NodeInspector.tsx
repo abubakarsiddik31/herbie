@@ -157,9 +157,9 @@ export function NodeInspector({
       </div>
 
       {/* Content */}
-      <ScrollArea className="flex-1 p-4">
+      <ScrollArea className="flex-1 min-w-0 p-4">
         {activeTab === "config" ? (
-          <div className="space-y-4 text-xs">
+          <div className="space-y-4 text-xs min-w-0">
             {/* Step Name */}
             <div className="space-y-1.5">
               <Label htmlFor="node-name" className="text-xs">Step Title</Label>
@@ -512,7 +512,7 @@ export function NodeInspector({
                 <p className="mt-1 text-[11px]">Click "Test Workflow" in the toolbar to run.</p>
               </div>
             ) : (
-              <div className="space-y-4">
+              <div className="space-y-4 min-w-0">
                 <div
                   className={cn(
                     "flex items-center justify-between rounded-xl border p-3 text-xs",

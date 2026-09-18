@@ -347,7 +347,7 @@ export function CodeBlock({
 
       {isPreviewable && (
         <Dialog open={isExpanded} onOpenChange={setIsExpanded}>
-          <DialogContent className="max-w-4xl max-h-[85vh] flex flex-col p-4">
+          <DialogContent className="sm:max-w-4xl lg:max-w-5xl max-h-[85vh] flex flex-col p-4">
             <DialogHeader className="flex flex-row items-center justify-between pb-2 border-b">
               <DialogTitle className="text-sm font-semibold uppercase tracking-wider flex items-center gap-2">
                 <span>{language}</span>
