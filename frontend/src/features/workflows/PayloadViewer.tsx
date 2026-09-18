@@ -17,7 +17,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 
 interface PayloadViewerProps {
@@ -132,8 +131,8 @@ export function PayloadViewer({
 
       {/* Expanded Fullscreen Dialog */}
       <Dialog open={fullscreen} onOpenChange={setFullscreen}>
-        <DialogContent className="sm:max-w-4xl lg:max-w-5xl max-h-[88vh] flex flex-col p-0 overflow-hidden">
-          <DialogHeader className="flex flex-row items-center justify-between border-b border-border p-4 bg-muted/20">
+        <DialogContent className="sm:max-w-4xl lg:max-w-5xl h-[88vh] max-h-[88vh] flex flex-col p-0 overflow-hidden">
+          <DialogHeader className="flex flex-row items-center justify-between border-b border-border p-4 bg-muted/20 shrink-0">
             <DialogTitle className="text-sm font-semibold tracking-tight">{title}</DialogTitle>
             <div className="flex items-center gap-2 pr-6">
               {hasRichText && (
@@ -169,7 +168,7 @@ export function PayloadViewer({
             </div>
           </DialogHeader>
 
-          <ScrollArea className="flex-1 p-6">
+          <div className="flex-1 min-h-0 overflow-y-auto p-6">
             {mode === "rich" && hasRichText ? (
               <div className="max-w-3xl mx-auto">
                 <RichPayloadRenderer data={data} expanded />
@@ -177,7 +176,7 @@ export function PayloadViewer({
             ) : (
               <RawJSONRenderer data={data} expanded />
             )}
-          </ScrollArea>
+          </div>
         </DialogContent>
       </Dialog>
     </div>
