@@ -32,25 +32,25 @@ func TestSearchToolSchema(t *testing.T) {
 }
 
 func searchDeps(captured *[]string) Deps {
-	return Deps{Search: func(_ context.Context, query string, k int, _ []string) ([]rag.Scored, error) {
+	return Deps{Search: func(_ context.Context, query string, k int, _ []string) ([]rag.Scored, int, error) {
 		*captured = append(*captured, query+"/"+strconv.Itoa(k))
 		return []rag.Scored{
 			{Chunk: rag.Chunk{DocTitle: "a.txt", Index: 0, Content: "alpha text"}, Score: 0.9},
 			{Chunk: rag.Chunk{DocTitle: "a.txt", Index: 1, Content: strings.Repeat("long ", 100)}, Score: 0.5},
-		}, nil
+		}, 0, nil
 	}}
 }
 
 func TestSearchToolExec(t *testing.T) {
 	var captured []string
 	var seenDocIDs []string
-	deps := Deps{Search: func(_ context.Context, query string, k int, docIDs []string) ([]rag.Scored, error) {
+	deps := Deps{Search: func(_ context.Context, query string, k int, docIDs []string) ([]rag.Scored, int, error) {
 		captured = append(captured, query+"/"+strconv.Itoa(k))
 		seenDocIDs = docIDs
 		return []rag.Scored{
 			{Chunk: rag.Chunk{DocTitle: "a.txt", Heading: "Intro", Page: 2, Index: 0, Content: "alpha text"}, Score: 0.9},
 			{Chunk: rag.Chunk{DocTitle: "a.txt", Index: 1, Content: "beta text"}, Score: 0.5},
-		}, nil
+		}, 0, nil
 	}}
 	out, err := SearchTool().Exec(context.Background(), deps, json.RawMessage(`{"query":"q","k":3}`))
 	if err != nil {
@@ -70,9 +70,9 @@ func TestSearchToolExec(t *testing.T) {
 
 func TestSearchToolDocIDs(t *testing.T) {
 	var seen []string
-	deps := Deps{Search: func(_ context.Context, _ string, _ int, docIDs []string) ([]rag.Scored, error) {
+	deps := Deps{Search: func(_ context.Context, _ string, _ int, docIDs []string) ([]rag.Scored, int, error) {
 		seen = docIDs
-		return nil, nil
+		return nil, 0, nil
 	}}
 	if _, err := SearchTool().Exec(context.Background(), deps, json.RawMessage(`{"query":"q","documentIds":["d1"]}`)); err != nil {
 		t.Fatal(err)
@@ -83,7 +83,7 @@ func TestSearchToolDocIDs(t *testing.T) {
 }
 
 func TestSearchToolNoResults(t *testing.T) {
-	deps := Deps{Search: func(_ context.Context, _ string, _ int, _ []string) ([]rag.Scored, error) { return nil, nil }}
+	deps := Deps{Search: func(_ context.Context, _ string, _ int, _ []string) ([]rag.Scored, int, error) { return nil, 0, nil }}
 	out, err := SearchTool().Exec(context.Background(), deps, json.RawMessage(`{"query":"q"}`))
 	if err != nil || out.Text != "No matching documents." {
 		t.Fatalf("out=%q err=%v", out.Text, err)
@@ -100,9 +100,9 @@ func TestSearchToolDisabled(t *testing.T) {
 func TestSearchToolClampsK(t *testing.T) {
 	for args, want := range map[string]int{`{"query":"q","k":99}`: 20, `{"query":"q","k":0}`: 5, `{"query":"q","k":-3}`: 5} {
 		var got int
-		deps := Deps{Search: func(_ context.Context, _ string, k int, _ []string) ([]rag.Scored, error) {
+		deps := Deps{Search: func(_ context.Context, _ string, k int, _ []string) ([]rag.Scored, int, error) {
 			got = k
-			return nil, nil
+			return nil, 0, nil
 		}}
 		if _, err := SearchTool().Exec(context.Background(), deps, json.RawMessage(args)); err != nil {
 			t.Fatal(err)
@@ -122,8 +122,8 @@ func TestSearchToolEmptyQueryRetries(t *testing.T) {
 }
 
 func TestSearchToolErrorPropagates(t *testing.T) {
-	deps := Deps{Search: func(_ context.Context, _ string, _ int, _ []string) ([]rag.Scored, error) {
-		return nil, errors.New("index down")
+	deps := Deps{Search: func(_ context.Context, _ string, _ int, _ []string) ([]rag.Scored, int, error) {
+		return nil, 0, errors.New("index down")
 	}}
 	_, err := SearchTool().Exec(context.Background(), deps, json.RawMessage(`{"query":"q"}`))
 	if err == nil || !strings.Contains(err.Error(), "index down") {
@@ -148,7 +148,7 @@ func TestPromptForCitations(t *testing.T) {
 
 func TestBuildAddsRetrievalGuidance(t *testing.T) {
 	got := promptFor(RunSpec{SystemPrompt: "base"}, []tool.Tool[Deps]{SearchTool()})
-	for _, want := range []string{"refined", "documentIds", "ONLY bracket numbers", "restart at 1"} {
+	for _, want := range []string{"refined", "documentIds", "ONLY bracket numbers", "cumulative across calls"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("guidance lacks %q: %s", want, got)
 		}
@@ -156,5 +156,21 @@ func TestBuildAddsRetrievalGuidance(t *testing.T) {
 	plain := promptFor(RunSpec{SystemPrompt: "base"}, nil)
 	if strings.Contains(plain, "bracket numbers") {
 		t.Fatalf("guidance leaks into non-search runs: %s", plain)
+	}
+}
+
+func TestSearchToolCumulativeOffset(t *testing.T) {
+	deps := Deps{Search: func(_ context.Context, _ string, _ int, _ []string) ([]rag.Scored, int, error) {
+		return []rag.Scored{
+			{Chunk: rag.Chunk{DocTitle: "b.txt", Content: "second call content"}, Score: 0.8},
+		}, 3, nil // 3 sources existed from earlier calls
+	}}
+	out, err := SearchTool().Exec(context.Background(), deps, json.RawMessage(`{"query":"more"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The new chunk must be labeled [4], not [1]
+	if !strings.Contains(out.Text, "[4] (b.txt) second call content") {
+		t.Fatalf("expected cumulative bracket number [4], got:\n%s", out.Text)
 	}
 }

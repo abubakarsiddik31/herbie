@@ -350,11 +350,12 @@ func (s *Server) searchDeps(userID, convID string, sources *[]rag.Scored) chat.S
 	if s.deps.RagSearch == nil {
 		return nil
 	}
-	return func(ctx context.Context, query string, k int, docIDs []string) ([]rag.Scored, error) {
+	return func(ctx context.Context, query string, k int, docIDs []string) ([]rag.Scored, int, error) {
 		scored, rep, err := s.deps.RagSearch(ctx, userID, query, k, docIDs)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
+		offset := len(*sources)
 		*sources = append(*sources, scored...)
 		if rep.Embed.InputTokens > 0 {
 			model := s.deps.Cfg.RAG.EmbeddingModel
@@ -373,7 +374,7 @@ func (s *Server) searchDeps(userID, convID string, sources *[]rag.Scored) chat.S
 				InputTokens: rep.RerankIn, OutputTokens: rep.RerankOut, Estimated: false, CostMicros: cost,
 			})
 		}
-		return scored, nil
+		return scored, offset, nil
 	}
 }
 
