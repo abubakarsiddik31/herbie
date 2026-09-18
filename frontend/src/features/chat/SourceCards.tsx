@@ -31,6 +31,12 @@ export function SourceCards({ sources }: { sources: Source[] }) {
                 <span className="rounded bg-muted px-1 font-mono text-[10px]">[{i + 1}]</span>
                 <span className="truncate" title={s.title}>{s.title}</span>
               </p>
+              {(s.heading || s.page > 0) && (
+                <p className="mt-0.5 text-muted-foreground text-[11px]">
+                  {s.heading && <span>§ {s.heading}</span>}
+                  {s.page > 0 && <span> · p.{s.page}</span>}
+                </p>
+              )}
               <p className="mt-1 line-clamp-3 text-muted-foreground text-xs leading-relaxed">{s.snippet}</p>
             </li>
           ))}

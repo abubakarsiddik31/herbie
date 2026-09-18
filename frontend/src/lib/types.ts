@@ -19,6 +19,8 @@ export interface ChatMessage {
 export interface Source {
   documentId: string;
   title: string;
+  heading: string;
+  page: number;
   snippet: string;
   score: number;
 }
