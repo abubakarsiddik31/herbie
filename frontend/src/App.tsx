@@ -6,6 +6,7 @@ import { RequireAuth } from "@/components/RequireAuth";
 import { LoginPage } from "@/pages/LoginPage";
 import { RegisterPage } from "@/pages/RegisterPage";
 import { OAuthCallbackPage } from "@/pages/OAuthCallbackPage";
+import { PreferencesPage } from "@/pages/PreferencesPage";
 import { SharedPage } from "@/pages/SharedPage";
 import { ChatPage } from "@/pages/ChatPage";
 import { ToolsPage } from "@/pages/ToolsPage";
@@ -28,6 +29,7 @@ export default function App() {
             <Route path="/chat/:conversationId?" element={<ChatPage />} />
             <Route path="/tools" element={<ToolsPage />} />
             <Route path="/usage" element={<UsagePage />} />
+            <Route path="/preferences" element={<PreferencesPage />} />
             <Route path="/documents" element={<DocumentsPage />} />
           </Route>
           <Route path="*" element={<Navigate to="/chat" replace />} />
