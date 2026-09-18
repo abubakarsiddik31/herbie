@@ -336,6 +336,9 @@ func (s *Server) userTools(ctx context.Context, userID string, ragEnabled bool) 
 	if s.deps.RagSearch != nil && ragEnabled {
 		tools = append(tools, chat.SearchTool())
 	}
+	if s.deps.WebSearch != nil {
+		tools = append(tools, chat.WebSearchTool(s.deps.WebSearch, s.deps.Cfg.WebSearchRequireApproval))
+	}
 	return tools, nil
 }
 

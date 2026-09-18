@@ -12,6 +12,7 @@ import (
 	"github.com/abubakarsiddik31/golem-chatbot/internal/cost"
 	"github.com/abubakarsiddik31/golem-chatbot/internal/rag"
 	"github.com/abubakarsiddik31/golem-chatbot/internal/storage"
+	"github.com/abubakarsiddik31/golem-chatbot/internal/websearch"
 )
 
 // ServerDeps carries the wired collaborators. Stores are narrow interfaces
@@ -39,6 +40,9 @@ type ServerDeps struct {
 	// embedding's exact usage for metering. Nil = RAG disabled: no
 	// search tool is registered and the documents API answers 503.
 	RagSearch RagSearchFunc
+	// WebSearch provides public web retrieval. Nil = web search disabled:
+	// the web_search tool is not registered.
+	WebSearch websearch.Searcher
 	// Compactor summarizes hot histories into the run instructions.
 	// Nil = compaction disabled: history passes through verbatim.
 	Compactor *chat.Compactor

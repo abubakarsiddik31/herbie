@@ -20,6 +20,7 @@ import (
 	"github.com/abubakarsiddik31/golem-chatbot/internal/rag"
 	"github.com/abubakarsiddik31/golem-chatbot/internal/storage"
 	"github.com/abubakarsiddik31/golem-chatbot/internal/weaviate"
+	"github.com/abubakarsiddik31/golem-chatbot/internal/websearch"
 )
 
 func main() {
@@ -130,6 +131,12 @@ func main() {
 		}
 	}
 
+	var webSearch websearch.Searcher
+	if cfg.WebSearch.Enabled() {
+		webSearch = websearch.New(cfg.WebSearch)
+		log.Info("web search enabled", "provider", cfg.WebSearch.Provider)
+	}
+
 	// Per-model ledger rates from the catalog; the env rates stay as the
 	// fallback for models without a catalog entry.
 	byModel := make(map[string]cost.Rates, len(chat.Catalog())+1)
@@ -161,6 +168,7 @@ func main() {
 		Rates:     rates,
 		ModelKeys: modelKeys,
 		RagSearch: ragSearch,
+		WebSearch: webSearch,
 		Compactor: compactor,
 		RAG:       ragRunner,
 		Docs:      storage.NewDocuments(pool),
