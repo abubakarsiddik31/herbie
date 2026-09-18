@@ -77,7 +77,7 @@ describe("WorkflowsPage", () => {
     const user = userEvent.setup();
     renderWorkflowsPage();
 
-    expect(await screen.findByText("No workflows found")).toBeInTheDocument();
+    expect(await screen.findByText("No workflows created yet")).toBeInTheDocument();
 
     // Click "New Workflow"
     const newBtn = screen.getByRole("button", { name: /New Workflow/i });
@@ -138,10 +138,52 @@ describe("WorkflowsPage", () => {
     expect(screen.getByText("Daily Weather Digest")).toBeInTheDocument();
 
     // Filter by "GitHub"
-    const searchInput = screen.getByPlaceholderText(/Search workflows/i);
+    const searchInput = screen.getByPlaceholderText(/Search my workflows/i);
     await user.type(searchInput, "GitHub");
 
     expect(screen.getByText("Sync GitHub Issues")).toBeInTheDocument();
     expect(screen.queryByText("Daily Weather Digest")).not.toBeInTheDocument();
+  });
+
+  it("switches to Example Templates tab, filters by category, previews and clones a template", async () => {
+    const user = userEvent.setup();
+    renderWorkflowsPage();
+
+    // Switch to Example Templates tab
+    const templatesTab = screen.getByRole("button", { name: /Example Templates/i });
+    await user.click(templatesTab);
+
+    // Verify templates are rendered
+    expect(await screen.findByText("GitHub Issue Triage & AI Summary")).toBeInTheDocument();
+    expect(screen.getByText("Hacker News AI Research Digest")).toBeInTheDocument();
+
+    // Filter by category "Alerts & Messaging"
+    const alertsCategoryBtn = screen.getByRole("button", { name: "Alerts & Messaging" });
+    await user.click(alertsCategoryBtn);
+
+    expect(screen.getByText("Crypto Price Threshold Monitor")).toBeInTheDocument();
+    expect(screen.queryByText("Hacker News AI Research Digest")).not.toBeInTheDocument();
+
+    // Search within templates
+    const searchInput = screen.getByPlaceholderText(/Search templates/i);
+    await user.type(searchInput, "Crypto");
+
+    expect(screen.getByText("Crypto Price Threshold Monitor")).toBeInTheDocument();
+
+    // Click "Preview"
+    const previewBtn = screen.getByRole("button", { name: /Preview/i });
+    await user.click(previewBtn);
+
+    // Verify preview modal appears
+    expect(await screen.findByText("Pipeline Execution Steps (5 nodes)")).toBeInTheDocument();
+
+    // Click "Use This Template"
+    const useBtn = screen.getByRole("button", { name: /Use This Template/i });
+    await user.click(useBtn);
+
+    await waitFor(() => {
+      expect(mockWorkflows).toHaveLength(1);
+      expect(mockWorkflows[0].name).toBe("Crypto Price Threshold Monitor");
+    });
   });
 });
