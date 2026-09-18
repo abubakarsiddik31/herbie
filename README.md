@@ -132,3 +132,5 @@ RAG_ENABLED=true
 | `MAX_UPLOAD_BYTES` | `20971520` | Upload cap (20 MB) |
 
 API: `GET /api/documents`, `POST /api/documents` (multipart `file`), `DELETE /api/documents/{id}`; all 503 with `rag_disabled` when the stack is off. Ingestion is idempotent per document (stale vectors are deleted before re-upsert); a failed ingest keeps the row (`status=failed`) and the original object.
+
+Retrieval quality is covered by a live golden-query eval: `BASE=http://localhost:8080 ./scripts/rag-eval.sh` uploads three fixture docs (`backend/internal/rag/testdata/eval/`, one topic each with a unique canary sentence), asks one question per doc, and passes only if every answer top-cites the expected document and carries a matching `[n]` bracket citation.
