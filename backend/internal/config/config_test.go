@@ -182,3 +182,91 @@ func TestRAGBadDimsFails(t *testing.T) {
 		t.Fatal("want error for bad dims")
 	}
 }
+
+func TestRAGRetrievalDefaults(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://localhost/gc")
+	t.Setenv("JWT_SECRET", "0123456789abcdef0123456789abcdef")
+	t.Setenv("GEMINI_API_KEY", "k")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.RAG.RetrievalAlpha != 0.5 {
+		t.Fatalf("RetrievalAlpha = %v", cfg.RAG.RetrievalAlpha)
+	}
+	if cfg.RAG.RetrieveMult != 4 || cfg.RAG.MaxCandidates != 40 {
+		t.Fatalf("retrieve defaults: mult=%d max=%d", cfg.RAG.RetrieveMult, cfg.RAG.MaxCandidates)
+	}
+	if !cfg.RAG.RerankEnabled || cfg.RAG.RerankModel != "gemini-2.5-flash" {
+		t.Fatalf("rerank defaults: %v %q", cfg.RAG.RerankEnabled, cfg.RAG.RerankModel)
+	}
+	if cfg.RAG.ChunkTargetTokens != 512 || cfg.RAG.ChunkOverlapTokens != 64 {
+		t.Fatalf("chunk defaults: %d/%d", cfg.RAG.ChunkTargetTokens, cfg.RAG.ChunkOverlapTokens)
+	}
+	if cfg.RAG.ExpandBefore != 1 || cfg.RAG.ExpandAfter != 1 {
+		t.Fatalf("expand defaults: %d/%d", cfg.RAG.ExpandBefore, cfg.RAG.ExpandAfter)
+	}
+	if !cfg.RAG.CompactionEnabled || cfg.RAG.CompactionModel != "gemini-2.5-flash" {
+		t.Fatalf("compaction defaults: %v %q", cfg.RAG.CompactionEnabled, cfg.RAG.CompactionModel)
+	}
+	if cfg.RAG.CompactionThreshold != 40000 || cfg.RAG.CompactionKeepRecent != 10 || cfg.RAG.CompactionSummaryTokens != 800 {
+		t.Fatalf("compaction budgets: %+v", cfg.RAG)
+	}
+}
+
+func TestRAGRetrievalOverrides(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://localhost/gc")
+	t.Setenv("JWT_SECRET", "0123456789abcdef0123456789abcdef")
+	t.Setenv("GEMINI_API_KEY", "k")
+	t.Setenv("RETRIEVAL_ALPHA", "0.7")
+	t.Setenv("RETRIEVE_MULT", "2")
+	t.Setenv("RERANK_ENABLED", "false")
+	t.Setenv("RERANK_MODEL", "gpt-4.1")
+	t.Setenv("CHUNK_TARGET_TOKENS", "256")
+	t.Setenv("EXPAND_BEFORE", "2")
+	t.Setenv("COMPACTION_THRESHOLD_TOKENS", "20000")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.RAG.RetrievalAlpha != 0.7 || cfg.RAG.RetrieveMult != 2 {
+		t.Fatalf("overrides: %+v", cfg.RAG)
+	}
+	if cfg.RAG.RerankEnabled || cfg.RAG.RerankModel != "gpt-4.1" {
+		t.Fatalf("rerank overrides: %+v", cfg.RAG)
+	}
+	if cfg.RAG.ChunkTargetTokens != 256 || cfg.RAG.ExpandBefore != 2 || cfg.RAG.CompactionThreshold != 20000 {
+		t.Fatalf("budget overrides: %+v", cfg.RAG)
+	}
+}
+
+func TestRAGBadAlphaFails(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://localhost/gc")
+	t.Setenv("JWT_SECRET", "0123456789abcdef0123456789abcdef")
+	t.Setenv("GEMINI_API_KEY", "k")
+	t.Setenv("RETRIEVAL_ALPHA", "1.5")
+	if _, err := Load(); err == nil {
+		t.Fatal("want error for alpha > 1")
+	}
+}
+
+func TestRAGBadChunkFails(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://localhost/gc")
+	t.Setenv("JWT_SECRET", "0123456789abcdef0123456789abcdef")
+	t.Setenv("GEMINI_API_KEY", "k")
+	t.Setenv("CHUNK_OVERLAP_TOKENS", "512")
+	t.Setenv("CHUNK_TARGET_TOKENS", "256")
+	if _, err := Load(); err == nil {
+		t.Fatal("want error for overlap >= target")
+	}
+}
+
+func TestRAGBadCompactionFails(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://localhost/gc")
+	t.Setenv("JWT_SECRET", "0123456789abcdef0123456789abcdef")
+	t.Setenv("GEMINI_API_KEY", "k")
+	t.Setenv("COMPACTION_THRESHOLD_TOKENS", "0")
+	if _, err := Load(); err == nil {
+		t.Fatal("want error for non-positive compaction threshold")
+	}
+}

@@ -53,6 +53,21 @@ type RAGConfig struct {
 	EmbedBatchSize     int
 	EmbeddingInputRate float64
 	MaxUploadBytes     int64
+
+	RetrievalAlpha          float64
+	RetrieveMult            int
+	MaxCandidates           int
+	RerankEnabled           bool
+	RerankModel             string
+	ChunkTargetTokens       int
+	ChunkOverlapTokens      int
+	ExpandBefore            int
+	ExpandAfter             int
+	CompactionEnabled       bool
+	CompactionModel         string
+	CompactionThreshold     int
+	CompactionKeepRecent    int
+	CompactionSummaryTokens int
 }
 
 // dotenvPaths are where a repo-root .env may sit relative to the working
@@ -95,6 +110,47 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	alpha, err := envFloat("RETRIEVAL_ALPHA", 0.5)
+	if err != nil {
+		return Config{}, err
+	}
+	if alpha < 0 || alpha > 1 {
+		return Config{}, fmt.Errorf("invalid RETRIEVAL_ALPHA: %q (want 0..1)", os.Getenv("RETRIEVAL_ALPHA"))
+	}
+	retrieveMult, err := envInt("RETRIEVE_MULT", 4)
+	if err != nil {
+		return Config{}, err
+	}
+	maxCand, err := envInt("RERANK_MAX_CANDIDATES", 40)
+	if err != nil {
+		return Config{}, err
+	}
+	chunkTarget, err := envInt("CHUNK_TARGET_TOKENS", 512)
+	if err != nil {
+		return Config{}, err
+	}
+	chunkOverlap, err := envInt("CHUNK_OVERLAP_TOKENS", 64)
+	if err != nil {
+		return Config{}, err
+	}
+	if chunkTarget <= 0 || chunkOverlap < 0 || chunkOverlap >= chunkTarget {
+		return Config{}, fmt.Errorf("invalid chunk budget: target=%d overlap=%d", chunkTarget, chunkOverlap)
+	}
+	compThreshold, err := envInt("COMPACTION_THRESHOLD_TOKENS", 40000)
+	if err != nil {
+		return Config{}, err
+	}
+	if compThreshold <= 0 {
+		return Config{}, fmt.Errorf("invalid COMPACTION_THRESHOLD_TOKENS: %d", compThreshold)
+	}
+	compKeep, err := envInt("COMPACTION_KEEP_RECENT", 10)
+	if err != nil {
+		return Config{}, err
+	}
+	compSummary, err := envInt("COMPACTION_SUMMARY_TOKENS", 800)
+	if err != nil {
+		return Config{}, err
+	}
 	cfg := Config{
 		Port:             env("APP_PORT", "8080"),
 		DatabaseURL:      os.Getenv("DATABASE_URL"),
@@ -129,6 +185,21 @@ func Load() (Config, error) {
 			EmbedBatchSize:     batch,
 			EmbeddingInputRate: embedRate,
 			MaxUploadBytes:     envInt64("MAX_UPLOAD_BYTES", 20<<20),
+
+			RetrievalAlpha:          alpha,
+			RetrieveMult:            retrieveMult,
+			MaxCandidates:           maxCand,
+			RerankEnabled:           envBool("RERANK_ENABLED", true),
+			RerankModel:             env("RERANK_MODEL", "gemini-2.5-flash"),
+			ChunkTargetTokens:       chunkTarget,
+			ChunkOverlapTokens:      chunkOverlap,
+			ExpandBefore:            envIntOr("EXPAND_BEFORE", 1),
+			ExpandAfter:             envIntOr("EXPAND_AFTER", 1),
+			CompactionEnabled:       envBool("COMPACTION_ENABLED", true),
+			CompactionModel:         env("COMPACTION_MODEL", "gemini-2.5-flash"),
+			CompactionThreshold:     compThreshold,
+			CompactionKeepRecent:    compKeep,
+			CompactionSummaryTokens: compSummary,
 		},
 	}
 	var errs []error
@@ -192,6 +263,13 @@ func envBool(key string, def bool) bool {
 		if b, err := strconv.ParseBool(v); err == nil {
 			return b
 		}
+	}
+	return def
+}
+
+func envIntOr(key string, def int) int {
+	if n, err := envInt(key, def); err == nil && n >= 0 {
+		return n
 	}
 	return def
 }
