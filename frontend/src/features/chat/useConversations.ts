@@ -52,3 +52,15 @@ export function useDeleteConversation() {
     },
   });
 }
+
+export function useDeleteMessage(convID: string | null) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (messageId: string) =>
+      apiFetch<void>(`/api/conversations/${convID}/messages/${messageId}`, { method: "DELETE" }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["conversation", convID] });
+      void queryClient.invalidateQueries({ queryKey: ["conversations"] });
+    },
+  });
+}

@@ -155,3 +155,19 @@ func (s *Server) handleRegenerate(w http.ResponseWriter, r *http.Request) {
 	_ = s.deps.Convos.Touch(ctx, convID)
 	s.runTurn(ctx, userID, convID, spec, historyFrom(remaining, lastUser), msgs[lastUser].Content, payload.Parts, knownRows(remaining), w)
 }
+
+// handleDeleteMessage removes one message and everything after it —
+// deleting a question drops the answer that followed, deleting an answer
+// leaves prior context intact.
+func (s *Server) handleDeleteMessage(w http.ResponseWriter, r *http.Request) {
+	userID, _ := userIDFrom(r.Context())
+	if err := s.deps.Msgs.DeleteMessage(r.Context(), r.PathValue("id"), r.PathValue("messageId"), userID); err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "not_found", "message not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "internal", "could not delete message")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}

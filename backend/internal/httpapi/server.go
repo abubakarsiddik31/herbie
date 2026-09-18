@@ -96,6 +96,7 @@ func NewServer(deps ServerDeps) http.Handler {
 	authed.HandleFunc("DELETE /api/conversations/{id}/shares", s.handleUnshareConversation)
 	authed.HandleFunc("POST /api/conversations/{id}/messages", s.handleSendMessage)
 	authed.HandleFunc("POST /api/conversations/{id}/messages/{messageId}/edit", s.handleEditMessage)
+	authed.HandleFunc("DELETE /api/conversations/{id}/messages/{messageId}", s.handleDeleteMessage)
 	authed.HandleFunc("POST /api/conversations/{id}/regenerate", s.handleRegenerate)
 	authed.HandleFunc("POST /api/conversations/{id}/approvals", s.handleApprovals)
 	authed.HandleFunc("GET /api/tools", s.handleListTools)

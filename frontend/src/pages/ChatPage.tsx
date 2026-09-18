@@ -64,6 +64,7 @@ import {
   useConversations,
   useCreateConversation,
   useDeleteConversation,
+  useDeleteMessage,
   useUpdateConversationSettings,
 } from "@/features/chat/useConversations";
 import { useTools } from "@/features/tools/useTools";
@@ -131,6 +132,7 @@ export function ChatPage() {
   const [input, setInput] = useState("");
   const [sendError, setSendError] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<Conversation | null>(null);
+  const [pendingMessageDelete, setPendingMessageDelete] = useState<string | null>(null);
   const [sharing, setSharing] = useState<Conversation | null>(null);
   const [renaming, setRenaming] = useState<Conversation | null>(null);
   const [renameTitle, setRenameTitle] = useState("");
@@ -165,6 +167,7 @@ export function ChatPage() {
   const { data: models } = useModels();
   const createConversation = useCreateConversation();
   const deleteConversation = useDeleteConversation();
+  const deleteMessage = useDeleteMessage(selectedId);
   const updateSettings = useUpdateConversationSettings(selectedId);
 
   const renameMutation = useMutation({
@@ -248,6 +251,13 @@ export function ChatPage() {
     );
   }
 
+  function confirmDeleteMessage() {
+    if (!pendingMessageDelete) return;
+    deleteMessage.mutate(pendingMessageDelete, {
+      onSuccess: () => setPendingMessageDelete(null),
+      onError: (err) => toast.error(err instanceof ApiError ? err.message : "Failed to delete message"),
+    });
+  }
   function confirmDelete() {
     if (!pendingDelete) return;
     const id = pendingDelete.id;
@@ -685,6 +695,16 @@ export function ChatPage() {
                             >
                               <Pencil className="size-3.5" />
                             </button>
+                            <button
+                              type="button"
+                              aria-label="Delete message"
+                              title="Delete message and everything after it"
+                              disabled={blockInteraction}
+                              onClick={() => setPendingMessageDelete(m.id)}
+                              className="rounded-md p-1 text-muted-foreground/60 opacity-0 transition-opacity group-hover:opacity-100 hover:text-destructive disabled:cursor-not-allowed"
+                            >
+                              <Trash2 className="size-3.5" />
+                            </button>
                           </div>
                         )
                       ) : (
@@ -726,6 +746,16 @@ export function ChatPage() {
                             {!m.streaming && (
                               <div className="flex items-center gap-1.5 pt-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
                                 <CopyMessageButton text={m.content} />
+                                <button
+                                  type="button"
+                                  aria-label="Delete message"
+                                  title="Delete message and everything after it"
+                                  disabled={blockInteraction}
+                                  onClick={() => setPendingMessageDelete(m.id)}
+                                  className="rounded-md p-1 text-muted-foreground/60 transition-colors hover:text-destructive disabled:cursor-not-allowed"
+                                >
+                                  <Trash2 className="size-3.5" />
+                                </button>
                                 {isLast && (
                                   <button
                                     type="button"
@@ -954,6 +984,23 @@ export function ChatPage() {
             <Button variant="outline" onClick={() => setPendingDelete(null)}>Cancel</Button>
             <Button variant="destructive" onClick={confirmDelete} disabled={deleteConversation.isPending}>
               {deleteConversation.isPending ? "Deleting…" : "Delete"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={pendingMessageDelete !== null} onOpenChange={(open) => { if (!open) setPendingMessageDelete(null); }}>
+        <DialogContent showCloseButton={false}>
+          <DialogHeader>
+            <DialogTitle>Delete message?</DialogTitle>
+            <DialogDescription>
+              This message and everything after it will be permanently removed.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPendingMessageDelete(null)}>Cancel</Button>
+            <Button variant="destructive" onClick={confirmDeleteMessage} disabled={deleteMessage.isPending}>
+              {deleteMessage.isPending ? "Deleting…" : "Delete"}
             </Button>
           </DialogFooter>
         </DialogContent>
