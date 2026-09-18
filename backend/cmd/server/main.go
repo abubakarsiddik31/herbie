@@ -100,11 +100,33 @@ func main() {
 			os.Exit(1)
 		}
 		svc := rag.NewService(embedder, vs, objs)
-		ragSearch = svc.Search
+		svc.WithTuning(cfg.RAG.RetrievalAlpha, cfg.RAG.RetrieveMult, cfg.RAG.MaxCandidates, cfg.RAG.ExpandBefore, cfg.RAG.ExpandAfter, cfg.RAG.ChunkTargetTokens, cfg.RAG.ChunkOverlapTokens)
+		if cfg.RAG.RerankEnabled {
+			if client, err := registry.Resolve(chat.RunSpec{Model: cfg.RAG.RerankModel}); err != nil {
+				log.Warn("rerank disabled: model unresolvable", "model", cfg.RAG.RerankModel, "err", err)
+			} else {
+				svc.WithRanker(rag.NewRanker(client, cfg.RAG.RerankModel))
+			}
+		}
+		ragSearch = func(ctx context.Context, userID, query string, k int, docIDs []string) ([]rag.Scored, rag.UsageReport, error) {
+			return svc.Search(ctx, userID, query, rag.SearchOptions{TopK: k, DocIDs: docIDs})
+		}
 		ragRunner = svc
 		vectors = vs
 		objects = objs
 		log.Info("rag enabled", "model", cfg.RAG.EmbeddingModel, "weaviate", cfg.RAG.WeaviateURL, "minio", cfg.RAG.MinIOEndpoint)
+	}
+
+	// Compaction benefits every long thread, not just RAG runs, so the
+	// compactor builds whenever its model resolves — independent of the
+	// RAG-enabled gate above.
+	var compactor *chat.Compactor
+	if cfg.RAG.CompactionEnabled {
+		if client, err := registry.Resolve(chat.RunSpec{Model: cfg.RAG.CompactionModel}); err != nil {
+			log.Warn("compaction disabled: model unresolvable", "model", cfg.RAG.CompactionModel, "err", err)
+		} else {
+			compactor = chat.NewCompactor(client, cfg.RAG.CompactionModel, cfg.RAG.CompactionThreshold, cfg.RAG.CompactionKeepRecent, cfg.RAG.CompactionSummaryTokens)
+		}
 	}
 
 	// Per-model ledger rates from the catalog; the env rates stay as the
@@ -135,6 +157,7 @@ func main() {
 		Rates:     rates,
 		ModelKeys: modelKeys,
 		RagSearch: ragSearch,
+		Compactor: compactor,
 		RAG:       ragRunner,
 		Docs:      storage.NewDocuments(pool),
 		Vectors:   vectors,

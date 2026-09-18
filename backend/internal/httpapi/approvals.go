@@ -111,9 +111,11 @@ func (s *Server) handleApprovals(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var sources []rag.Scored
+	history := pausedRunHistory(msgs)
+	spec, history = s.maybeCompact(ctx, userID, convID, spec, history)
 	outcome, err := s.deps.Agent.RunDeferred(ctx,
 		chat.Deps{UserID: userID, ConversationID: convID, Search: s.searchDeps(userID, convID, &sources)},
-		pausedRunHistory(msgs), golem.DeferredResults{Approvals: resolutions},
+		history, golem.DeferredResults{Approvals: resolutions},
 		sink, tools, spec)
 	if err != nil {
 		s.persistFailure(ctx, userID, convID, spec, err, sink)

@@ -97,7 +97,10 @@ func (f *fakeVectors) DeleteDocument(_ context.Context, documentID string) error
 	f.deleted = append(f.deleted, documentID)
 	return nil
 }
-func (f *fakeVectors) HybridSearch(_ context.Context, _, _ string, _ []float32, _ int) ([]rag.Scored, error) {
+func (f *fakeVectors) HybridSearch(_ context.Context, _, _ string, _ []float32, _ float64, _ int, _ []string) ([]rag.Scored, error) {
+	return nil, nil
+}
+func (f *fakeVectors) ExpandRange(_ context.Context, _, _ string, _, _ int) ([]rag.Chunk, error) {
 	return nil, nil
 }
 
@@ -131,8 +134,8 @@ func newDocsServer(t *testing.T, maxUpload int64) (http.Handler, string, *fakeDo
 		Cfg:    cfg,
 		Usage:  newFakeUsage(),
 		Agent:  nil,
-		RagSearch: func(_ context.Context, _, _ string, _ int) ([]rag.Scored, rag.EmbedUsage, error) {
-			return nil, rag.EmbedUsage{}, nil
+		RagSearch: func(_ context.Context, _, _ string, _ int, _ []string) ([]rag.Scored, rag.UsageReport, error) {
+			return nil, rag.UsageReport{}, nil
 		},
 		RAG:     fr,
 		Docs:    docs,

@@ -32,7 +32,7 @@ func TestSearchToolSchema(t *testing.T) {
 }
 
 func searchDeps(captured *[]string) Deps {
-	return Deps{Search: func(_ context.Context, query string, k int) ([]rag.Scored, error) {
+	return Deps{Search: func(_ context.Context, query string, k int, _ []string) ([]rag.Scored, error) {
 		*captured = append(*captured, query+"/"+strconv.Itoa(k))
 		return []rag.Scored{
 			{Chunk: rag.Chunk{DocTitle: "a.txt", Index: 0, Content: "alpha text"}, Score: 0.9},
@@ -43,20 +43,47 @@ func searchDeps(captured *[]string) Deps {
 
 func TestSearchToolExec(t *testing.T) {
 	var captured []string
-	out, err := SearchTool().Exec(context.Background(), searchDeps(&captured), json.RawMessage(`{"query":"q","k":3}`))
+	var seenDocIDs []string
+	deps := Deps{Search: func(_ context.Context, query string, k int, docIDs []string) ([]rag.Scored, error) {
+		captured = append(captured, query+"/"+strconv.Itoa(k))
+		seenDocIDs = docIDs
+		return []rag.Scored{
+			{Chunk: rag.Chunk{DocTitle: "a.txt", Heading: "Intro", Page: 2, Index: 0, Content: "alpha text"}, Score: 0.9},
+			{Chunk: rag.Chunk{DocTitle: "a.txt", Index: 1, Content: "beta text"}, Score: 0.5},
+		}, nil
+	}}
+	out, err := SearchTool().Exec(context.Background(), deps, json.RawMessage(`{"query":"q","k":3}`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(out.Text, "[1] (a.txt) alpha text\n\n[2] (a.txt) long ") {
-		t.Fatalf("formatted results: %q", out.Text)
+	want := "Sources — cite ONLY these bracket numbers:\n\n[1] (a.txt § Intro, p.2) alpha text\n\n[2] (a.txt) beta text"
+	if out.Text != want {
+		t.Fatalf("formatted results:\n got %q\nwant %q", out.Text, want)
 	}
 	if captured[0] != "q/3" {
 		t.Fatalf("args not passed: %q", captured[0])
 	}
+	if seenDocIDs != nil {
+		t.Fatalf("docIDs want nil, got %v", seenDocIDs)
+	}
+}
+
+func TestSearchToolDocIDs(t *testing.T) {
+	var seen []string
+	deps := Deps{Search: func(_ context.Context, _ string, _ int, docIDs []string) ([]rag.Scored, error) {
+		seen = docIDs
+		return nil, nil
+	}}
+	if _, err := SearchTool().Exec(context.Background(), deps, json.RawMessage(`{"query":"q","documentIds":["d1"]}`)); err != nil {
+		t.Fatal(err)
+	}
+	if len(seen) != 1 || seen[0] != "d1" {
+		t.Fatalf("docIDs: %v", seen)
+	}
 }
 
 func TestSearchToolNoResults(t *testing.T) {
-	deps := Deps{Search: func(_ context.Context, _ string, _ int) ([]rag.Scored, error) { return nil, nil }}
+	deps := Deps{Search: func(_ context.Context, _ string, _ int, _ []string) ([]rag.Scored, error) { return nil, nil }}
 	out, err := SearchTool().Exec(context.Background(), deps, json.RawMessage(`{"query":"q"}`))
 	if err != nil || out.Text != "No matching documents." {
 		t.Fatalf("out=%q err=%v", out.Text, err)
@@ -73,7 +100,7 @@ func TestSearchToolDisabled(t *testing.T) {
 func TestSearchToolClampsK(t *testing.T) {
 	for args, want := range map[string]int{`{"query":"q","k":99}`: 20, `{"query":"q","k":0}`: 5, `{"query":"q","k":-3}`: 5} {
 		var got int
-		deps := Deps{Search: func(_ context.Context, _ string, k int) ([]rag.Scored, error) {
+		deps := Deps{Search: func(_ context.Context, _ string, k int, _ []string) ([]rag.Scored, error) {
 			got = k
 			return nil, nil
 		}}
@@ -95,7 +122,7 @@ func TestSearchToolEmptyQueryRetries(t *testing.T) {
 }
 
 func TestSearchToolErrorPropagates(t *testing.T) {
-	deps := Deps{Search: func(_ context.Context, _ string, _ int) ([]rag.Scored, error) {
+	deps := Deps{Search: func(_ context.Context, _ string, _ int, _ []string) ([]rag.Scored, error) {
 		return nil, errors.New("index down")
 	}}
 	_, err := SearchTool().Exec(context.Background(), deps, json.RawMessage(`{"query":"q"}`))
@@ -116,5 +143,18 @@ func TestPromptForCitations(t *testing.T) {
 	custom := promptFor(spec, []tool.Tool[Deps]{SearchTool()})
 	if !strings.HasPrefix(custom, "custom") || !strings.Contains(custom, "cite sources inline") {
 		t.Fatalf("custom prompt lost citation rules: %q", custom)
+	}
+}
+
+func TestBuildAddsRetrievalGuidance(t *testing.T) {
+	got := promptFor(RunSpec{SystemPrompt: "base"}, []tool.Tool[Deps]{SearchTool()})
+	for _, want := range []string{"refined", "documentIds", "ONLY bracket numbers", "restart at 1"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("guidance lacks %q: %s", want, got)
+		}
+	}
+	plain := promptFor(RunSpec{SystemPrompt: "base"}, nil)
+	if strings.Contains(plain, "bracket numbers") {
+		t.Fatalf("guidance leaks into non-search runs: %s", plain)
 	}
 }

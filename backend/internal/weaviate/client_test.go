@@ -3,6 +3,7 @@ package weaviate
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -208,7 +209,7 @@ func TestHybridSearch(t *testing.T) {
 	defer srv.Close()
 
 	c := New(srv.URL, 768, srv.Client())
-	got, err := c.HybridSearch(context.Background(), "u1", `say "hello" world`, []float32{0.25, -1.5}, 5)
+	got, err := c.HybridSearch(context.Background(), "u1", `say "hello" world`, []float32{0.25, -1.5}, 0.5, 5, nil)
 	if err != nil {
 		t.Fatalf("HybridSearch: %v", err)
 	}
@@ -220,7 +221,7 @@ func TestHybridSearch(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		`hybrid:{query:"say \"hello\" world" vector:[0.25,-1.5] alpha:0.5}`,
+		`hybrid:{query:"say \"hello\" world" vector:[0.25,-1.5] alpha:0.5 fusionType: rankedFusion}`,
 		`path:["user_id"] operator:Equal valueText:"u1"`,
 		`limit:5`,
 	} {
@@ -239,7 +240,107 @@ func TestHybridSearchGraphQLError(t *testing.T) {
 	defer srv.Close()
 
 	c := New(srv.URL, 768, srv.Client())
-	if _, err := c.HybridSearch(context.Background(), "u1", "q", nil, 5); err == nil {
+	if _, err := c.HybridSearch(context.Background(), "u1", "q", nil, 0.5, 5, nil); err == nil {
 		t.Fatal("want graphql error surfaced")
+	}
+}
+
+func TestEnsureCollectionAddsMissingProps(t *testing.T) {
+	var posts []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/v1/schema/DocumentChunk" {
+			fmt.Fprint(w, `{"class":"DocumentChunk","properties":[{"name":"content"}]}`)
+			return
+		}
+		if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/properties") {
+			body, _ := io.ReadAll(r.Body)
+			posts = append(posts, string(body))
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+	}))
+	defer srv.Close()
+	if err := New(srv.URL, 4, srv.Client()).EnsureCollection(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(posts, "\n")
+	for _, want := range []string{`"heading"`, `"page"`, `"token_count"`} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("missing property %s in %v", want, posts)
+		}
+	}
+}
+
+func TestHybridSearchAlphaFusionLimit(t *testing.T) {
+	var gotBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		gotBody = string(body)
+		fmt.Fprint(w, `{"data":{"Get":{"DocumentChunk":[
+			{"content":"alpha","doc_title":"T","document_id":"d1","chunk_index":0,"heading":"H","page":2,"token_count":100,"_additional":{"score":"0.87"}}]}}}`)
+	}))
+	defer srv.Close()
+	got, err := New(srv.URL, 4, srv.Client()).HybridSearch(context.Background(), "u1", "hello world", []float32{0.1, 0.2}, 0.7, 25, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`alpha:0.7`, `fusionType: rankedFusion`, `limit:25`, `user_id`} {
+		if !strings.Contains(gotBody, want) {
+			t.Fatalf("missing %q in %s", want, gotBody)
+		}
+	}
+	if len(got) != 1 || got[0].Score != 0.87 || got[0].Chunk.Heading != "H" || got[0].Chunk.Page != 2 {
+		t.Fatalf("scored: %+v", got)
+	}
+}
+
+func TestHybridSearchDocFilter(t *testing.T) {
+	var gotBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		gotBody = string(body)
+		fmt.Fprint(w, `{"data":{"Get":{"DocumentChunk":[]}}}`)
+	}))
+	defer srv.Close()
+	if _, err := New(srv.URL, 4, srv.Client()).HybridSearch(context.Background(), "u1", "q", []float32{0.1}, 0.5, 5, []string{"d1", "d2"}); err != nil {
+		t.Fatal(err)
+	}
+	var sent struct{ Query string }
+	if err := json.Unmarshal([]byte(gotBody), &sent); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`document_id`, `valueText:"d1"`, `valueText:"d2"`, `user_id`} {
+		if !strings.Contains(sent.Query, want) {
+			t.Fatalf("missing %q in %s", want, sent.Query)
+		}
+	}
+}
+
+func TestExpandRange(t *testing.T) {
+	var gotBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		gotBody = string(body)
+		fmt.Fprint(w, `{"data":{"Get":{"DocumentChunk":[
+			{"content":"c1","doc_title":"T","document_id":"d1","chunk_index":1,"heading":"","page":0,"token_count":10},
+			{"content":"c2","doc_title":"T","document_id":"d1","chunk_index":2,"heading":"","page":0,"token_count":10}]}}}`)
+	}))
+	defer srv.Close()
+	got, err := New(srv.URL, 4, srv.Client()).ExpandRange(context.Background(), "u1", "d1", 1, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sent struct{ Query string }
+	if err := json.Unmarshal([]byte(gotBody), &sent); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`chunk_index`, `valueInt:1`, `valueInt:2`, `valueText:"d1"`} {
+		if !strings.Contains(sent.Query, want) {
+			t.Fatalf("missing %q in %s", want, sent.Query)
+		}
+	}
+	if len(got) != 2 || got[0].Content != "c1" || got[1].Content != "c2" {
+		t.Fatalf("range: %+v", got)
 	}
 }

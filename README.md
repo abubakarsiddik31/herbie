@@ -108,7 +108,25 @@ startup:
 
 ## RAG (Phase 2c)
 
-Upload documents (txt, md, pdf, docx — 20 MB cap) on the **Documents** page; they are stored in MinIO, extracted, chunked (~1000 chars, paragraph-aware, ~150 char overlap), and embedded with **golem v0.7.5's embeddings port** (`gemini-embedding-001`, 768 dims) into Weaviate. The chat agent gets a `search_documents` tool and decides when to retrieve; answers cite `[n]` sources, rendered as collapsible source cards. Every query embedding is metered exactly (`kind=embedding`, `estimated=false`) and the usage page breaks spend down per document.
+The agent owns retrieval — there is no fixed pipeline. On every turn it
+formulates its own queries, calls `search_documents` (optionally scoped with
+`documentIds` taken from earlier results), refines with narrower queries when
+results look thin, and answers only from tool evidence.
+
+Upload documents (txt, md, pdf, docx — 20 MB cap) on the **Documents** page; they are stored in MinIO, extracted into headed sections, chunked (~512 tokens / ~2000 chars with ~64-token overlap, recursive headings → paragraphs → sentences, carrying heading + page metadata via `CHUNK_TARGET_TOKENS` / `CHUNK_OVERLAP_TOKENS`), and embedded with **golem v0.7.6's embeddings port** (`gemini-embedding-001`, 768 dims) into Weaviate.
+
+Each retrieval call runs: query embedding → hybrid over-retrieve (`RETRIEVAL_ALPHA` default 0.5, `fusionType: rankedFusion`, `RETRIEVE_MULT`×k capped at `RERANK_MAX_CANDIDATES`) → neighbor-window expansion (`EXPAND_BEFORE`/`EXPAND_AFTER`, default 1/1; the core chunk stays the citation unit) → listwise LLM rerank (`RERANK_MODEL` default `gemini-2.5-flash`, `RERANK_ENABLED=false` disables) → top-k with `[n] (Title § Heading, p.N)` citations, numbers restarting at 1 on every call.
+
+Citation discipline is hard: every claim drawn from documents carries its
+bracket number, only bracket numbers shown in a tool result are cited, and
+missing evidence is admitted instead of guessed. The Sources card mirrors the
+tool receipt (title, heading, page, snippet).
+
+Long threads compact: histories over `COMPACTION_THRESHOLD_TOKENS` (default
+40000) keep the last `COMPACTION_KEEP_RECENT` (10) turns verbatim while older
+turns compress into the run instructions via `COMPACTION_MODEL` (summary cap
+`COMPACTION_SUMMARY_TOKENS`). Compaction is ephemeral — history rows and role
+alternation are untouched.
 
 **Enable it** — the infra ships dormant behind the compose `rag` profile:
 
@@ -130,5 +148,25 @@ RAG_ENABLED=true
 | `EMBEDDING_BATCH` | `96` | Texts per embed call |
 | `EMBEDDING_INPUT_USD_PER_MTOK` | `0.15` | Ledger rate |
 | `MAX_UPLOAD_BYTES` | `20971520` | Upload cap (20 MB) |
+| `RETRIEVAL_ALPHA` | `0.5` | Hybrid BM25/vector blend (0..1) |
+| `RETRIEVE_MULT` | `4` | Over-retrieve ×k (capped below) |
+| `RERANK_MAX_CANDIDATES` | `40` | Candidate cap |
+| `RERANK_ENABLED` | `true` | `false` keeps hybrid order, no rerank spend |
+| `RERANK_MODEL` | `gemini-2.5-flash` | Listwise rerank model |
+| `CHUNK_TARGET_TOKENS` | `512` | Chunk budget |
+| `CHUNK_OVERLAP_TOKENS` | `64` | Word-safe overlap |
+| `EXPAND_BEFORE` / `EXPAND_AFTER` | `1` / `1` | Neighbor-window size |
+| `COMPACTION_ENABLED` | `true` | Summarize hot histories |
+| `COMPACTION_MODEL` | `gemini-2.5-flash` | Summarizer model |
+| `COMPACTION_THRESHOLD_TOKENS` | `40000` | History estimate trigger |
+| `COMPACTION_KEEP_RECENT` | `10` | Verbatim recent turns |
+| `COMPACTION_SUMMARY_TOKENS` | `800` | Summary cap |
+
+Metering: query embeddings land as exact `kind=embedding` rows, rerank
+generations as `kind=rerank`, compactions as `kind=compaction` — rerank and
+compaction priced from the catalog (unknown models fall back to defaults); the
+usage page breaks spend down per document.
 
 API: `GET /api/documents`, `POST /api/documents` (multipart `file`), `DELETE /api/documents/{id}`; all 503 with `rag_disabled` when the stack is off. Ingestion is idempotent per document (stale vectors are deleted before re-upsert); a failed ingest keeps the row (`status=failed`) and the original object.
+
+Retrieval quality is covered by a live golden-query eval: `BASE=http://localhost:8080 ./scripts/rag-eval.sh` uploads three fixture docs (`backend/internal/rag/testdata/eval/`, one topic each with a unique canary sentence), asks one question per doc, and passes only if every answer top-cites the expected document and carries a matching `[n]` bracket citation.

@@ -9,9 +9,12 @@ import (
 )
 
 // Scored pairs a chunk with its retrieval score (hybrid BM25+vector).
+// Context optionally carries the expanded neighbor window; empty means
+// the core chunk content stands alone.
 type Scored struct {
-	Chunk Chunk
-	Score float64
+	Chunk   Chunk
+	Score   float64
+	Context string
 }
 
 // VectorStore is the retrieval index contract. internal/weaviate.Client
@@ -19,7 +22,8 @@ type Scored struct {
 type VectorStore interface {
 	UpsertChunks(ctx context.Context, userID, documentID, docTitle string, chunks []Chunk, vectors [][]float32) error
 	DeleteDocument(ctx context.Context, documentID string) error
-	HybridSearch(ctx context.Context, userID, query string, queryVector []float32, k int) ([]Scored, error)
+	HybridSearch(ctx context.Context, userID, query string, queryVector []float32, alpha float64, limit int, docIDs []string) ([]Scored, error)
+	ExpandRange(ctx context.Context, userID, docID string, lo, hi int) ([]Chunk, error)
 }
 
 // ObjectUploader is the slice of the object store the pipeline needs:
@@ -35,6 +39,33 @@ const (
 	maxKeyBytes = 9000 // sane cap so odd filenames cannot break the store
 )
 
+// SearchOptions scopes one retrieval call. DocIDs empty = all documents.
+type SearchOptions struct {
+	TopK   int
+	DocIDs []string
+}
+
+// SearchConfig tunes retrieval. Alpha blends BM25/vector in Weaviate;
+// candidates = min(max(TopK*CandidateMult, TopK), MaxCandidates).
+// ExpandBefore/After widen each hit with neighbor chunks for context.
+type SearchConfig struct {
+	Alpha         float64
+	CandidateMult int
+	MaxCandidates int
+	ExpandBefore  int
+	ExpandAfter   int
+}
+
+// UsageReport carries everything the ledger needs: the exact query-embed
+// tokens plus the optional rerank generation usage.
+type UsageReport struct {
+	Embed       EmbedUsage
+	Reranked    bool
+	RerankModel string
+	RerankIn    int
+	RerankOut   int
+}
+
 // EmbedUsage is the embedding ledger entry for one call: exact provider
 // tokens when the API reports them, an estimate flagged Estimated when it
 // does not (Gemini's embeddings endpoints return no usage metadata).
@@ -44,16 +75,51 @@ type EmbedUsage struct {
 }
 
 // Service is the RAG vertical: ingest (extract → chunk → embed → index)
-// and search (embed query → hybrid search). It owns no storage rows; the
-// HTTP layer tracks document state in Postgres around Ingest calls.
+// and search (embed query → hybrid search → expand → rerank). It owns no
+// storage rows; the HTTP layer tracks document state in Postgres around
+// Ingest calls.
 type Service struct {
 	embed   *Embedder
 	vs      VectorStore
 	objects ObjectUploader
+
+	ranker       *Ranker
+	searchCfg    SearchConfig
+	chunkTarget  int
+	chunkOverlap int
 }
 
 func NewService(embed *Embedder, vs VectorStore, objects ObjectUploader) *Service {
-	return &Service{embed: embed, vs: vs, objects: objects}
+	return &Service{
+		embed:        embed,
+		vs:           vs,
+		objects:      objects,
+		searchCfg:    SearchConfig{Alpha: 0.5, CandidateMult: 4, MaxCandidates: 40, ExpandBefore: 1, ExpandAfter: 1},
+		chunkTarget:  512,
+		chunkOverlap: 64,
+	}
+}
+
+// WithRanker attaches the listwise reranker used by Search. Nil disables
+// reranking (hybrid order is trimmed to TopK).
+func (s *Service) WithRanker(r *Ranker) *Service {
+	s.ranker = r
+	return s
+}
+
+// WithTuning overrides the retrieval, expansion, and chunk budgets.
+// Negative values clamp to 0 at use.
+func (s *Service) WithTuning(alpha float64, mult, maxCand, before, after, chunkTarget, chunkOverlap int) *Service {
+	s.searchCfg = SearchConfig{
+		Alpha:         alpha,
+		CandidateMult: mult,
+		MaxCandidates: maxCand,
+		ExpandBefore:  before,
+		ExpandAfter:   after,
+	}
+	s.chunkTarget = chunkTarget
+	s.chunkOverlap = chunkOverlap
+	return s
 }
 
 // Ingest keeps the original bytes in the object store, then indexes the
@@ -64,14 +130,21 @@ func (s *Service) Ingest(ctx context.Context, userID, documentID, docTitle, mime
 	if err := s.objects.Put(ctx, key, contentType, bytes.NewReader(content), int64(len(content))); err != nil {
 		return 0, EmbedUsage{}, fmt.Errorf("store original: %w", err)
 	}
-	text, err := ExtractText(mime, bytes.NewReader(content))
+	sections, err := ExtractSections(mime, bytes.NewReader(content))
 	if err != nil {
 		return 0, EmbedUsage{}, fmt.Errorf("extract text: %w", err)
 	}
-	if strings.TrimSpace(text) == "" {
+	hasText := false
+	for _, sec := range sections {
+		if strings.TrimSpace(sec.Text) != "" {
+			hasText = true
+			break
+		}
+	}
+	if !hasText {
 		return 0, EmbedUsage{}, fmt.Errorf("no text extracted from %q", docTitle)
 	}
-	chunks := ChunkText(documentID, docTitle, text)
+	chunks := ChunkSections(documentID, docTitle, sections, s.chunkTarget, s.chunkOverlap)
 	if len(chunks) == 0 {
 		return 0, EmbedUsage{}, fmt.Errorf("no chunks produced from %q", docTitle)
 	}
@@ -89,24 +162,95 @@ func (s *Service) Ingest(ctx context.Context, userID, documentID, docTitle, mime
 	return len(chunks), embedUsage(res.Usage.InputTokens, total), nil
 }
 
-// Search embeds the query and hybrid-searches the index. The returned
-// EmbedUsage carries the query embedding's token count for the ledger.
-func (s *Service) Search(ctx context.Context, userID, query string, k int) ([]Scored, EmbedUsage, error) {
+// Search embeds the query, over-retrieves hybrid candidates, widens each
+// hit with its neighbor window, then reranks (when a ranker is attached)
+// and trims to TopK. The UsageReport carries the query-embed tokens plus
+// the optional rerank generation usage for the ledger.
+func (s *Service) Search(ctx context.Context, userID, query string, opts SearchOptions) ([]Scored, UsageReport, error) {
+	var rep UsageReport
+	k := opts.TopK
 	if k <= 0 {
 		k = defaultK
 	}
 	if k > maxK {
 		k = maxK
 	}
-	res, err := s.embed.EmbedQuery(ctx, query)
+	emb, err := s.embed.EmbedQuery(ctx, query)
 	if err != nil {
-		return nil, EmbedUsage{}, fmt.Errorf("embed query: %w", err)
+		return nil, rep, fmt.Errorf("embed query: %w", err)
 	}
-	scored, err := s.vs.HybridSearch(ctx, userID, query, res.Vectors[0], k)
+	rep.Embed = embedUsage(emb.Usage.InputTokens, query)
+	candidates := k * s.searchCfg.CandidateMult
+	if candidates < k {
+		candidates = k
+	}
+	if candidates > s.searchCfg.MaxCandidates {
+		candidates = s.searchCfg.MaxCandidates
+	}
+	rows, err := s.vs.HybridSearch(ctx, userID, query, emb.Vectors[0], s.searchCfg.Alpha, candidates, opts.DocIDs)
 	if err != nil {
-		return nil, EmbedUsage{}, fmt.Errorf("search index: %w", err)
+		return nil, rep, fmt.Errorf("search index: %w", err)
 	}
-	return scored, embedUsage(res.Usage.InputTokens, query), nil
+	rows, err = s.expand(ctx, userID, rows)
+	if err != nil {
+		return nil, rep, fmt.Errorf("expand windows: %w", err)
+	}
+	if s.ranker != nil && len(rows) > 1 {
+		ranked, usage, _ := s.ranker.Rerank(ctx, query, rows, k) // fail-open: never errors
+		rep.Reranked = true
+		rep.RerankModel = s.ranker.ModelName()
+		rep.RerankIn, rep.RerankOut = usage.InputTokens, usage.OutputTokens
+		return ranked, rep, nil
+	}
+	if len(rows) > k {
+		rows = rows[:k]
+	}
+	return rows, rep, nil
+}
+
+// expand widens each hit with neighbor chunks (small-to-big): one range
+// read per document, windows sliced locally, overlapping windows share
+// reads. The core Chunk stays the citation unit; Context carries the window.
+func (s *Service) expand(ctx context.Context, userID string, rows []Scored) ([]Scored, error) {
+	before, after := s.searchCfg.ExpandBefore, s.searchCfg.ExpandAfter
+	if before <= 0 && after <= 0 || len(rows) == 0 {
+		return rows, nil
+	}
+	lo := map[string]int{}
+	hi := map[string]int{}
+	for _, r := range rows {
+		if l, ok := lo[r.Chunk.DocumentID]; !ok || r.Chunk.Index-before < l {
+			lo[r.Chunk.DocumentID] = max(r.Chunk.Index-before, 0)
+		}
+		if h, ok := hi[r.Chunk.DocumentID]; !ok || r.Chunk.Index+after > h {
+			hi[r.Chunk.DocumentID] = r.Chunk.Index + after
+		}
+	}
+	byDoc := map[string]map[int]Chunk{}
+	for docID := range lo {
+		chunks, err := s.vs.ExpandRange(ctx, userID, docID, lo[docID], hi[docID])
+		if err != nil {
+			return nil, err
+		}
+		m := map[int]Chunk{}
+		for _, c := range chunks {
+			m[c.Index] = c
+		}
+		byDoc[docID] = m
+	}
+	for i, r := range rows {
+		m := byDoc[r.Chunk.DocumentID]
+		var parts []string
+		for idx := max(r.Chunk.Index-before, 0); idx <= r.Chunk.Index+after; idx++ {
+			if c, ok := m[idx]; ok {
+				parts = append(parts, c.Content)
+			}
+		}
+		if len(parts) > 1 {
+			rows[i].Context = strings.Join(parts, "\n\n")
+		}
+	}
+	return rows, nil
 }
 
 // embedUsage trusts provider-reported tokens; absent them it falls back

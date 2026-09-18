@@ -4,8 +4,8 @@ import { SourceCards } from "./SourceCards";
 import type { Source } from "@/lib/types";
 
 const sources: Source[] = [
-  { documentId: "d1", title: "notes.md", snippet: "Paris is the capital of France.", score: 0.87 },
-  { documentId: "d1", title: "notes.md", snippet: "Second fact.", score: 0.42 },
+  { documentId: "d1", title: "notes.md", heading: "Install", page: 2, snippet: "Paris is the capital of France.", score: 0.87 },
+  { documentId: "d1", title: "notes.md", heading: "", page: 0, snippet: "Second fact.", score: 0.42 },
 ];
 
 describe("SourceCards", () => {
@@ -21,5 +21,25 @@ describe("SourceCards", () => {
   it("renders nothing without sources", () => {
     const { container } = render(<SourceCards sources={[]} />);
     expect(container).toBeEmptyDOMElement();
+  });
+
+  it("shows heading and page when present", () => {
+    render(<SourceCards sources={sources} />);
+    fireEvent.click(screen.getByRole("button", { name: /sources \(2\)/i }));
+    expect(screen.getAllByText("notes.md")).toHaveLength(2);
+    expect(screen.getByText(/Install/)).toBeTruthy();
+    expect(screen.getByText(/p\.2/)).toBeTruthy();
+  });
+
+  it("hides heading and page markers when absent", () => {
+    render(
+      <SourceCards
+        sources={[{ documentId: "d", title: "plain.md", heading: "", page: 0, snippet: "Just text.", score: 0.1 }]}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /sources \(1\)/i }));
+    expect(screen.getByText("plain.md")).toBeTruthy();
+    expect(screen.queryByText(/§/)).toBeNull();
+    expect(screen.queryByText(/p\./)).toBeNull();
   });
 });

@@ -40,6 +40,11 @@ type Sink interface {
 const systemPrompt = `You are a helpful assistant in a local chat app.
 Answer clearly and concisely in markdown.`
 
+// DefaultSystemPrompt is the persona promptFor falls back to when a
+// conversation sets none. maybeCompact seeds empty specs with it so a
+// compacted run never silently drops the persona.
+const DefaultSystemPrompt = systemPrompt
+
 // Agent builds a golem agent per run. Golem fixes the model client, the
 // system instructions, and the tool set at construction, so a per-request
 // build is how a run's conversation-scoped model (RunSpec) and user runtime
@@ -83,9 +88,14 @@ func (a *Agent) build(spec RunSpec, tools []tool.Tool[Deps]) (*golem.Agent[Deps,
 	return agent, nil
 }
 
+const retrievalGuidance = `
+
+You have a search_documents tool over the user's uploaded files. Drive retrieval yourself: start with a focused query; if results look thin or off-topic, call again with refined queries or narrow documentIds to the promising files. Never answer from documents you have not seen in a tool result.
+Citation discipline (hard rules): cite EVERY claim that comes from documents with its bracket number, e.g. [1]; cite ONLY bracket numbers shown in a tool result — numbers restart at 1 on every call, never invent or carry numbers across calls; if the evidence does not support an answer, say what is missing instead of guessing.`
+
 // promptFor resolves the run's system prompt: the conversation's prompt,
-// else the built-in one, plus citation rules when document search is
-// registered.
+// else the built-in one, plus citation rules and retrieval guidance when
+// document search is registered.
 func promptFor(spec RunSpec, tools []tool.Tool[Deps]) string {
 	prompt := spec.SystemPrompt
 	if prompt == "" {
@@ -93,7 +103,7 @@ func promptFor(spec RunSpec, tools []tool.Tool[Deps]) string {
 	}
 	for _, t := range tools {
 		if t.Name == SearchToolName {
-			return prompt + citationRules
+			return prompt + citationRules + retrievalGuidance
 		}
 	}
 	return prompt

@@ -32,6 +32,9 @@ type ServerDeps struct {
 	// embedding's exact usage for metering. Nil = RAG disabled: no
 	// search tool is registered and the documents API answers 503.
 	RagSearch RagSearchFunc
+	// Compactor summarizes hot histories into the run instructions.
+	// Nil = compaction disabled: history passes through verbatim.
+	Compactor *chat.Compactor
 	// The retrieval stack's collaborators for the documents API. All nil
 	// when RAG is disabled.
 	RAG     RagRunner
@@ -41,8 +44,9 @@ type ServerDeps struct {
 }
 
 // RagSearchFunc is rag.Service.Search narrowed to what the chat path
-// needs (the score rows plus the query-embedding usage).
-type RagSearchFunc func(ctx context.Context, userID, query string, k int) ([]rag.Scored, rag.EmbedUsage, error)
+// needs (the score rows plus the query-embedding and rerank usage).
+// docIDs empty = all user documents; otherwise restricted to those IDs.
+type RagSearchFunc func(ctx context.Context, userID, query string, k int, docIDs []string) ([]rag.Scored, rag.UsageReport, error)
 
 type Server struct {
 	deps ServerDeps

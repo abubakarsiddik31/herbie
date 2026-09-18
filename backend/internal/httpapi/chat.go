@@ -167,6 +167,7 @@ func knownRows(msgs []storage.Message) map[string]bool {
 // rows are not duplicated. The sink opens only after those steps so
 // failures stay plain HTTP errors.
 func (s *Server) runTurn(ctx context.Context, userID, convID string, spec chat.RunSpec, history []model.Message, prompt string, parts []model.Part, known map[string]bool, w http.ResponseWriter) {
+	spec, history = s.maybeCompact(ctx, userID, convID, spec, history)
 	// Tools load before the SSE sink goes out so failures can still be
 	// plain HTTP errors. One broken config skips that tool only (logged by
 	// DecodeConfigs's returned error).
@@ -194,6 +195,35 @@ func (s *Server) runTurn(ctx context.Context, userID, convID string, spec chat.R
 	s.settleRun(ctx, userID, convID, spec, outcome, sink, known)
 }
 
+// maybeCompact trims a hot history into its recent window and folds the
+// older span's summary into the run instructions (ephemeral: history rows
+// and role alternation are untouched). The summarizer spend is metered as
+// a `compaction` usage event priced from the rate table. Fail-open: a nil
+// compactor, a cool history, or a model failure returns inputs unchanged.
+func (s *Server) maybeCompact(ctx context.Context, userID, convID string, spec chat.RunSpec, history []model.Message) (chat.RunSpec, []model.Message) {
+	if s.deps.Compactor == nil {
+		return spec, history
+	}
+	recent, summary, cusage, did, _ := s.deps.Compactor.Compact(ctx, history)
+	if !did {
+		return spec, history
+	}
+	if spec.SystemPrompt == "" {
+		spec.SystemPrompt = chat.DefaultSystemPrompt
+	}
+	spec.SystemPrompt += "\n\n[Compacted earlier context — summarized, not verbatim]\n" + summary
+	if cusage.InputTokens+cusage.OutputTokens > 0 {
+		cm := s.deps.Compactor.ModelName()
+		ccost := s.deps.Rates.RatesFor(cm).ChatCostMicros(cusage.InputTokens, cusage.OutputTokens)
+		_ = s.deps.Usage.Add(ctx, storage.UsageEvent{
+			UserID: userID, Kind: "compaction", Model: cm, ConversationID: &convID,
+			InputTokens: cusage.InputTokens, OutputTokens: cusage.OutputTokens,
+			Estimated: false, CostMicros: ccost,
+		})
+	}
+	return spec, recent
+}
+
 // emitSources tells the client which document chunks the run retrieved, so
 // the answer can render its source cards. Nothing emits when the run never
 // searched.
@@ -203,13 +233,15 @@ func emitSources(sink *sseSink, sources []rag.Scored) {
 	}
 	rows := make([]map[string]any, len(sources))
 	for i, sc := range sources {
-		snippet := sc.Chunk.Content
+		snippet := rag.DisplayText(sc)
 		if len(snippet) > 160 {
 			snippet = strings.TrimSpace(snippet[:160]) + "…"
 		}
 		rows[i] = map[string]any{
 			"documentId": sc.Chunk.DocumentID,
 			"title":      sc.Chunk.DocTitle,
+			"heading":    sc.Chunk.Heading,
+			"page":       sc.Chunk.Page,
 			"snippet":    snippet,
 			"score":      sc.Score,
 		}
@@ -257,26 +289,33 @@ func (s *Server) userTools(ctx context.Context, userID string) ([]tool.Tool[chat
 
 // searchDeps wraps the raw RagSearch with embedding metering (every query
 // embed is an exact-token `embedding` usage event priced from the rate
-// table) and per-run source collection for the sources SSE event. Nil when
-// RAG is disabled.
+// table), optional rerank generation metering, and per-run source collection
+// for the sources SSE event. Nil when RAG is disabled.
 func (s *Server) searchDeps(userID, convID string, sources *[]rag.Scored) chat.SearchFunc {
 	if s.deps.RagSearch == nil {
 		return nil
 	}
-	return func(ctx context.Context, query string, k int) ([]rag.Scored, error) {
-		scored, usage, err := s.deps.RagSearch(ctx, userID, query, k)
+	return func(ctx context.Context, query string, k int, docIDs []string) ([]rag.Scored, error) {
+		scored, rep, err := s.deps.RagSearch(ctx, userID, query, k, docIDs)
 		if err != nil {
 			return nil, err
 		}
 		*sources = append(*sources, scored...)
-		if usage.InputTokens > 0 {
+		if rep.Embed.InputTokens > 0 {
 			model := s.deps.Cfg.RAG.EmbeddingModel
 			_ = s.deps.Usage.Add(ctx, storage.UsageEvent{
 				UserID: userID, Kind: "embedding", Model: model,
 				ConversationID: &convID,
-				InputTokens:    usage.InputTokens,
-				Estimated:      usage.Estimated,
-				CostMicros:     s.deps.Rates.RatesFor(model).ChatCostMicros(usage.InputTokens, 0),
+				InputTokens:    rep.Embed.InputTokens,
+				Estimated:      rep.Embed.Estimated,
+				CostMicros:     s.deps.Rates.RatesFor(model).ChatCostMicros(rep.Embed.InputTokens, 0),
+			})
+		}
+		if rep.Reranked && rep.RerankIn+rep.RerankOut > 0 {
+			cost := s.deps.Rates.RatesFor(rep.RerankModel).ChatCostMicros(rep.RerankIn, rep.RerankOut)
+			_ = s.deps.Usage.Add(ctx, storage.UsageEvent{
+				UserID: userID, Kind: "rerank", Model: rep.RerankModel, ConversationID: &convID,
+				InputTokens: rep.RerankIn, OutputTokens: rep.RerankOut, Estimated: false, CostMicros: cost,
 			})
 		}
 		return scored, nil

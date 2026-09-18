@@ -2,11 +2,6 @@ package rag
 
 import "strings"
 
-const (
-	chunkTarget  = 1000
-	chunkOverlap = 150
-)
-
 // Chunk is one retrieval unit: a slice of a document's text with the
 // metadata the index and the citations need.
 type Chunk struct {
@@ -14,106 +9,125 @@ type Chunk struct {
 	DocTitle   string
 	Index      int
 	Content    string
+	Heading    string // nearest section heading, "" when none
+	Page       int    // 1-based for PDFs, 0 otherwise
+	Tokens     int    // EstTokens(Content) at build time
 }
 
-// ChunkText splits text into ~1000-char chunks with ~150-char overlap,
-// preferring paragraph boundaries (blocks separated by blank lines,
-// markdown headings always starting a block). A block longer than the
-// target is hard-split at word boundaries, and consecutive windows of
-// such a block share the overlap tail. Chunks come back in reading
-// order with sequential Index values.
-func ChunkText(docID, title, text string) []Chunk {
-	var out []Chunk
-	emit := func(content string) {
-		if s := strings.TrimSpace(content); s != "" {
-			out = append(out, Chunk{DocumentID: docID, DocTitle: title, Index: len(out), Content: s})
-		}
-	}
-	var cur strings.Builder
-	var carry string // overlap tail carried into the next chunk after a hard split
-	flush := func() {
-		emit(cur.String())
-		cur.Reset()
-	}
-	for _, block := range blocks(text) {
-		for len(block) > chunkTarget {
-			flush()
-			window, rest := wordWindow(block, chunkTarget-chunkOverlap)
-			if carry != "" {
-				emit(carry + " " + window)
-			} else {
-				emit(window)
+// splitSentences cuts s on sentence boundaries (. ! ? or newline),
+// keeping the delimiter. A fragment with no delimiter is one sentence.
+func splitSentences(s string) []string {
+	var out []string
+	start := 0
+	for i := 0; i < len(s); i++ {
+		if s[i] == '.' || s[i] == '!' || s[i] == '?' || s[i] == '\n' {
+			frag := strings.TrimSpace(s[start : i+1])
+			if frag != "" {
+				out = append(out, frag)
 			}
-			carry = lastWords(window, chunkOverlap)
-			block = rest
+			start = i + 1
 		}
-		if carry != "" {
-			cur.WriteString(carry + "\n\n")
-			carry = ""
-		}
-		if cur.Len() > 0 && cur.Len()+len(block)+2 > chunkTarget {
-			flush()
-		}
-		cur.WriteString(block)
-		cur.WriteString("\n\n")
 	}
-	flush()
+	if tail := strings.TrimSpace(s[start:]); tail != "" {
+		out = append(out, tail)
+	}
 	return out
 }
 
-// blocks splits on blank lines; a markdown heading line always starts a
-// new block so headings stay attached to the body that follows them.
-func blocks(text string) []string {
+// splitUnits returns the recursive split ladder for one section body:
+// paragraphs, then sentences inside oversize paragraphs, then words.
+func splitUnits(text string, targetTokens int) []string {
 	var out []string
 	for _, para := range strings.Split(text, "\n\n") {
-		var cur string
-		for _, ln := range strings.Split(strings.TrimSpace(para), "\n") {
-			trimmed := strings.TrimSpace(ln)
-			if strings.HasPrefix(trimmed, "#") {
-				if cur != "" {
-					out = append(out, cur)
-				}
-				cur = trimmed
-				continue
-			}
-			if cur == "" {
-				cur = trimmed
-				continue
-			}
-			cur += "\n" + trimmed
+		para = strings.TrimSpace(para)
+		if para == "" {
+			continue
 		}
-		if cur != "" {
-			out = append(out, cur)
+		if EstTokens(para) <= targetTokens {
+			out = append(out, para)
+			continue
+		}
+		for _, sent := range splitSentences(para) {
+			if EstTokens(sent) <= targetTokens {
+				out = append(out, sent)
+				continue
+			}
+			words := strings.Fields(sent)
+			cur := ""
+			for _, w := range words {
+				if cur != "" && EstTokens(cur+" "+w) > targetTokens {
+					out = append(out, cur)
+					cur = w
+					continue
+				}
+				if cur != "" {
+					cur += " "
+				}
+				cur += w
+			}
+			if cur != "" {
+				out = append(out, cur)
+			}
 		}
 	}
 	return out
 }
 
-// wordWindow cuts s at a word boundary at or before n chars, returning
-// the window and the rest.
-func wordWindow(s string, n int) (string, string) {
-	if n >= len(s) {
-		return s, ""
-	}
-	cut := n
-	for cut > 0 && s[cut] != ' ' && s[cut] != '\n' {
-		cut--
-	}
-	if cut == 0 {
-		cut = n // no whitespace to respect: hard cut
-	}
-	return strings.TrimSpace(s[:cut]), strings.TrimSpace(s[cut:])
-}
-
-// lastWords returns the last ~n chars of s, extended forward to the end
-// of the word it lands in so the next chunk resumes at a word start.
-func lastWords(s string, n int) string {
+// overlapTail returns roughly the last overlapTokens of s, cut at a word start.
+func overlapTail(s string, overlapTokens int) string {
+	n := overlapTokens * 4
 	if n >= len(s) {
 		return s
 	}
-	start := len(s) - n
-	for start < len(s) && s[start] != ' ' && s[start] != '\n' {
-		start++
+	i := strings.LastIndexAny(s[:len(s)-n+1], " \n")
+	if i < 0 {
+		return s[len(s)-n:]
 	}
-	return strings.TrimSpace(s[start:])
+	return strings.TrimSpace(s[i+1:])
+}
+
+// ChunkSections splits sections into token-budgeted chunks with word-safe
+// overlap. Units never cross a section boundary, so Heading/Page stay exact.
+// Units inside a chunk are space-joined so word overlap across chunk
+// boundaries stays contiguous (an 8-word tail of one chunk is a literal
+// substring of the next). The budget check measures the joined content
+// exactly, separators included, so Tokens never overshoots targetTokens by
+// more than one unit.
+func ChunkSections(docID, title string, sections []Section, targetTokens, overlapTokens int) []Chunk {
+	var out []Chunk
+	for _, sec := range sections {
+		var cur []string
+		flush := func() {
+			if len(cur) == 0 {
+				return
+			}
+			content := strings.Join(cur, " ")
+			out = append(out, Chunk{
+				DocumentID: docID, DocTitle: title, Index: len(out),
+				Content: content, Heading: sec.Heading, Page: sec.Page,
+				Tokens: EstTokens(content),
+			})
+			cur = nil
+		}
+		for _, u := range splitUnits(sec.Text, targetTokens) {
+			if len(cur) > 0 && EstTokens(strings.Join(cur, " ")+" "+u) > targetTokens {
+				flush()
+				if overlapTokens > 0 && len(out) > 0 {
+					cur = []string{overlapTail(out[len(out)-1].Content, overlapTokens)}
+				}
+			}
+			cur = append(cur, u)
+		}
+		flush()
+	}
+	return out
+}
+
+// ChunkText is the single-section entry point with the default 512/64
+// token budget. Service wiring moves to ChunkSections in the pipeline task.
+func ChunkText(docID, title, text string) []Chunk {
+	if strings.TrimSpace(text) == "" {
+		return nil
+	}
+	return ChunkSections(docID, title, []Section{{Text: text}}, 512, 64)
 }

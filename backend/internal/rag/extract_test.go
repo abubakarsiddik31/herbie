@@ -97,3 +97,62 @@ func TestExtractUnsupported(t *testing.T) {
 		t.Fatal("want error for empty mime")
 	}
 }
+
+func TestExtractSectionsMarkdown(t *testing.T) {
+	got, err := ExtractSections("text/markdown", strings.NewReader("# Intro\nbody one\n\n## Deep\nbody two"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("sections: %+v", got)
+	}
+	if got[0].Heading != "Intro" || !strings.Contains(got[0].Text, "body one") {
+		t.Fatalf("s0: %+v", got[0])
+	}
+	if got[1].Heading != "Deep" || got[1].Page != 0 {
+		t.Fatalf("s1: %+v", got[1])
+	}
+}
+
+func TestExtractSectionsPlain(t *testing.T) {
+	got, err := ExtractSections("text/plain", strings.NewReader("just text"))
+	if err != nil || len(got) != 1 || got[0].Heading != "" || got[0].Text != "just text" {
+		t.Fatalf("plain: %+v %v", got, err)
+	}
+}
+
+func TestExtractSectionsPDFPages(t *testing.T) {
+	f, err := os.Open("testdata/tiny.pdf")
+	if err != nil {
+		t.Fatal("run TestMainPDFFixture first to generate it")
+	}
+	defer f.Close()
+	got, err := ExtractSections("application/pdf", f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Page != 1 || !strings.Contains(got[0].Text, "Hello golem chatbot") {
+		t.Fatalf("pdf sections: %+v", got)
+	}
+}
+
+func TestExtractSectionsDocxHeadings(t *testing.T) {
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	w, _ := zw.Create("word/document.xml")
+	w.Write([]byte(`<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>Title One</w:t></w:r></w:p><w:p><w:r><w:t>para text</w:t></w:r></w:p></w:body></w:document>`))
+	zw.Close()
+	got, err := ExtractSections("application/vnd.openxmlformats-officedocument.wordprocessingml.document", &buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Heading != "Title One" || !strings.Contains(got[0].Text, "para text") {
+		t.Fatalf("docx sections: %+v", got)
+	}
+}
+
+func TestEstTokens(t *testing.T) {
+	if EstTokens("") != 1 || EstTokens("abcd") != 1 || EstTokens("abcdefgh") != 2 {
+		t.Fatalf("est: %d %d %d", EstTokens(""), EstTokens("abcd"), EstTokens("abcdefgh"))
+	}
+}
