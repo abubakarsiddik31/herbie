@@ -12,12 +12,18 @@ var (
 	ErrWeakPassword       = errors.New("password must be at least 10 characters")
 	ErrInvalidCredentials = errors.New("invalid email or password")
 	ErrInvalidRefresh     = errors.New("invalid refresh token")
+	ErrOAuthUnlinked      = errors.New("oauth account not linked")
+	ErrOAuthConflict      = errors.New("oauth account linked to another user")
+	ErrInvalidOAuthCode   = errors.New("invalid oauth code")
 )
+
+const oauthCodeTTL = 5 * time.Minute
 
 type UserRecord struct {
 	ID           string
 	Email        string
 	PasswordHash string
+	HasPassword  bool
 }
 
 type RefreshRecord struct {
@@ -39,6 +45,14 @@ type RefreshStore interface {
 	RevokeFamily(ctx context.Context, userID string) error
 }
 
+type OAuthStore interface {
+	FindUserByProvider(ctx context.Context, provider, subject string) (UserRecord, error)
+	CreateOAuthUser(ctx context.Context, email string) (UserRecord, error)
+	LinkProvider(ctx context.Context, userID, provider, subject string) error
+	StoreCode(ctx context.Context, userID, codeHash string, expiresAt time.Time) error
+	ConsumeCode(ctx context.Context, codeHash string) (string, error)
+}
+
 type AuthResult struct {
 	AccessToken      string
 	AccessExpiresAt  time.Time
@@ -50,15 +64,16 @@ type AuthResult struct {
 type Service struct {
 	users   UserStore
 	refresh RefreshStore
+	oauth   OAuthStore
 	tokens  *TokenMaker
 }
 
-func NewService(users UserStore, refresh RefreshStore, secret string) (*Service, error) {
+func NewService(users UserStore, refresh RefreshStore, oauth OAuthStore, secret string) (*Service, error) {
 	tm, err := NewTokenMaker(secret)
 	if err != nil {
 		return nil, err
 	}
-	return &Service{users: users, refresh: refresh, tokens: tm}, nil
+	return &Service{users: users, refresh: refresh, oauth: oauth, tokens: tm}, nil
 }
 
 func (s *Service) issue(ctx context.Context, user UserRecord) (AuthResult, error) {
@@ -101,8 +116,63 @@ func (s *Service) Login(ctx context.Context, email, password string) (AuthResult
 	if err != nil {
 		return AuthResult{}, ErrInvalidCredentials
 	}
+	if !user.HasPassword {
+		return AuthResult{}, ErrInvalidCredentials
+	}
 	if err := CheckPassword(user.PasswordHash, password); err != nil {
 		return AuthResult{}, ErrInvalidCredentials
+	}
+	return s.issue(ctx, user)
+}
+
+// OAuthLogin resolves a verified provider identity to a session. A linked
+// identity signs in; an email matching a password account links it; a new
+// email provisions a passwordless account and links it.
+func (s *Service) OAuthLogin(ctx context.Context, provider, subject, email string) (AuthResult, error) {
+	if user, err := s.oauth.FindUserByProvider(ctx, provider, subject); err == nil {
+		return s.issue(ctx, user)
+	} else if !errors.Is(err, ErrOAuthUnlinked) {
+		return AuthResult{}, err
+	}
+	if existing, err := s.users.ByEmail(ctx, email); err == nil {
+		if err := s.oauth.LinkProvider(ctx, existing.ID, provider, subject); err != nil {
+			return AuthResult{}, err
+		}
+		return s.issue(ctx, existing)
+	} else if !errors.Is(err, ErrInvalidCredentials) {
+		return AuthResult{}, err
+	}
+	user, err := s.oauth.CreateOAuthUser(ctx, email)
+	if err != nil {
+		return AuthResult{}, err
+	}
+	if err := s.oauth.LinkProvider(ctx, user.ID, provider, subject); err != nil {
+		return AuthResult{}, err
+	}
+	return s.issue(ctx, user)
+}
+
+// IssueOAuthCode mints a single-use handoff code the SPA exchanges for a
+// session after the provider redirects back to it.
+func (s *Service) IssueOAuthCode(ctx context.Context, userID string) (string, error) {
+	code, hash, err := NewRefreshToken()
+	if err != nil {
+		return "", err
+	}
+	if err := s.oauth.StoreCode(ctx, userID, hash, time.Now().Add(oauthCodeTTL)); err != nil {
+		return "", err
+	}
+	return code, nil
+}
+
+func (s *Service) ConsumeOAuthCode(ctx context.Context, code string) (AuthResult, error) {
+	userID, err := s.oauth.ConsumeCode(ctx, HashRefreshToken(code))
+	if err != nil {
+		return AuthResult{}, err
+	}
+	user, err := s.users.ByID(ctx, userID)
+	if err != nil {
+		return AuthResult{}, ErrInvalidOAuthCode
 	}
 	return s.issue(ctx, user)
 }

@@ -34,10 +34,9 @@ func (u *Users) Create(ctx context.Context, email, passwordHash string) (auth.Us
 }
 
 func (u *Users) ByEmail(ctx context.Context, email string) (auth.UserRecord, error) {
-	row := u.pool.QueryRow(ctx,
-		`SELECT id, email::text, password_hash FROM users WHERE email = $1`, email)
-	var rec auth.UserRecord
-	if err := row.Scan(&rec.ID, &rec.Email, &rec.PasswordHash); err != nil {
+	rec, err := scanUser(u.pool.QueryRow(ctx,
+		`SELECT id, email::text, password_hash FROM users WHERE email = $1`, email))
+	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return auth.UserRecord{}, auth.ErrInvalidCredentials
 		}
@@ -47,9 +46,9 @@ func (u *Users) ByEmail(ctx context.Context, email string) (auth.UserRecord, err
 }
 
 func (u *Users) ByID(ctx context.Context, id string) (auth.UserRecord, error) {
-	row := u.pool.QueryRow(ctx, `SELECT id, email::text, password_hash FROM users WHERE id = $1`, id)
-	var rec auth.UserRecord
-	if err := row.Scan(&rec.ID, &rec.Email, &rec.PasswordHash); err != nil {
+	rec, err := scanUser(u.pool.QueryRow(ctx,
+		`SELECT id, email::text, password_hash FROM users WHERE id = $1`, id))
+	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return auth.UserRecord{}, auth.ErrInvalidRefresh
 		}
