@@ -41,8 +41,9 @@ type ServerDeps struct {
 }
 
 // RagSearchFunc is rag.Service.Search narrowed to what the chat path
-// needs (the score rows plus the query-embedding usage).
-type RagSearchFunc func(ctx context.Context, userID, query string, k int) ([]rag.Scored, rag.EmbedUsage, error)
+// needs (the score rows plus the query-embedding and rerank usage).
+// docIDs empty = all user documents; otherwise restricted to those IDs.
+type RagSearchFunc func(ctx context.Context, userID, query string, k int, docIDs []string) ([]rag.Scored, rag.UsageReport, error)
 
 type Server struct {
 	deps ServerDeps

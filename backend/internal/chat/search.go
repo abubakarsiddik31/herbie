@@ -17,8 +17,10 @@ import (
 const SearchToolName = "search_documents"
 
 // SearchFunc retrieves the user's document chunks; wired per run by the
-// HTTP layer (embedding + Weaviate + usage metering behind it).
-type SearchFunc func(ctx context.Context, query string, k int) ([]rag.Scored, error)
+// HTTP layer (embedding + Weaviate + usage metering behind it). An empty
+// docIDs means all user documents; otherwise search is restricted to those
+// document IDs (from an earlier result).
+type SearchFunc func(ctx context.Context, query string, k int, docIDs []string) ([]rag.Scored, error)
 
 const citationRules = `
 
@@ -30,7 +32,8 @@ var searchSchema = json.RawMessage(`{
   "type": "object",
   "properties": {
     "query": {"type": "string", "description": "The text to search the user's documents for."},
-    "k": {"type": "integer", "description": "How many passages to return (default 5, max 20)."}
+    "k": {"type": "integer", "description": "How many passages to return (default 5, max 20)."},
+    "documentIds": {"type": "array", "items": {"type": "string"}, "description": "Restrict search to these document IDs (from an earlier result). Omit for all documents."}
   },
   "required": ["query"]
 }`)
@@ -41,7 +44,7 @@ var searchSchema = json.RawMessage(`{
 func SearchTool() tool.Tool[Deps] {
 	return tool.Tool[Deps]{
 		Name:        SearchToolName,
-		Description: "Search the user's uploaded documents for passages relevant to a query. Use it when the answer may depend on the user's documents.",
+		Description: "Search the user's uploaded documents for passages relevant to a query. Results are hybrid-retrieved, expanded with surrounding context, and relevance-ranked. Call again with a refined query or narrower documentIds when results look thin — iterate until the evidence answers the question.",
 		Schema:      searchSchema,
 		Timeout:     30 * time.Second,
 		MaxRetries:  tool.RetryLimit(1),
@@ -50,8 +53,9 @@ func SearchTool() tool.Tool[Deps] {
 				return tool.Text("No documents are available."), nil
 			}
 			var a struct {
-				Query string `json:"query"`
-				K     int    `json:"k"`
+				Query       string   `json:"query"`
+				K           int      `json:"k"`
+				DocumentIDs []string `json:"documentIds"`
 			}
 			if err := json.Unmarshal(args, &a); err != nil || strings.TrimSpace(a.Query) == "" {
 				return tool.Result{}, &model.ModelRetry{Err: fmt.Errorf(`provide a non-empty "query" string`)}
@@ -63,7 +67,17 @@ func SearchTool() tool.Tool[Deps] {
 			if k > 20 {
 				k = 20
 			}
-			scored, err := deps.Search(ctx, a.Query, k)
+			var docIDs []string
+			for _, id := range a.DocumentIDs {
+				if strings.TrimSpace(id) == "" {
+					continue
+				}
+				docIDs = append(docIDs, id)
+				if len(docIDs) >= 20 {
+					break
+				}
+			}
+			scored, err := deps.Search(ctx, a.Query, k, docIDs)
 			if err != nil {
 				return tool.Result{}, fmt.Errorf("search documents: %w", err)
 			}

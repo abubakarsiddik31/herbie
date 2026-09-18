@@ -134,8 +134,8 @@ func newDocsServer(t *testing.T, maxUpload int64) (http.Handler, string, *fakeDo
 		Cfg:    cfg,
 		Usage:  newFakeUsage(),
 		Agent:  nil,
-		RagSearch: func(_ context.Context, _, _ string, _ int) ([]rag.Scored, rag.EmbedUsage, error) {
-			return nil, rag.EmbedUsage{}, nil
+		RagSearch: func(_ context.Context, _, _ string, _ int, _ []string) ([]rag.Scored, rag.UsageReport, error) {
+			return nil, rag.UsageReport{}, nil
 		},
 		RAG:     fr,
 		Docs:    docs,

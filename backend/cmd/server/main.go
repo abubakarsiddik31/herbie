@@ -100,7 +100,17 @@ func main() {
 			os.Exit(1)
 		}
 		svc := rag.NewService(embedder, vs, objs)
-		ragSearch = svc.Search
+		svc.WithTuning(cfg.RAG.RetrievalAlpha, cfg.RAG.RetrieveMult, cfg.RAG.MaxCandidates, cfg.RAG.ExpandBefore, cfg.RAG.ExpandAfter, cfg.RAG.ChunkTargetTokens, cfg.RAG.ChunkOverlapTokens)
+		if cfg.RAG.RerankEnabled {
+			if client, err := registry.Resolve(chat.RunSpec{Model: cfg.RAG.RerankModel}); err != nil {
+				log.Warn("rerank disabled: model unresolvable", "model", cfg.RAG.RerankModel, "err", err)
+			} else {
+				svc.WithRanker(rag.NewRanker(client, cfg.RAG.RerankModel))
+			}
+		}
+		ragSearch = func(ctx context.Context, userID, query string, k int, docIDs []string) ([]rag.Scored, rag.UsageReport, error) {
+			return svc.Search(ctx, userID, query, rag.SearchOptions{TopK: k, DocIDs: docIDs})
+		}
 		ragRunner = svc
 		vectors = vs
 		objects = objs

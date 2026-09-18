@@ -66,11 +66,11 @@ func TestSendMessageSearchesDocumentsAndMetersEmbedding(t *testing.T) {
 
 	var queries []string
 	var gotK int
-	ragSearch := func(_ context.Context, userID, query string, k int) ([]rag.Scored, rag.EmbedUsage, error) {
+	ragSearch := func(_ context.Context, userID, query string, k int, _ []string) ([]rag.Scored, rag.UsageReport, error) {
 		queries = append(queries, userID+":"+query)
 		gotK = k
 		return []rag.Scored{{Chunk: rag.Chunk{DocumentID: "d1", DocTitle: "notes.md", Content: "Paris is the capital of France"}, Score: 0.9}},
-			rag.EmbedUsage{InputTokens: 7}, nil
+			rag.UsageReport{Embed: rag.EmbedUsage{InputTokens: 7}}, nil
 	}
 
 	h, token := newRagHandlerServer(t, agent, convs, msgs, usage, ragSearch)
@@ -109,6 +109,54 @@ func TestSendMessageSearchesDocumentsAndMetersEmbedding(t *testing.T) {
 	}
 	if e.CostMicros != 1 { // 7 tokens at 0.15 USD/MTok → round(7*0.15) = 1
 		t.Fatalf("embedding cost: %d", e.CostMicros)
+	}
+	if e.ConversationID == nil || *e.ConversationID != conv.ID {
+		t.Fatalf("conversation not attached: %+v", e)
+	}
+	if e.UserID != "u-1" {
+		t.Fatalf("user not attached: %+v", e)
+	}
+}
+
+func TestSendMessageRecordsRerankUsage(t *testing.T) {
+	m := testmodel.New().
+		Respond(toolCallResponse("call-1", "search_documents", json.RawMessage(`{"query":"capital of France"}`))).
+		Respond(model.Response{Message: model.Message{Role: model.RoleAssistant, Content: "The capital is Paris [1]."},
+			Usage: model.Usage{InputTokens: 10, OutputTokens: 5}})
+	agent := newTestAgent(t, m)
+	usage := newFakeUsage()
+	msgs := newFakeMsgs()
+	convs := newFakeConvos(msgs)
+
+	ragSearch := func(_ context.Context, _, _ string, _ int, _ []string) ([]rag.Scored, rag.UsageReport, error) {
+		return []rag.Scored{{Chunk: rag.Chunk{DocumentID: "d1", DocTitle: "notes.md", Content: "Paris is the capital of France"}, Score: 0.9}},
+			rag.UsageReport{
+				Embed:       rag.EmbedUsage{InputTokens: 7},
+				Reranked:    true,
+				RerankModel: "gemini-2.5-flash",
+				RerankIn:    5000,
+				RerankOut:   50,
+			}, nil
+	}
+
+	h, token := newRagHandlerServer(t, agent, convs, msgs, usage, ragSearch)
+	conv := convs.mustCreate("u-1", "")
+	rec := postMessage(t, h, token, conv.ID, "what is the capital?")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var e storage.UsageEvent
+	for _, ev := range usage.events {
+		if ev.Kind == "rerank" {
+			e = ev
+		}
+	}
+	if e.Kind != "rerank" {
+		t.Fatalf("no rerank event: %+v", usage.events)
+	}
+	if e.Model != "gemini-2.5-flash" || e.InputTokens != 5000 || e.OutputTokens != 50 || e.Estimated {
+		t.Fatalf("rerank event wrong: %+v", e)
 	}
 	if e.ConversationID == nil || *e.ConversationID != conv.ID {
 		t.Fatalf("conversation not attached: %+v", e)

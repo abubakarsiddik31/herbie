@@ -257,26 +257,33 @@ func (s *Server) userTools(ctx context.Context, userID string) ([]tool.Tool[chat
 
 // searchDeps wraps the raw RagSearch with embedding metering (every query
 // embed is an exact-token `embedding` usage event priced from the rate
-// table) and per-run source collection for the sources SSE event. Nil when
-// RAG is disabled.
+// table), optional rerank generation metering, and per-run source collection
+// for the sources SSE event. Nil when RAG is disabled.
 func (s *Server) searchDeps(userID, convID string, sources *[]rag.Scored) chat.SearchFunc {
 	if s.deps.RagSearch == nil {
 		return nil
 	}
-	return func(ctx context.Context, query string, k int) ([]rag.Scored, error) {
-		scored, usage, err := s.deps.RagSearch(ctx, userID, query, k)
+	return func(ctx context.Context, query string, k int, docIDs []string) ([]rag.Scored, error) {
+		scored, rep, err := s.deps.RagSearch(ctx, userID, query, k, docIDs)
 		if err != nil {
 			return nil, err
 		}
 		*sources = append(*sources, scored...)
-		if usage.InputTokens > 0 {
+		if rep.Embed.InputTokens > 0 {
 			model := s.deps.Cfg.RAG.EmbeddingModel
 			_ = s.deps.Usage.Add(ctx, storage.UsageEvent{
 				UserID: userID, Kind: "embedding", Model: model,
 				ConversationID: &convID,
-				InputTokens:    usage.InputTokens,
-				Estimated:      usage.Estimated,
-				CostMicros:     s.deps.Rates.RatesFor(model).ChatCostMicros(usage.InputTokens, 0),
+				InputTokens:    rep.Embed.InputTokens,
+				Estimated:      rep.Embed.Estimated,
+				CostMicros:     s.deps.Rates.RatesFor(model).ChatCostMicros(rep.Embed.InputTokens, 0),
+			})
+		}
+		if rep.Reranked && rep.RerankIn+rep.RerankOut > 0 {
+			cost := s.deps.Rates.RatesFor(rep.RerankModel).ChatCostMicros(rep.RerankIn, rep.RerankOut)
+			_ = s.deps.Usage.Add(ctx, storage.UsageEvent{
+				UserID: userID, Kind: "rerank", Model: rep.RerankModel, ConversationID: &convID,
+				InputTokens: rep.RerankIn, OutputTokens: rep.RerankOut, Estimated: false, CostMicros: cost,
 			})
 		}
 		return scored, nil
