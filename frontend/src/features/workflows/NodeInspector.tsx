@@ -1,13 +1,24 @@
 import { useState } from "react";
-import { Copy, Trash2, X } from "lucide-react";
+import {
+  AlertCircle,
+  CheckCircle2,
+  Copy,
+  Loader2,
+  PanelRightClose,
+  PanelRightOpen,
+  Trash2,
+  X,
+} from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { cn } from "@/lib/utils";
 import { useTools } from "@/features/tools/useTools";
 import { getNodeDefinition } from "./nodeTypes";
+import { PayloadViewer } from "./PayloadViewer";
 import type { NodeExecutionResult } from "@/lib/types";
 
 interface NodeInspectorProps {
@@ -33,7 +44,8 @@ export function NodeInspector({
   onClose,
 }: NodeInspectorProps) {
   const def = getNodeDefinition(node.type);
-  const [activeTab, setActiveTab] = useState<"config" | "result">("config");
+  const [activeTab, setActiveTab] = useState<"config" | "result">(executionResult ? "result" : "config");
+  const [isExpanded, setIsExpanded] = useState(false);
 
   const [name, setName] = useState(node.name || def.label);
   const [config, setConfig] = useState<Record<string, unknown>>({
@@ -64,19 +76,33 @@ export function NodeInspector({
   }
 
   return (
-    <aside className="flex h-full w-84 md:w-96 flex-col border-l border-border bg-card shadow-xl z-20">
+    <aside
+      className={cn(
+        "flex h-full flex-col border-l border-border bg-card shadow-xl z-20 transition-all duration-200",
+        isExpanded ? "w-[560px] max-w-[90vw]" : "w-84 md:w-96"
+      )}
+    >
       {/* Header */}
       <div className="flex items-center justify-between border-b border-border/60 p-3.5">
-        <div className="flex items-center gap-2">
-          <div className="flex size-7 items-center justify-center rounded-md border border-border bg-muted">
+        <div className="flex items-center gap-2 min-w-0">
+          <div className="flex size-7 shrink-0 items-center justify-center rounded-md border border-border bg-muted">
             <def.icon className="size-4 text-primary" />
           </div>
-          <div>
-            <h3 className="text-xs font-semibold text-foreground tracking-tight">{def.label}</h3>
-            <p className="text-[10px] text-muted-foreground font-mono">ID: {node.id}</p>
+          <div className="min-w-0">
+            <h3 className="text-xs font-semibold text-foreground tracking-tight truncate">{def.label}</h3>
+            <p className="text-[10px] text-muted-foreground font-mono truncate">ID: {node.id}</p>
           </div>
         </div>
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1 shrink-0">
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            onClick={() => setIsExpanded(!isExpanded)}
+            className="text-muted-foreground hover:text-foreground"
+            title={isExpanded ? "Standard width" : "Expand drawer width"}
+          >
+            {isExpanded ? <PanelRightClose className="size-4" /> : <PanelRightOpen className="size-4" />}
+          </Button>
           <Button
             variant="ghost"
             size="icon-xs"
@@ -486,42 +512,47 @@ export function NodeInspector({
                 <p className="mt-1 text-[11px]">Click "Test Workflow" in the toolbar to run.</p>
               </div>
             ) : (
-              <div className="space-y-3">
-                <div className="flex items-center justify-between rounded-lg border border-border bg-muted/40 p-2.5">
-                  <span className="font-medium text-foreground">Status</span>
-                  <span
-                    className={`font-semibold capitalize ${
-                      executionResult.status === "success"
-                        ? "text-emerald-500"
-                        : executionResult.status === "running"
-                        ? "text-blue-500"
-                        : "text-destructive"
-                    }`}
-                  >
-                    {executionResult.status} ({executionResult.durationMs}ms)
+              <div className="space-y-4">
+                <div
+                  className={cn(
+                    "flex items-center justify-between rounded-xl border p-3 text-xs",
+                    executionResult.status === "success" &&
+                      "border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
+                    executionResult.status === "failed" &&
+                      "border-destructive/30 bg-destructive/10 text-destructive",
+                    executionResult.status === "running" &&
+                      "border-blue-500/30 bg-blue-500/10 text-blue-500"
+                  )}
+                >
+                  <div className="flex items-center gap-2">
+                    {executionResult.status === "success" && <CheckCircle2 className="size-4 text-emerald-500" />}
+                    {executionResult.status === "failed" && <AlertCircle className="size-4 text-destructive" />}
+                    {executionResult.status === "running" && <Loader2 className="size-4 animate-spin text-blue-500" />}
+                    <span className="font-semibold capitalize">{executionResult.status}</span>
+                  </div>
+                  <span className="font-mono text-[11px] text-muted-foreground">
+                    Duration: {executionResult.durationMs}ms
                   </span>
                 </div>
 
                 {executionResult.error && (
-                  <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-2.5 text-destructive text-[11px]">
-                    <span className="font-semibold">Error:</span> {executionResult.error}
+                  <div className="rounded-xl border border-destructive/30 bg-destructive/10 p-3 text-destructive text-[11px]">
+                    <span className="font-semibold">Execution Error:</span> {executionResult.error}
                   </div>
                 )}
 
-                <div className="space-y-1.5">
-                  <Label className="text-xs text-muted-foreground">Node Output Payload</Label>
-                  <pre className="max-h-60 overflow-auto rounded-lg border border-border bg-muted/50 p-2 font-mono text-[11px] leading-relaxed">
-                    {JSON.stringify(executionResult.output ?? null, null, 2)}
-                  </pre>
-                </div>
+                <PayloadViewer
+                  title="Node Output Payload"
+                  data={executionResult.output}
+                  defaultMode="rich"
+                />
 
                 {executionResult.input !== undefined && (
-                  <div className="space-y-1.5 pt-2 border-t border-border/40">
-                    <Label className="text-xs text-muted-foreground">Node Input Payload</Label>
-                    <pre className="max-h-40 overflow-auto rounded-lg border border-border bg-muted/50 p-2 font-mono text-[11px] leading-relaxed">
-                      {JSON.stringify(executionResult.input ?? null, null, 2)}
-                    </pre>
-                  </div>
+                  <PayloadViewer
+                    title="Node Input Payload"
+                    data={executionResult.input}
+                    defaultMode="rich"
+                  />
                 )}
               </div>
             )}

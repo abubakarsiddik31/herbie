@@ -9,6 +9,7 @@ import {
 } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useWorkflowRuns } from "./useWorkflows";
+import { PayloadViewer } from "./PayloadViewer";
 import type { WorkflowRun } from "@/lib/types";
 
 interface WorkflowRunsDialogProps {
@@ -114,20 +115,18 @@ export function WorkflowRunsDialog({ workflowId, open, onOpenChange }: WorkflowR
                   )}
 
                   {/* Output Data */}
-                  <div className="space-y-1.5">
-                    <p className="font-semibold text-foreground text-xs">Final Output Data</p>
-                    <pre className="max-h-56 overflow-auto rounded-lg border border-border bg-card p-2.5 font-mono text-[11px] leading-relaxed">
-                      {JSON.stringify(selectedRun.outputData ?? null, null, 2)}
-                    </pre>
-                  </div>
+                  <PayloadViewer
+                    title="Final Output Data"
+                    data={selectedRun.outputData}
+                    defaultMode="rich"
+                  />
 
                   {/* Input Data */}
-                  <div className="space-y-1.5">
-                    <p className="font-semibold text-foreground text-xs">Trigger Input Payload</p>
-                    <pre className="max-h-40 overflow-auto rounded-lg border border-border bg-card p-2.5 font-mono text-[11px] leading-relaxed">
-                      {JSON.stringify(selectedRun.inputData ?? null, null, 2)}
-                    </pre>
-                  </div>
+                  <PayloadViewer
+                    title="Trigger Input Payload"
+                    data={selectedRun.inputData}
+                    defaultMode="rich"
+                  />
 
                   {/* Step Results breakdown */}
                   {selectedRun.nodeResults && Object.keys(selectedRun.nodeResults).length > 0 && (

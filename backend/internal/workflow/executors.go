@@ -51,11 +51,22 @@ var DefaultExecutors = map[string]NodeExecutor{
 	"delay":            executeDelay,
 }
 
-func executeManualTrigger(_ context.Context, _ Node, evalCtx *EvalContext, _ *ExecutionEnvironment) (any, string, error) {
-	if evalCtx.JSON != nil {
-		return evalCtx.JSON, "", nil
+func executeManualTrigger(_ context.Context, node Node, evalCtx *EvalContext, _ *ExecutionEnvironment) (any, string, error) {
+	out := make(map[string]any)
+	for k, v := range node.Data {
+		out[k] = v
 	}
-	return map[string]any{"triggeredAt": time.Now().Format(time.RFC3339)}, "", nil
+	if inputMap, ok := evalCtx.JSON.(map[string]any); ok {
+		for k, v := range inputMap {
+			out[k] = v
+		}
+	} else if evalCtx.JSON != nil {
+		out["input"] = evalCtx.JSON
+	}
+	if len(out) == 0 {
+		out["triggeredAt"] = time.Now().Format(time.RFC3339)
+	}
+	return out, "", nil
 }
 
 func executeWebhookTrigger(_ context.Context, _ Node, evalCtx *EvalContext, _ *ExecutionEnvironment) (any, string, error) {
