@@ -129,7 +129,7 @@ func (s *Server) handleApprovals(w http.ResponseWriter, r *http.Request) {
 	for _, row := range msgs {
 		known[string(row.Data)] = true
 	}
-	idMap, err := s.persistRunMessages(ctx, userID, convID, spec.Model, outcome.Messages, outcome.Usage, outcome.Requests, false, known, 0)
+	idMap, err := s.persistRunMessages(ctx, userID, convID, spec.Model, outcome.Messages, outcome.Usage, outcome.Requests, false, known, 0, sourceJSON(sources))
 	if err != nil {
 		s.deps.Log.Error("persist resumed messages", "err", err)
 	}

@@ -192,7 +192,7 @@ func (s *Server) runTurn(ctx context.Context, userID, convID string, spec chat.R
 		return
 	}
 	emitSources(sink, sources)
-	s.settleRun(ctx, userID, convID, spec, outcome, sink, known)
+	s.settleRun(ctx, userID, convID, spec, outcome, sink, known, sourceJSON(sources))
 }
 
 // maybeCompact trims a hot history into its recent window and folds the
@@ -231,6 +231,25 @@ func emitSources(sink *sseSink, sources []rag.Scored) {
 	if len(sources) == 0 {
 		return
 	}
+	_ = sink.event("sources", map[string]any{"sources": sourceRows(sources)})
+}
+
+// sourceJSON renders retrieved chunks as the persisted per-message copy
+// (nil when the run never searched — the store defaults to []).
+func sourceJSON(sources []rag.Scored) json.RawMessage {
+	if len(sources) == 0 {
+		return nil
+	}
+	raw, err := json.Marshal(sourceRows(sources))
+	if err != nil {
+		return nil
+	}
+	return raw
+}
+
+// sourceRows renders retrieved chunks as client source rows: the SSE payload
+// and the persisted per-message copy share this shape exactly.
+func sourceRows(sources []rag.Scored) []map[string]any {
 	rows := make([]map[string]any, len(sources))
 	for i, sc := range sources {
 		snippet := rag.DisplayText(sc)
@@ -246,7 +265,7 @@ func emitSources(sink *sseSink, sources []rag.Scored) {
 			"score":      sc.Score,
 		}
 	}
-	_ = sink.event("sources", map[string]any{"sources": rows})
+	return rows
 }
 
 // runSpecFor resolves a conversation's model settings into a RunSpec: an
@@ -341,14 +360,15 @@ func (s *Server) toolEnv() chat.ToolEnv {
 }
 
 // settleRun dispatches a finished run: approval pauses park the conversation,
-// everything else finishes normally.
-func (s *Server) settleRun(ctx context.Context, userID, convID string, spec chat.RunSpec, outcome chat.Outcome, sink *sseSink, known map[string]bool) {
+// everything else finishes normally. sources carries the run's retrieved
+// chunks for the concluding answer row (nil when it never searched).
+func (s *Server) settleRun(ctx context.Context, userID, convID string, spec chat.RunSpec, outcome chat.Outcome, sink *sseSink, known map[string]bool, sources json.RawMessage) {
 	newFrom := replayedPrefixLen(outcome.Messages)
 	if len(outcome.Pending) > 0 {
 		s.pauseRun(ctx, userID, convID, spec, outcome, sink, known, newFrom)
 		return
 	}
-	s.finishRun(ctx, userID, convID, spec, outcome, sink, known, newFrom)
+	s.finishRun(ctx, userID, convID, spec, outcome, sink, known, newFrom, sources)
 }
 
 // replayedPrefixLen reports how many leading messages of a streamed run's
@@ -370,7 +390,7 @@ func replayedPrefixLen(msgs []model.Message) int {
 // tool call, usage, pending calls) and tells the client what needs a
 // decision. No done event follows — the stream ends waiting for approvals.
 func (s *Server) pauseRun(ctx context.Context, userID, convID string, spec chat.RunSpec, outcome chat.Outcome, sink *sseSink, known map[string]bool, newFrom int) {
-	idMap, err := s.persistRunMessages(ctx, userID, convID, spec.Model, outcome.Messages, outcome.Usage, outcome.Requests, false, known, newFrom)
+	idMap, err := s.persistRunMessages(ctx, userID, convID, spec.Model, outcome.Messages, outcome.Usage, outcome.Requests, false, known, newFrom, nil)
 	if err != nil {
 		s.deps.Log.Error("persist paused messages", "err", err)
 	}
@@ -412,7 +432,7 @@ func (s *Server) persistFailure(ctx context.Context, userID, convID string, spec
 		partial = runError.Partial
 	}
 	if partial != nil && len(partial.Messages) > 0 {
-		if _, err := s.persistRunMessages(ctx, userID, convID, spec.Model, partial.Messages, partial.Usage, partial.Requests, true, nil, replayedPrefixLen(partial.Messages)); err != nil {
+		if _, err := s.persistRunMessages(ctx, userID, convID, spec.Model, partial.Messages, partial.Usage, partial.Requests, true, nil, replayedPrefixLen(partial.Messages), nil); err != nil {
 			s.deps.Log.Error("persist partial", "err", err)
 		}
 		_ = s.deps.Usage.Add(ctx, usageEventFor(userID, convID, spec.Model, partial.Usage, partial.Requests, s.deps.Rates))
@@ -451,7 +471,7 @@ func (s *Server) persistFailure(ctx context.Context, userID, convID string, spec
 // persisted ones (the approval pause needs it to key pending rows). A tool
 // result is matched to the most recent unanswered raw ID, mirroring the
 // emission order golem guarantees.
-func (s *Server) persistRunMessages(ctx context.Context, userID, convID, modelStr string, msgs []model.Message, usage model.Usage, requests int, truncated bool, skip map[string]bool, newFrom int) (map[string]string, error) {
+func (s *Server) persistRunMessages(ctx context.Context, userID, convID, modelStr string, msgs []model.Message, usage model.Usage, requests int, truncated bool, skip map[string]bool, newFrom int, sources json.RawMessage) (map[string]string, error) {
 	lastAssistant := -1
 	for i, m := range msgs {
 		if m.Role == model.RoleAssistant {
@@ -510,6 +530,10 @@ func (s *Server) persistRunMessages(ctx context.Context, userID, convID, modelSt
 			row.Requests = requests
 			row.CostMicros = s.deps.Rates.ChatCostMicrosFor(modelStr, usage.InputTokens, usage.OutputTokens)
 			row.Model = modelStr
+			// The run's citations belong to its concluding answer: the same
+			// rows the sources event carried, so history reloads render the
+			// same cards the live session showed.
+			row.Sources = sources
 		}
 		if err := s.deps.Msgs.Add(ctx, row); err != nil {
 			return idMap, err
@@ -542,8 +566,8 @@ func rawOf(idMap map[string]string, persisted string) string {
 	return ""
 }
 
-func (s *Server) finishRun(ctx context.Context, userID, convID string, spec chat.RunSpec, outcome chat.Outcome, sink *sseSink, known map[string]bool, newFrom int) {
-	if _, err := s.persistRunMessages(ctx, userID, convID, spec.Model, outcome.Messages, outcome.Usage, outcome.Requests, false, known, newFrom); err != nil {
+func (s *Server) finishRun(ctx context.Context, userID, convID string, spec chat.RunSpec, outcome chat.Outcome, sink *sseSink, known map[string]bool, newFrom int, sources json.RawMessage) {
+	if _, err := s.persistRunMessages(ctx, userID, convID, spec.Model, outcome.Messages, outcome.Usage, outcome.Requests, false, known, newFrom, sources); err != nil {
 		s.deps.Log.Error("persist assistant messages", "err", err)
 	}
 	if err := s.deps.Usage.Add(ctx, usageEventFor(userID, convID, spec.Model, outcome.Usage, outcome.Requests, s.deps.Rates)); err != nil {

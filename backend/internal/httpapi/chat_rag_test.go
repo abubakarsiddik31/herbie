@@ -168,6 +168,87 @@ func TestSendMessageRecordsRerankUsage(t *testing.T) {
 	}
 }
 
+func TestSendMessagePersistsSourcesOnFinalMessage(t *testing.T) {
+	m := testmodel.New().
+		Respond(toolCallResponse("call-1", "search_documents", json.RawMessage(`{"query":"capital of France"}`))).
+		Respond(model.Response{Message: model.Message{Role: model.RoleAssistant, Content: "The capital is Paris [1]."},
+			Usage: model.Usage{InputTokens: 10, OutputTokens: 5}})
+	agent := newTestAgent(t, m)
+	usage := newFakeUsage()
+	msgs := newFakeMsgs()
+	convs := newFakeConvos(msgs)
+
+	ragSearch := func(_ context.Context, _, _ string, _ int, _ []string) ([]rag.Scored, rag.UsageReport, error) {
+		return []rag.Scored{{Chunk: rag.Chunk{DocumentID: "d1", DocTitle: "notes.md", Content: "Paris is the capital of France"}, Score: 0.9}},
+			rag.UsageReport{Embed: rag.EmbedUsage{InputTokens: 7}}, nil
+	}
+
+	h, token := newRagHandlerServer(t, agent, convs, msgs, usage, ragSearch)
+	conv := convs.mustCreate("u-1", "")
+	rec := postMessage(t, h, token, conv.ID, "what is the capital?")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// The run's final assistant row carries the retrieved sources; the user
+	// prompt row carries none.
+	var final *storage.Message
+	for i := range msgs.rows {
+		row := &msgs.rows[i]
+		if row.Role == "assistant" && row.Content == "The capital is Paris [1]." {
+			final = row
+		}
+		if row.Role == "user" && len(row.Sources) > 0 && string(row.Sources) != "[]" {
+			t.Fatalf("user row carries sources: %s", row.Sources)
+		}
+	}
+	if final == nil {
+		t.Fatalf("final assistant row missing: %+v", msgs.rows)
+	}
+	var got []map[string]any
+	if err := json.Unmarshal(final.Sources, &got); err != nil {
+		t.Fatalf("sources not JSON: %s", final.Sources)
+	}
+	if len(got) != 1 || got[0]["documentId"] != "d1" || got[0]["title"] != "notes.md" {
+		t.Fatalf("sources wrong: %s", final.Sources)
+	}
+
+	// History reloads serve the same rows so the cards (and citation jumps)
+	// survive a refresh.
+	req := httptest.NewRequest(http.MethodGet, "/api/conversations/"+conv.ID, nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec2 := httptest.NewRecorder()
+	h.ServeHTTP(rec2, req)
+	if rec2.Code != http.StatusOK {
+		t.Fatalf("history status %d: %s", rec2.Code, rec2.Body.String())
+	}
+	var detail struct {
+		Messages []struct {
+			Role    string           `json:"role"`
+			Content string           `json:"content"`
+			Sources []map[string]any `json:"sources"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(rec2.Body.Bytes(), &detail); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, m := range detail.Messages {
+		if m.Role == "assistant" && m.Content == "The capital is Paris [1]." {
+			found = true
+			if len(m.Sources) != 1 || m.Sources[0]["documentId"] != "d1" {
+				t.Fatalf("history sources wrong: %+v", m.Sources)
+			}
+		}
+		if m.Role == "user" && len(m.Sources) != 0 {
+			t.Fatalf("user history message carries sources: %+v", m.Sources)
+		}
+	}
+	if !found {
+		t.Fatalf("final answer missing from history: %s", rec2.Body.String())
+	}
+}
+
 func TestRunTurnCompactsHotHistory(t *testing.T) {
 	m := testmodel.New().Respond(model.Response{
 		Message: model.Message{Role: model.RoleAssistant, Content: "still here"},

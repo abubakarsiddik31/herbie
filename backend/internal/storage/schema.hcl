@@ -208,6 +208,11 @@ table "messages" {
     null    = false
     default = ""
   }
+  column "sources" {
+    type    = jsonb
+    null    = false
+    default = sql("'[]'::jsonb")
+  }
   column "created_at" {
     type    = timestamptz
     null    = false

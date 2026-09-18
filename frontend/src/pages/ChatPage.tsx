@@ -70,7 +70,7 @@ interface ConversationDetail {
 
 // Server messages arrive without the ephemeral streaming/error fields.
 function toChatMessage(m: ChatMessage): ChatMessage {
-  return { id: m.id, role: m.role, content: m.content, truncated: m.truncated, createdAt: m.createdAt, usage: m.usage, images: m.images };
+  return { id: m.id, role: m.role, content: m.content, truncated: m.truncated, createdAt: m.createdAt, usage: m.usage, images: m.images, sources: m.sources };
 }
 
 // CopyMessageButton is a small hover action that copies one message's text.
