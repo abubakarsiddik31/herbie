@@ -18,6 +18,7 @@ const server = setupServer(
   http.post("*/api/auth/register", () =>
     HttpResponse.json({ accessToken: "reg-tok", user: { id: "u2", email: "c@d.co" } }),
   ),
+  http.get("*/api/auth/providers", () => HttpResponse.json({ providers: [] })),
 );
 
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
@@ -65,6 +66,32 @@ describe("AuthForm", () => {
       accessToken: "reg-tok",
       user: { id: "u2", email: "c@d.co" },
     });
+  });
+
+  it("shows no provider buttons when the server offers password auth only", async () => {
+    renderRoutes("/login");
+    await vi.waitFor(() => expect(screen.getByRole("button", { name: "Sign in" })).toBeInTheDocument());
+    expect(screen.queryByRole("link", { name: /continue with/i })).not.toBeInTheDocument();
+  });
+
+  it("lists configured providers as start links", async () => {
+    server.use(
+      http.get("*/api/auth/providers", () =>
+        HttpResponse.json({
+          providers: [
+            { id: "google", name: "Google" },
+            { id: "github", name: "GitHub" },
+          ],
+        }),
+      ),
+    );
+    renderRoutes("/login");
+    const google = await screen.findByRole("link", { name: "Continue with Google" });
+    expect(google).toHaveAttribute("href", expect.stringContaining("/api/auth/oauth/google"));
+    expect(screen.getByRole("link", { name: "Continue with GitHub" })).toHaveAttribute(
+      "href",
+      expect.stringContaining("/api/auth/oauth/github"),
+    );
   });
 
   it("surfaces API errors via toast and stays on the page", async () => {
