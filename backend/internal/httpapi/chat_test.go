@@ -114,10 +114,10 @@ func (f *fakeConvos) Create(_ context.Context, userID, title string, patch stora
 	return conv, nil
 }
 
-func (f *fakeConvos) List(_ context.Context, userID string) ([]storage.Conversation, error) {
+func (f *fakeConvos) List(_ context.Context, userID, q string) ([]storage.Conversation, error) {
 	var out []storage.Conversation
 	for _, c := range f.convs {
-		if c.UserID == userID {
+		if c.UserID == userID && (q == "" || strings.Contains(strings.ToLower(c.Title), strings.ToLower(q))) {
 			out = append(out, c)
 		}
 	}

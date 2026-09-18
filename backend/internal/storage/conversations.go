@@ -61,9 +61,11 @@ func (c *Conversations) Create(ctx context.Context, userID, title string, patch 
 	return conv, nil
 }
 
-func (c *Conversations) List(ctx context.Context, userID string) ([]Conversation, error) {
+func (c *Conversations) List(ctx context.Context, userID, q string) ([]Conversation, error) {
 	rows, err := c.pool.Query(ctx,
-		`SELECT `+conversationColumns+` FROM conversations WHERE user_id = $1 ORDER BY updated_at DESC`, userID)
+		`SELECT `+conversationColumns+` FROM conversations
+		 WHERE user_id = $1 AND ($2 = '' OR title ILIKE '%' || $2 || '%' ESCAPE '\')
+		 ORDER BY updated_at DESC`, userID, escapeLike(q))
 	if err != nil {
 		return nil, fmt.Errorf("list conversations: %w", err)
 	}
@@ -164,4 +166,11 @@ func derefBool(b *bool, def bool) bool {
 		return def
 	}
 	return *b
+}
+
+// escapeLike quotes LIKE metacharacters so search terms match literally.
+func escapeLike(q string) string {
+	q = strings.ReplaceAll(q, `\`, `\\`)
+	q = strings.ReplaceAll(q, `%`, `\%`)
+	return strings.ReplaceAll(q, `_`, `\_`)
 }
