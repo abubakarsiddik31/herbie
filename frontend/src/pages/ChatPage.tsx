@@ -1,42 +1,35 @@
 import { useEffect, useRef, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useNavigate, useParams } from "react-router";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
+  ArrowUp,
   BookOpen,
   Check,
+  ChevronDown,
   Copy,
   Download,
   Flame,
-  Gauge,
   Globe,
   HelpCircle,
-  LogOut,
-  Menu,
   Mic,
+  Paperclip,
   Pencil,
   PenLine,
-  Plus,
-  Paperclip,
   RefreshCw,
-  FileUp,
-  Search,
-  Send,
-  Settings,
   Share2,
   ShieldCheck,
+  Sidebar,
+  SlidersHorizontal,
   Sparkles,
   Square,
   Trash2,
-  Wrench,
   X,
 } from "lucide-react";
 import { ApiError, apiFetch } from "@/lib/api";
-import { useDebouncedValue } from "@/lib/useDebouncedValue";
 import { MAX_IMAGES_PER_MESSAGE, readImageFiles, type PendingImage } from "@/lib/images";
 import { cn, fmtTokens } from "@/lib/utils";
 import type { ChatMessage, Conversation, ConversationSettings } from "@/lib/types";
-import { useAuth } from "@/stores/auth";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -47,15 +40,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Skeleton } from "@/components/ui/skeleton";
 import { BrandMark } from "@/components/BrandMark";
-import { ThemeToggle } from "@/components/ThemeToggle";
 import { RunLoader } from "@/components/ai/RunLoader";
 import { StreamingText } from "@/components/ai/StreamingText";
 import { ThinkingTrace } from "@/components/ai/ThinkingTrace";
+import { useSidebar } from "@/components/layout/SidebarContext";
 import { CommandPalette } from "@/features/chat/CommandPalette";
 import { ConversationSettingsDialog } from "@/features/chat/ConversationSettingsDialog";
 import { conversationFilename, downloadMarkdown, toMarkdown } from "@/features/chat/exportMarkdown";
@@ -68,23 +58,30 @@ import { useVoiceInput } from "@/features/chat/useVoiceInput";
 import {
   useConversations,
   useCreateConversation,
-  useDeleteConversation,
   useDeleteMessage,
   useUpdateConversationSettings,
 } from "@/features/chat/useConversations";
 import { useTools } from "@/features/tools/useTools";
+import { useDocuments } from "@/features/documents/useDocuments";
 
 interface ConversationDetail {
   conversation: Conversation;
   messages: ChatMessage[];
 }
 
-// Server messages arrive without the ephemeral streaming/error fields.
 function toChatMessage(m: ChatMessage): ChatMessage {
-  return { id: m.id, role: m.role, content: m.content, truncated: m.truncated, createdAt: m.createdAt, usage: m.usage, images: m.images, sources: m.sources };
+  return {
+    id: m.id,
+    role: m.role,
+    content: m.content,
+    truncated: m.truncated,
+    createdAt: m.createdAt,
+    usage: m.usage,
+    images: m.images,
+    sources: m.sources,
+  };
 }
 
-// CopyMessageButton is a small hover action that copies one message's text.
 function CopyMessageButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
   return (
@@ -106,19 +103,6 @@ function CopyMessageButton({ text }: { text: string }) {
   );
 }
 
-const GROUP_ORDER = ["Today", "Yesterday", "Previous 7 days", "Older"] as const;
-
-function groupKey(updatedAt: string): string {
-  const d = new Date(updatedAt);
-  const now = new Date();
-  const startOfDay = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
-  const days = Math.floor((startOfDay(now) - startOfDay(d)) / 86_400_000);
-  if (days <= 0) return "Today";
-  if (days === 1) return "Yesterday";
-  if (days < 7) return "Previous 7 days";
-  return "Older";
-}
-
 const SUGGESTIONS = [
   { icon: Globe, label: "What's the weather in Tokyo?" },
   { icon: Flame, label: "Search Hacker News for agent frameworks" },
@@ -129,62 +113,48 @@ const SUGGESTIONS = [
 export function ChatPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const user = useAuth((s) => s.user);
-  // The selected conversation lives in the URL (/chat/:conversationId?), so
-  // refresh and deep links land on the same thread.
   const { conversationId } = useParams();
   const selectedId = conversationId ?? null;
+
+  const { toggleSidebar, setMobileOpen } = useSidebar();
+
   const [input, setInput] = useState("");
   const [sendError, setSendError] = useState<string | null>(null);
-  const [pendingDelete, setPendingDelete] = useState<Conversation | null>(null);
   const [pendingMessageDelete, setPendingMessageDelete] = useState<string | null>(null);
   const [sharing, setSharing] = useState<Conversation | null>(null);
-  const [renaming, setRenaming] = useState<Conversation | null>(null);
-  const [renameTitle, setRenameTitle] = useState("");
-  const [filter, setFilter] = useState("");
-  const debouncedFilter = useDebouncedValue(filter);
-  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
-  // The user message currently being edited inline (null = none).
   const [editing, setEditing] = useState<{ id: string; draft: string } | null>(null);
-  // Images picked for the next message (cleared on send).
   const [attachments, setAttachments] = useState<PendingImage[]>([]);
-  // The latest citation jump requested from an answer's bracket links, with
-  // the owning message id so only its source list reacts.
   const [citeJump, setCiteJump] = useState<(CiteJump & { msgId: string }) | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  // Settings for a chat that does not exist yet; applied at create time.
+  const { data: docs } = useDocuments();
+  const hasDocs = (docs?.length ?? 0) > 0;
   const [draftSettings, setDraftSettings] = useState<ConversationSettings>({
     model: "",
     temperature: null,
     systemPrompt: "",
-    ragEnabled: true,
+    ragEnabled: false,
   });
+
+  useEffect(() => {
+    setDraftSettings((prev) => ({ ...prev, ragEnabled: hasDocs }));
+  }, [hasDocs]);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const seededRef = useRef<string | null>(null);
 
   const { messages, setMessages, status, send, edit, regenerate, resolve, stop, reset, trace, pending } = useChat(() => {
-    // Refresh titles/order after each completed run.
     void queryClient.invalidateQueries({ queryKey: ["conversations"] });
   });
 
-  const { data: conversations, isLoading: conversationsLoading } = useConversations(debouncedFilter.trim());
+  const { data: conversations } = useConversations();
   const { data: tools } = useTools();
   const { data: models } = useModels();
   const createConversation = useCreateConversation();
-  const deleteConversation = useDeleteConversation();
   const deleteMessage = useDeleteMessage(selectedId);
   const updateSettings = useUpdateConversationSettings(selectedId);
-
-  const renameMutation = useMutation({
-    mutationFn: ({ id, title }: { id: string; title: string }) =>
-      apiFetch<Conversation>(`/api/conversations/${id}`, { method: "PATCH", json: { title } }),
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["conversations"] }),
-    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Failed to rename conversation"),
-  });
 
   const { data: detail, isFetching: detailLoading, isError: detailError } = useQuery({
     queryKey: ["conversation", selectedId],
@@ -196,115 +166,37 @@ export function ChatPage() {
     retry: false,
   });
 
-  // Seed the thread once per selected conversation. The create-then-send path
-  // presets seededRef so the (empty) history fetch cannot clobber the
-  // optimistic messages the run just appended.
   useEffect(() => {
-    if (!detail || !selectedId || detail.conversation.id !== selectedId) return;
-    if (seededRef.current === selectedId) return;
-    seededRef.current = selectedId;
-    setMessages(detail.messages.map(toChatMessage));
-  }, [detail, selectedId, setMessages]);
-
-  // A URL id that doesn't exist (deep link, deleted elsewhere) falls back to
-  // a fresh chat.
-  useEffect(() => {
-    if (detailError) navigate("/chat", { replace: true });
-  }, [detailError, navigate]);
+    if (detailError && selectedId !== null) {
+      toast.error("Conversation not found");
+      navigate("/chat", { replace: true });
+    }
+  }, [detailError, selectedId, navigate]);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ block: "end" });
-  }, [messages]);
-
-  // Don't keep a stream (or its setState calls) alive after leaving the page.
-  useEffect(() => () => stop(), [stop]);
-
-  function selectConversation(id: string) {
-    if (id === selectedId) {
-      setSidebarOpen(false);
+    if (selectedId === null) {
+      seededRef.current = null;
+      reset();
       return;
     }
-    reset();
-    seededRef.current = null;
-    queryClient.removeQueries({ queryKey: ["conversation", id] });
-    setSendError(null);
-    setCiteJump(null);
-    navigate(`/chat/${id}`);
-    setSidebarOpen(false);
-  }
+    if (detail && seededRef.current !== selectedId) {
+      seededRef.current = selectedId;
+      setMessages(detail.messages.map(toChatMessage));
+      setSendError(null);
+    }
+  }, [selectedId, detail, reset, setMessages]);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, trace, pending]);
 
   function startNewChat() {
-    reset();
-    seededRef.current = null;
-    setSendError(null);
-    setCiteJump(null);
     navigate("/chat");
-    setSidebarOpen(false);
-  }
-
-  function openRename(c: Conversation) {
-    setRenaming(c);
-    setRenameTitle(c.title);
-  }
-
-  function confirmRename() {
-    if (!renaming) return;
-    const title = renameTitle.trim();
-    if (!title || title === renaming.title) {
-      setRenaming(null);
-      return;
-    }
-    renameMutation.mutate(
-      { id: renaming.id, title },
-      { onSuccess: () => setRenaming(null) },
-    );
-  }
-
-  function confirmDeleteMessage() {
-    if (!pendingMessageDelete) return;
-    deleteMessage.mutate(pendingMessageDelete, {
-      onSuccess: () => setPendingMessageDelete(null),
-      onError: (err) => toast.error(err instanceof ApiError ? err.message : "Failed to delete message"),
-    });
-  }
-  function confirmDelete() {
-    if (!pendingDelete) return;
-    const id = pendingDelete.id;
-    deleteConversation.mutate(id, {
-      onSuccess: () => {
-        if (id === selectedId) {
-          reset();
-          navigate("/chat");
-        }
-        setPendingDelete(null);
-      },
-      onError: (err) => toast.error(err instanceof ApiError ? err.message : "Failed to delete conversation"),
-    });
-  }
-
-  async function submit(preset?: string) {
-    const content = (preset ?? input).trim();
-    if ((!content && attachments.length === 0) || status === "running" || createConversation.isPending) return;
-    if (selectedId && pending.length > 0) {
-      toast.error("Resolve the pending approval first.");
-      return;
-    }
-    if (preset === undefined) setInput("");
-    setSendError(null);
-    const images = attachments.map(({ mediaType, data }) => ({ mediaType, data }));
+    reset();
+    setInput("");
     setAttachments([]);
-    try {
-      let conversationId = selectedId;
-      if (conversationId === null) {
-        const conversation = await createConversation.mutateAsync(draftSettings);
-        conversationId = conversation.id;
-        seededRef.current = conversationId;
-        navigate(`/chat/${conversationId}`, { replace: true });
-      }
-      await send(content, conversationId, images);
-    } catch (err) {
-      setSendError(err instanceof ApiError ? err.message : "Something went wrong. Please try again.");
-    }
+    setEditing(null);
+    setSendError(null);
   }
 
   async function pickImages(files: FileList | null) {
@@ -315,41 +207,82 @@ export function ChatPage() {
     if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
-  function removeAttachment(previewUrl: string) {
-    setAttachments((prev) => prev.filter((a) => a.previewUrl !== previewUrl));
+  function removeAttachment(url: string) {
+    setAttachments((prev) => prev.filter((a) => a.previewUrl !== url));
   }
 
-  function decide(approved: boolean) {
-    if (!selectedId || pending.length === 0) return;
-    const decisions = pending.map((p) => ({ callId: p.callId, approved, reason: approved ? undefined : "user denied" }));
-    void resolve(selectedId, decisions).catch((err) => {
-      setSendError(err instanceof ApiError ? err.message : "Failed to resume the conversation.");
-    });
-  }
-
-  function saveEdit(msgId: string) {
-    if (!editing || selectedId === null) return;
-    const content = editing.draft.trim();
-    if (!content) return;
-    setEditing(null);
+  async function submit(overrideText?: string) {
+    const text = (overrideText ?? input).trim();
+    if ((!text && attachments.length === 0) || running || pending.length > 0) return;
     setSendError(null);
-    void edit(selectedId, msgId, content).catch((err) => {
-      setSendError(err instanceof ApiError ? err.message : "Failed to re-run the conversation.");
-    });
+    const images = attachments.map(({ mediaType, data }) => ({ mediaType, data }));
+    if (!overrideText) {
+      setInput("");
+      setAttachments([]);
+    }
+
+    try {
+      let conversationId = selectedId;
+      if (conversationId === null) {
+        const conv = await createConversation.mutateAsync(draftSettings);
+        conversationId = conv.id;
+        seededRef.current = conversationId;
+        navigate(`/chat/${conversationId}`, { replace: true });
+      }
+      await send(text, conversationId, images);
+    } catch (err) {
+      setSendError(err instanceof ApiError ? err.message : "Failed to send message");
+    }
   }
 
   function regenerateLast() {
-    if (selectedId === null) return;
+    if (selectedId === null || running || pending.length > 0) return;
     setSendError(null);
-    void regenerate(selectedId).catch((err) => {
-      setSendError(err instanceof ApiError ? err.message : "Failed to regenerate the answer.");
+    regenerate(selectedId).catch((err) =>
+      setSendError(err instanceof ApiError ? err.message : "Failed to regenerate answer"),
+    );
+  }
+
+  function saveEdit(msgId: string) {
+    if (selectedId === null || !editing || running || pending.length > 0) return;
+    const next = editing.draft.trim();
+    if (!next) return;
+    setEditing(null);
+    setSendError(null);
+    edit(selectedId, msgId, next).catch((err) =>
+      setSendError(err instanceof ApiError ? err.message : "Failed to resend message"),
+    );
+  }
+
+  function confirmDeleteMessage() {
+    if (!pendingMessageDelete || !selectedId) return;
+    const id = pendingMessageDelete;
+    deleteMessage.mutate(id, {
+      onSuccess: () => {
+        setMessages((prev) => {
+          const idx = prev.findIndex((m) => m.id === id);
+          if (idx === -1) return prev;
+          return prev.slice(0, idx);
+        });
+        setPendingMessageDelete(null);
+        toast.success("Message deleted");
+      },
+      onError: (err) =>
+        toast.error(err instanceof ApiError ? err.message : "Failed to delete message"),
     });
   }
 
-  // Dictation keeps whatever is already drafted and appends transcripts to
-  // it; interim fragments compose on top of the finalized ones.
+  function decide(approved: boolean) {
+    if (selectedId === null || pending.length === 0) return;
+    const decisions = pending.map((p) => ({ callId: p.callId, approved, reason: approved ? undefined : "user denied" }));
+    resolve(selectedId, decisions).catch((err) =>
+      setSendError(err instanceof ApiError ? err.message : "Failed to resolve approvals"),
+    );
+  }
+
   const voiceBaseRef = useRef("");
   const voiceTranscriptRef = useRef("");
+
   const voice = useVoiceInput({
     onInterim: (t) => {
       const composed = [voiceBaseRef.current, `${voiceTranscriptRef.current} ${t}`.trim()].filter(Boolean).join(" ");
@@ -371,21 +304,11 @@ export function ChatPage() {
     voice.toggle();
   }
 
-  async function logout() {
-    try {
-      await apiFetch("/api/auth/logout", { method: "POST" });
-    } catch { /* clearing local state regardless */ }
-    useAuth.getState().clear();
-    navigate("/login", { replace: true });
-  }
-
   const activeConversation =
     conversations?.find((c) => c.id === selectedId) ??
     (detail?.conversation.id === selectedId ? detail.conversation : undefined);
   const running = status === "running";
 
-  // The settings the composer's model chip shows and the dialog edits: the
-  // stored conversation's when one is open, the draft otherwise.
   const activeSettings: ConversationSettings = activeConversation
     ? {
         model: activeConversation.model || models?.default || "",
@@ -477,299 +400,192 @@ export function ChatPage() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
-  const groups = GROUP_ORDER.map((label) => ({
-    label,
-    items: (conversations ?? []).filter((c) => groupKey(c.updatedAt) === label),
-  })).filter((g) => g.items.length > 0);
-  const nothingMatches =
-    !conversationsLoading && (conversations?.length ?? 0) === 0 && debouncedFilter.trim() !== "";
-
   return (
-    <div className="flex h-svh bg-background">
-      {sidebarOpen && (
-        <div
-          className="fixed inset-0 z-30 bg-black/40 md:hidden"
-          aria-hidden="true"
-          onClick={() => setSidebarOpen(false)}
-        />
-      )}
-
-      <aside
-        className={cn(
-          "flex w-72 shrink-0 flex-col border-r bg-background",
-          "max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-40 max-md:shadow-xl",
-          "max-md:transition-transform max-md:duration-200 max-md:-translate-x-full",
-          sidebarOpen && "max-md:translate-x-0",
-        )}
-      >
-        <div className="flex items-center gap-2 p-3">
-          <BrandMark className="size-7" />
-          <span className="font-semibold text-sm tracking-tight">Golem</span>
+    <div className="flex h-full flex-col bg-background">
+      {/* ChatGPT / Codex style Header */}
+      <header className="flex items-center justify-between gap-2 border-b border-border/60 px-3 py-2 bg-background/80 backdrop-blur-xs z-10 shrink-0">
+        <div className="flex items-center gap-2 min-w-0">
           <Button
             variant="ghost"
-            size="icon-sm"
-            className="ml-auto md:hidden"
-            aria-label="Close conversations"
-            onClick={() => setSidebarOpen(false)}
+            size="icon-xs"
+            onClick={() => {
+              if (window.innerWidth < 768) {
+                setMobileOpen(true);
+              } else {
+                toggleSidebar();
+              }
+            }}
+            aria-label="Toggle sidebar"
+            title="Toggle sidebar (⌘B)"
+            className="text-muted-foreground hover:text-foreground"
           >
-            <X />
+            <Sidebar className="size-4" />
           </Button>
-        </div>
 
-        <div className="px-3 pb-2">
-          <Button size="sm" className="w-full" onClick={startNewChat}>
-            <Plus /> New chat
-          </Button>
-        </div>
-
-        <div className="px-3 pb-2">
-          <div className="relative">
-              <Search className="absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
-              <input
-                value={filter}
-                onChange={(e) => setFilter(e.target.value)}
-                placeholder="Search conversations"
-                aria-label="Search conversations"
-                className="h-8 w-full rounded-md border border-input bg-transparent pr-2 pl-7 text-xs outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
-              />
-          </div>
-        </div>
-
-        <ScrollArea className="min-h-0 flex-1">
-          <nav className="space-y-0.5 px-2 pb-3">
-            {conversationsLoading && (
-              <div className="space-y-2 px-1 pt-1">
-                {[0, 1, 2, 3].map((i) => (
-                  <Skeleton key={i} className="h-9 w-full" />
-                ))}
-              </div>
-            )}
-            {!conversationsLoading && (conversations?.length ?? 0) === 0 && debouncedFilter.trim() === "" && (
-              <p className="px-3 py-6 text-muted-foreground text-sm">
-                No conversations yet. Send a message to start one.
-              </p>
-            )}
-            {nothingMatches && (
-              <p className="px-3 py-6 text-muted-foreground text-sm">No conversations match.</p>
-            )}
-            {groups.map((group) => (
-              <div key={group.label}>
-                <p className="px-3 pt-3 pb-1 text-[11px] font-medium tracking-wider text-muted-foreground/60 uppercase">
-                  {group.label}
-                </p>
-                {group.items.map((c) => (
-                  <div
-                    key={c.id}
-                    className={cn(
-                      "group flex items-center gap-1 rounded-md pr-1",
-                      c.id === selectedId ? "bg-accent text-accent-foreground" : "hover:bg-accent/50",
-                    )}
-                  >
-                    <button
-                      type="button"
-                      onClick={() => selectConversation(c.id)}
-                      title={c.title || "Untitled"}
-                      className="min-w-0 flex-1 truncate px-3 py-2 text-left text-sm outline-none"
-                    >
-                      {c.title || "Untitled"}
-                    </button>
-                    <div className="hidden shrink-0 gap-0.5 group-focus-within:flex group-hover:flex">
-                      <Button
-                        variant="ghost"
-                        size="icon-xs"
-                        aria-label={`Rename ${c.title || "conversation"}`}
-                        onClick={() => openRename(c)}
-                      >
-                        <Pencil />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon-xs"
-                        aria-label={`Share ${c.title || "conversation"}`}
-                        onClick={() => setSharing(c)}
-                      >
-                        <Share2 />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon-xs"
-                        aria-label={`Delete ${c.title || "conversation"}`}
-                        className="text-destructive hover:text-destructive"
-                        onClick={() => setPendingDelete(c)}
-                      >
-                        <Trash2 />
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ))}
-          </nav>
-        </ScrollArea>
-
-        <div className="border-t p-3">
-          <div className="flex items-center gap-2.5">
-            <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold uppercase">
-              {(user?.email ?? "?").slice(0, 1)}
-            </span>
-            <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground" title={user?.email}>
-              {user?.email ?? "Signed in"}
-            </span>
-            <Button variant="ghost" size="icon-sm" aria-label="Log out" onClick={() => void logout()}>
-              <LogOut />
-            </Button>
-            <Button variant="ghost" size="icon-sm" asChild aria-label="Preferences">
-              <Link to="/preferences">
-                <Settings />
-              </Link>
-            </Button>
-            <ThemeToggle />
-          </div>
-        </div>
-      </aside>
-
-      <main className="flex min-w-0 flex-1 flex-col">
-        <header className="flex items-center gap-1 border-b px-4 py-2.5">
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            className="md:hidden"
-            aria-label="Open conversations"
-            onClick={() => setSidebarOpen(true)}
+          {/* Model Selector Pill */}
+          <button
+            type="button"
+            onClick={() => setSettingsOpen(true)}
+            className="flex items-center gap-1.5 rounded-lg border border-border/60 bg-muted/30 px-2.5 py-1 text-xs font-medium text-foreground transition-all hover:bg-accent hover:border-foreground/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            title="Model & chat configuration"
           >
-            <Menu />
-          </Button>
-          <h1 className="min-w-0 flex-1 truncate text-sm font-medium">
+            <Sparkles className="size-3.5 text-primary" />
+            <span className="font-semibold">{modelLabel(activeSettings.model)}</span>
+            <ChevronDown className="size-3 text-muted-foreground" />
+          </button>
+
+          <span className="hidden sm:inline text-muted-foreground/30">|</span>
+
+          <h1 className="min-w-0 truncate text-xs font-medium text-muted-foreground">
             {activeConversation?.title || (selectedId ? "Conversation" : "New chat")}
           </h1>
-          <Button variant="ghost" size="sm" asChild>
-            <Link to="/documents">
-              <FileUp /> Documents
-            </Link>
-          </Button>
-          <Button variant="ghost" size="sm" asChild>
-            <Link to="/tools">
-              <Wrench /> Tools
-            </Link>
-          </Button>
-          <Button variant="ghost" size="sm" asChild>
-            <Link to="/usage">
-              <Gauge /> Usage
-            </Link>
+        </div>
+
+        <div className="flex shrink-0 items-center gap-1">
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            aria-label="Share conversation"
+            title="Share conversation link"
+            disabled={!activeConversation}
+            onClick={() => activeConversation && setSharing(activeConversation)}
+            className="text-muted-foreground hover:text-foreground"
+          >
+            <Share2 className="size-3.5" />
           </Button>
           <Button
             variant="ghost"
-            size="icon-sm"
+            size="icon-xs"
             aria-label="Export conversation"
             title="Export conversation as Markdown"
             disabled={!activeConversation || messages.length === 0}
             onClick={exportConversation}
+            className="text-muted-foreground hover:text-foreground"
           >
-            <Download />
+            <Download className="size-3.5" />
           </Button>
           <Button
             variant="ghost"
-            size="icon-sm"
+            size="icon-xs"
+            aria-label="Conversation settings"
+            title="Conversation settings"
+            onClick={() => setSettingsOpen(true)}
+            className="text-muted-foreground hover:text-foreground"
+          >
+            <SlidersHorizontal className="size-3.5" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon-xs"
             aria-label="Keyboard shortcuts"
             title="Keyboard shortcuts (?)"
             onClick={() => setShortcutsOpen(true)}
+            className="text-muted-foreground hover:text-foreground"
           >
-            <HelpCircle />
+            <HelpCircle className="size-3.5" />
           </Button>
-        </header>
+        </div>
+      </header>
 
-        <ScrollArea className="min-h-0 flex-1">
-          <div className="mx-auto w-full max-w-3xl px-4 py-6">
-            {messages.length === 0 && !detailLoading ? (
-              <div className="flex min-h-[55vh] flex-col items-center justify-center gap-6 text-center">
-                <div className="space-y-2.5">
-                  <BrandMark className="mx-auto size-12 rounded-xl [&_svg]:size-6" />
-                  <h2 className="text-xl font-semibold tracking-tight">How can I help?</h2>
-                  <p className="max-w-sm text-balance text-muted-foreground text-sm">
-                    Ask anything{tools && tools.length > 0 ? ` — ${tools.length} ${tools.length === 1 ? "tool is" : "tools are"} ready to call` : ""}.
-                  </p>
-                </div>
-                <div className="grid w-full max-w-lg gap-2 sm:grid-cols-2">
-                  {SUGGESTIONS.map((s, i) => (
-                    <button
-                      key={s.label}
-                      type="button"
-                      onClick={() => void submit(s.label)}
-                      style={{ animationDelay: `${i * 50}ms` }}
-                      className="group flex items-center gap-2.5 rounded-xl border bg-card p-3 text-left text-sm shadow-xs transition-all duration-200
-                        hover:-translate-y-0.5 hover:border-foreground/25 hover:shadow-md hover:shadow-black/5
-                        active:translate-y-0 active:scale-[0.99]
-                        focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50
-                        animate-in fade-in slide-in-from-bottom-2 duration-300 [animation-fill-mode:backwards] motion-reduce:animate-none"
-                    >
-                      <span className="flex size-7 shrink-0 items-center justify-center rounded-lg border bg-muted/60 text-foreground/80">
-                        <s.icon className="size-3.5" />
-                      </span>
-                      <span className="min-w-0 text-muted-foreground group-hover:text-foreground">{s.label}</span>
-                    </button>
-                  ))}
-                </div>
+      {/* Main message area */}
+      <ScrollArea className="min-h-0 flex-1">
+        <div className="mx-auto w-full max-w-3xl px-4 py-6">
+          {messages.length === 0 && !detailLoading ? (
+            <div className="flex min-h-[55vh] flex-col items-center justify-center gap-6 text-center">
+              <div className="space-y-2">
+                <BrandMark className="mx-auto size-12 rounded-2xl shadow-xs" />
+                <h2 className="text-2xl font-semibold tracking-tight text-foreground">
+                  What's on your mind today?
+                </h2>
+                <p className="max-w-md text-balance text-muted-foreground text-xs">
+                  Ask anything{tools && tools.length > 0 ? ` · ${tools.length} ${tools.length === 1 ? "tool" : "tools"} ready` : ""} · Search documents · Execute code
+                </p>
               </div>
-            ) : (
-              <div className="space-y-5">
-                {messages.map((m, i) => {
-                  const isLast = i === messages.length - 1;
-                  const blockInteraction = running || pending.length > 0;
-                  return (
-                    <div key={m.id} className={cn("flex", m.role === "user" ? "justify-end" : "group gap-3")}>
-                      {m.role === "user" ? (
-                        editing?.id === m.id ? (
-                          <div className="w-full max-w-[85%] rounded-2xl border border-ring/60 bg-card p-2 shadow-sm">
-                            <textarea
-                              value={editing.draft}
-                              onChange={(e) => setEditing({ id: m.id, draft: e.target.value })}
-                              onKeyDown={(e) => {
-                                if (e.key === "Enter" && !e.shiftKey) {
-                                  e.preventDefault();
-                                  saveEdit(m.id);
-                                } else if (e.key === "Escape") {
-                                  setEditing(null);
-                                }
-                              }}
-                              rows={2}
-                              autoFocus
-                              className="max-h-48 w-full resize-none bg-transparent px-1.5 py-1 text-sm outline-none field-sizing-content"
-                            />
-                            <div className="flex justify-end gap-1.5">
-                              <Button size="sm" variant="outline" onClick={() => setEditing(null)}>
-                                Cancel
-                              </Button>
-                              <Button size="sm" disabled={!editing.draft.trim() || blockInteraction} onClick={() => saveEdit(m.id)}>
-                                Save & resend
-                              </Button>
-                            </div>
+
+              <div className="grid w-full max-w-lg gap-2 sm:grid-cols-2">
+                {SUGGESTIONS.map((s, i) => (
+                  <button
+                    key={s.label}
+                    type="button"
+                    onClick={() => void submit(s.label)}
+                    style={{ animationDelay: `${i * 50}ms` }}
+                    className="group flex items-center gap-3 rounded-xl border border-border/60 bg-card p-3 text-left text-xs shadow-xs transition-all duration-200
+                      hover:-translate-y-0.5 hover:border-foreground/30 hover:shadow-sm
+                      active:translate-y-0 active:scale-[0.99]
+                      focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring
+                      animate-in fade-in slide-in-from-bottom-2 duration-300 [animation-fill-mode:backwards]"
+                  >
+                    <span className="flex size-7 shrink-0 items-center justify-center rounded-lg border border-border/60 bg-muted/40 text-foreground/80 group-hover:text-primary group-hover:border-primary/40 transition-colors">
+                      <s.icon className="size-3.5" />
+                    </span>
+                    <span className="min-w-0 text-muted-foreground group-hover:text-foreground transition-colors font-medium">
+                      {s.label}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-5">
+              {messages.map((m, i) => {
+                const isLast = i === messages.length - 1;
+                const blockInteraction = running || pending.length > 0;
+                return (
+                  <div key={m.id} className={cn("flex", m.role === "user" ? "justify-end" : "group gap-3")}>
+                    {m.role === "user" ? (
+                      editing?.id === m.id ? (
+                        <div className="w-full max-w-[85%] rounded-2xl border border-ring/60 bg-card p-2 shadow-sm">
+                          <textarea
+                            value={editing.draft}
+                            onChange={(e) => setEditing({ id: m.id, draft: e.target.value })}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" && !e.shiftKey) {
+                                e.preventDefault();
+                                saveEdit(m.id);
+                              } else if (e.key === "Escape") {
+                                setEditing(null);
+                              }
+                            }}
+                            rows={2}
+                            autoFocus
+                            className="max-h-48 w-full resize-none bg-transparent px-1.5 py-1 text-sm outline-none field-sizing-content"
+                          />
+                          <div className="flex justify-end gap-1.5 pt-1">
+                            <Button size="xs" variant="outline" onClick={() => setEditing(null)}>
+                              Cancel
+                            </Button>
+                            <Button size="xs" disabled={!editing.draft.trim() || blockInteraction} onClick={() => saveEdit(m.id)}>
+                              Save & resend
+                            </Button>
                           </div>
-                        ) : (
-                          <div className="group flex max-w-[75%] flex-col items-end gap-1">
-                            {m.images && m.images.length > 0 && (
-                              <div className="flex flex-wrap justify-end gap-1.5">
-                                {m.images.map((img, idx) => (
-                                  <img
-                                    key={idx}
-                                    src={img.dataUrl}
-                                    alt="attachment"
-                                    className="max-h-48 max-w-[16rem] rounded-xl border object-cover shadow-sm"
-                                  />
-                                ))}
-                              </div>
-                            )}
-                            {m.content && (
-                              <div className="rounded-2xl rounded-br-md bg-primary px-4 py-2.5 whitespace-pre-wrap text-primary-foreground text-sm shadow-sm">
-                                {m.content}
-                              </div>
-                            )}
+                        </div>
+                      ) : (
+                        <div className="group flex max-w-[75%] flex-col items-end gap-1">
+                          {m.images && m.images.length > 0 && (
+                            <div className="flex flex-wrap justify-end gap-1.5">
+                              {m.images.map((img, idx) => (
+                                <img
+                                  key={idx}
+                                  src={img.dataUrl}
+                                  alt="attachment"
+                                  className="max-h-48 max-w-[16rem] rounded-xl border object-cover shadow-sm"
+                                />
+                              ))}
+                            </div>
+                          )}
+                          {m.content && (
+                            <div className="rounded-2xl rounded-br-md bg-primary px-4 py-2.5 whitespace-pre-wrap text-primary-foreground text-sm shadow-sm">
+                              {m.content}
+                            </div>
+                          )}
+                          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                             <button
                               type="button"
                               aria-label="Edit message"
                               title="Edit & resend"
                               disabled={blockInteraction}
                               onClick={() => setEditing({ id: m.id, draft: m.content })}
-                              className="rounded-md p-1 text-muted-foreground/60 opacity-0 transition-opacity group-hover:opacity-100 hover:text-foreground disabled:cursor-not-allowed"
+                              className="rounded-md p-1 text-muted-foreground/60 hover:text-foreground disabled:cursor-not-allowed"
                             >
                               <Pencil className="size-3.5" />
                             </button>
@@ -779,181 +595,157 @@ export function ChatPage() {
                               title="Delete message and everything after it"
                               disabled={blockInteraction}
                               onClick={() => setPendingMessageDelete(m.id)}
-                              className="rounded-md p-1 text-muted-foreground/60 opacity-0 transition-opacity group-hover:opacity-100 hover:text-destructive disabled:cursor-not-allowed"
+                              className="rounded-md p-1 text-muted-foreground/60 hover:text-destructive disabled:cursor-not-allowed"
                             >
                               <Trash2 className="size-3.5" />
                             </button>
                           </div>
-                        )
-                      ) : (
-                        <>
-                          <BrandMark className="mt-0.5 size-7" />
-                          <div className="min-w-0 flex-1 space-y-1 pt-0.5">
-                            {m.streaming && trace.length > 0 && <ThinkingTrace rows={trace} />}
-                            {m.streaming && m.content === "" ? (
-                              <RunLoader />
-                            ) : (
-                              <StreamingText
-                                content={m.content}
-                                streaming={m.streaming}
-                                citations={
-                                  m.sources && m.sources.length > 0
-                                    ? {
-                                        count: m.sources.length,
-                                        onCite: (n) =>
-                                          setCiteJump((j) => ({
-                                            msgId: m.id,
-                                            n,
-                                            seq: (j?.seq ?? 0) + 1,
-                                          })),
-                                      }
-                                    : undefined
-                                }
-                              />
-                            )}
-                            {!m.streaming && m.sources && m.sources.length > 0 && (
-                              <SourceCards
-                                sources={m.sources}
-                                jump={citeJump?.msgId === m.id ? citeJump : null}
-                              />
-                            )}
-                            {m.error && <p className="text-destructive text-sm">{m.error}</p>}
-                            {m.truncated && (
-                              <Badge variant="outline" className="text-muted-foreground text-xs">stopped early</Badge>
-                            )}
-                            {!m.streaming && (
-                              <div className="flex items-center gap-1.5 pt-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
-                                <CopyMessageButton text={m.content} />
+                        </div>
+                      )
+                    ) : (
+                      <>
+                        <BrandMark className="mt-0.5 size-7 shrink-0" />
+                        <div className="min-w-0 flex-1 space-y-1 pt-0.5">
+                          {m.streaming && trace.length > 0 && <ThinkingTrace rows={trace} />}
+                          {m.streaming && m.content === "" ? (
+                            <RunLoader />
+                          ) : (
+                            <StreamingText
+                              content={m.content}
+                              streaming={m.streaming}
+                              citations={
+                                m.sources && m.sources.length > 0
+                                  ? {
+                                      count: m.sources.length,
+                                      onCite: (n) =>
+                                        setCiteJump((j) => ({
+                                          msgId: m.id,
+                                          n,
+                                          seq: (j?.seq ?? 0) + 1,
+                                        })),
+                                    }
+                                  : undefined
+                              }
+                            />
+                          )}
+                          {!m.streaming && m.sources && m.sources.length > 0 && (
+                            <SourceCards
+                              sources={m.sources}
+                              jump={citeJump?.msgId === m.id ? citeJump : null}
+                            />
+                          )}
+                          {m.error && <p className="text-destructive text-sm">{m.error}</p>}
+                          {m.truncated && (
+                            <Badge variant="outline" className="text-muted-foreground text-xs">stopped early</Badge>
+                          )}
+                          {!m.streaming && (
+                            <div className="flex items-center gap-1.5 pt-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+                              <CopyMessageButton text={m.content} />
+                              <button
+                                type="button"
+                                aria-label="Delete message"
+                                title="Delete message and everything after it"
+                                disabled={blockInteraction}
+                                onClick={() => setPendingMessageDelete(m.id)}
+                                className="rounded-md p-1 text-muted-foreground/60 transition-colors hover:text-destructive disabled:cursor-not-allowed"
+                              >
+                                <Trash2 className="size-3.5" />
+                              </button>
+                              {isLast && (
                                 <button
                                   type="button"
-                                  aria-label="Delete message"
-                                  title="Delete message and everything after it"
+                                  aria-label="Regenerate answer"
+                                  title="Regenerate"
                                   disabled={blockInteraction}
-                                  onClick={() => setPendingMessageDelete(m.id)}
-                                  className="rounded-md p-1 text-muted-foreground/60 transition-colors hover:text-destructive disabled:cursor-not-allowed"
+                                  onClick={regenerateLast}
+                                  className="rounded-md p-1 text-muted-foreground/60 transition-colors hover:text-foreground disabled:cursor-not-allowed"
                                 >
-                                  <Trash2 className="size-3.5" />
+                                  <RefreshCw className="size-3.5" />
                                 </button>
-                                {isLast && (
-                                  <button
-                                    type="button"
-                                    aria-label="Regenerate answer"
-                                    title="Regenerate"
-                                    disabled={blockInteraction}
-                                    onClick={regenerateLast}
-                                    className="rounded-md p-1 text-muted-foreground/60 transition-colors hover:text-foreground disabled:cursor-not-allowed"
-                                  >
-                                    <RefreshCw className="size-3.5" />
-                                  </button>
-                                )}
-                                {m.usage && (
-                                  <p className="text-[11px] text-muted-foreground/60">
-                                    {fmtTokens(m.usage.inputTokens)} in / {fmtTokens(m.usage.outputTokens)} out · $
-                                    {m.usage.costUsd.toFixed(5)}
-                                    {m.usage.model ? ` · ${m.usage.model}` : ""}
-                                  </p>
-                                )}
-                              </div>
-                            )}
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  );
-                })}
-                {pending.length > 0 && (
-                  <div className="overflow-hidden rounded-xl border border-amber-500/40 bg-amber-500/5">
-                    <div className="flex items-center gap-2 border-b border-amber-500/20 px-4 py-3">
-                      <ShieldCheck className="size-4 shrink-0 text-amber-600 dark:text-amber-400" />
-                      <p className="text-sm font-medium">
-                        The agent wants to run {pending.length === 1 ? "a tool" : `${pending.length} tools`}
-                      </p>
-                    </div>
-                    <div className="space-y-2 p-3">
-                      {pending.map((p) => (
-                        <div key={p.callId} className="rounded-lg border bg-background/70 px-3 py-2.5">
-                          <div className="flex items-center gap-2">
-                            <Badge variant="outline" className="font-mono text-xs">{p.toolName}</Badge>
-                            <span className="truncate font-mono text-xs text-muted-foreground">
-                              {JSON.stringify(p.args)}
-                            </span>
-                          </div>
-                          {p.reason && <p className="mt-1 text-xs text-muted-foreground">{p.reason}</p>}
+                              )}
+                              {m.usage && (
+                                <p className="text-[11px] text-muted-foreground/60">
+                                  {fmtTokens(m.usage.inputTokens)} in / {fmtTokens(m.usage.outputTokens)} out · $
+                                  {m.usage.costUsd.toFixed(5)}
+                                  {m.usage.model ? ` · ${m.usage.model}` : ""}
+                                </p>
+                              )}
+                            </div>
+                          )}
                         </div>
-                      ))}
-                    </div>
-                    <div className="flex gap-2 px-3 pb-3">
-                      <Button size="sm" onClick={() => decide(true)} disabled={running}>
-                        Approve
-                      </Button>
-                      <Button size="sm" variant="outline" onClick={() => decide(false)} disabled={running}>
-                        Deny
-                      </Button>
-                    </div>
+                      </>
+                    )}
                   </div>
-                )}
-              </div>
-            )}
-            <div ref={bottomRef} />
-          </div>
-        </ScrollArea>
+                );
+              })}
 
-        <div className="border-t p-3">
-          <div className="mx-auto w-full max-w-3xl">
-            {sendError && <p className="mb-2 text-destructive text-sm">{sendError}</p>}
-            {attachments.length > 0 && (
-              <div className="mb-2 flex flex-wrap gap-2">
-                {attachments.map((a) => (
-                  <div key={a.previewUrl} className="group/img relative">
-                    <img src={a.previewUrl} alt={a.name} className="size-16 rounded-lg border object-cover" />
-                    <button
-                      type="button"
-                      aria-label={`Remove ${a.name}`}
-                      onClick={() => removeAttachment(a.previewUrl)}
-                      className="absolute -top-1.5 -right-1.5 rounded-full border bg-background p-0.5 text-muted-foreground shadow-sm hover:text-foreground"
-                    >
-                      <X className="size-3" />
-                    </button>
+              {pending.length > 0 && (
+                <div className="overflow-hidden rounded-xl border border-amber-500/40 bg-amber-500/5">
+                  <div className="flex items-center gap-2 border-b border-amber-500/20 px-4 py-3">
+                    <ShieldCheck className="size-4 shrink-0 text-amber-600 dark:text-amber-400" />
+                    <p className="text-sm font-medium">
+                      The agent wants to run {pending.length === 1 ? "a tool" : `${pending.length} tools`}
+                    </p>
                   </div>
-                ))}
-              </div>
-            )}
-            <div
-              className={cn(
-                "flex items-end gap-1.5 rounded-2xl border bg-card p-1.5 shadow-sm transition-all",
-                "focus-within:border-ring/60 focus-within:ring-[3px] focus-within:ring-ring/20",
-                pending.length > 0 && "opacity-60",
+                  <div className="space-y-2 p-3">
+                    {pending.map((p) => (
+                      <div key={p.callId} className="rounded-lg border bg-background/70 px-3 py-2.5">
+                        <div className="flex items-center gap-2">
+                          <Badge variant="outline" className="font-mono text-xs">{p.toolName}</Badge>
+                          <span className="truncate font-mono text-xs text-muted-foreground">
+                            {JSON.stringify(p.args)}
+                          </span>
+                        </div>
+                        {p.reason && <p className="mt-1 text-xs text-muted-foreground">{p.reason}</p>}
+                      </div>
+                    ))}
+                  </div>
+                  <div className="flex gap-2 px-3 pb-3">
+                    <Button size="sm" onClick={() => decide(true)} disabled={running}>
+                      Approve
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={() => decide(false)} disabled={running}>
+                      Deny
+                    </Button>
+                  </div>
+                </div>
               )}
-            >
-              <Button
-                variant="ghost"
-                size="sm"
-                className="mb-0.5 shrink-0 gap-1.5 rounded-xl text-muted-foreground text-xs hover:text-foreground"
-                onClick={() => setSettingsOpen(true)}
-                title="Conversation settings"
-              >
-                <Sparkles />
-                <span className="hidden sm:inline">{modelLabel(activeSettings.model)}</span>
-              </Button>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/png,image/jpeg,image/webp,image/gif"
-                multiple
-                hidden
-                onChange={(e) => void pickImages(e.target.files)}
-              />
-              <Button
-                variant="ghost"
-                size="icon"
-                className="mb-0.5 shrink-0 rounded-xl text-muted-foreground"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={running || pending.length > 0 || attachments.length >= MAX_IMAGES_PER_MESSAGE}
-                aria-label="Attach images"
-                title="Attach images"
-              >
-                <Paperclip />
-              </Button>
+            </div>
+          )}
+          <div ref={bottomRef} />
+        </div>
+      </ScrollArea>
+
+      {/* ChatGPT / Codex style Floating Composer */}
+      <div className="p-3 md:p-4 bg-gradient-to-t from-background via-background to-transparent shrink-0">
+        <div className="mx-auto w-full max-w-3xl">
+          {sendError && <p className="mb-2 text-destructive text-xs">{sendError}</p>}
+          {attachments.length > 0 && (
+            <div className="mb-2 flex flex-wrap gap-2">
+              {attachments.map((a) => (
+                <div key={a.previewUrl} className="group/img relative">
+                  <img src={a.previewUrl} alt={a.name} className="size-16 rounded-xl border border-border/80 object-cover shadow-xs" />
+                  <button
+                    type="button"
+                    aria-label={`Remove ${a.name}`}
+                    onClick={() => removeAttachment(a.previewUrl)}
+                    className="absolute -top-1.5 -right-1.5 rounded-full border bg-background p-0.5 text-muted-foreground shadow-sm hover:text-destructive"
+                  >
+                    <X className="size-3" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div
+            className={cn(
+              "rounded-2xl border border-border/80 bg-card/95 backdrop-blur-md shadow-md transition-all",
+              "focus-within:border-ring/80 focus-within:ring-[3px] focus-within:ring-ring/20 focus-within:shadow-lg",
+              pending.length > 0 && "opacity-60",
+            )}
+          >
+            <div className="p-2.5 pb-1">
               <textarea
                 ref={textareaRef}
                 value={input}
@@ -967,51 +759,98 @@ export function ChatPage() {
                 rows={1}
                 placeholder={pending.length > 0 ? "Waiting for approval…" : "Message Golem…"}
                 disabled={running || pending.length > 0}
-                className="max-h-48 min-h-9 flex-1 resize-none bg-transparent px-2.5 py-1.5 text-sm outline-none field-sizing-content placeholder:text-muted-foreground disabled:cursor-not-allowed"
+                className="max-h-48 min-h-9 w-full resize-none bg-transparent px-2 py-1 text-sm outline-none placeholder:text-muted-foreground/60 field-sizing-content disabled:cursor-not-allowed"
               />
-              {voice.supported && (
-                <Button
-                  size="icon"
-                  variant={voice.listening ? "default" : "ghost"}
-                  className="shrink-0 rounded-xl text-muted-foreground"
-                  onClick={toggleVoice}
-                  disabled={running || pending.length > 0}
-                  aria-label={voice.listening ? "Stop dictation" : "Start dictation"}
-                  title={voice.listening ? "Stop dictation" : "Dictate"}
-                >
-                  {voice.listening ? <Square /> : <Mic />}
-                </Button>
-              )}
-              {running ? (
-                <Button
-                  size="icon"
-                  variant="outline"
-                  className="shrink-0 rounded-xl"
-                  onClick={stop}
-                  aria-label="Stop generating"
-                >
-                  <Square />
-                </Button>
-              ) : (
-                <Button
-                  size="icon"
-                  className="shrink-0 rounded-xl"
-                  onClick={() => void submit()}
-                  disabled={(!input.trim() && attachments.length === 0) || createConversation.isPending}
-                  aria-label="Send message"
-                >
-                  <Send />
-                </Button>
-              )}
             </div>
-            <p className="px-1 pt-1.5 text-[11px] text-muted-foreground/60">
-              {pending.length > 0
-                ? "Resolve the approval above to continue."
-                : "Enter to send · Shift+Enter for a new line"}
-            </p>
+
+            <div className="flex items-center justify-between px-2.5 pb-2 pt-1 border-t border-border/30">
+              <div className="flex items-center gap-1">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp,image/gif"
+                  multiple
+                  hidden
+                  onChange={(e) => void pickImages(e.target.files)}
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  className="rounded-lg text-muted-foreground hover:text-foreground"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={running || pending.length > 0 || attachments.length >= MAX_IMAGES_PER_MESSAGE}
+                  aria-label="Attach images"
+                  title="Attach images (up to 4)"
+                >
+                  <Paperclip className="size-3.5" />
+                </Button>
+
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="xs"
+                  onClick={() => setSettingsOpen(true)}
+                  className="rounded-lg text-[11px] text-muted-foreground hover:text-foreground gap-1 px-2 h-7"
+                  title="Model & Prompt Settings"
+                >
+                  <Sparkles className="size-3 text-primary" />
+                  <span className="hidden sm:inline font-mono">{modelLabel(activeSettings.model)}</span>
+                </Button>
+              </div>
+
+              <div className="flex items-center gap-1.5">
+                {voice.supported && (
+                  <Button
+                    size="icon-xs"
+                    variant={voice.listening ? "default" : "ghost"}
+                    className={cn(
+                      "rounded-lg text-muted-foreground hover:text-foreground",
+                      voice.listening && "bg-rose-500 text-white animate-pulse"
+                    )}
+                    onClick={toggleVoice}
+                    disabled={running || pending.length > 0}
+                    aria-label={voice.listening ? "Stop dictation" : "Start dictation"}
+                    title={voice.listening ? "Stop dictation" : "Dictate"}
+                  >
+                    {voice.listening ? <Square className="size-3" /> : <Mic className="size-3.5" />}
+                  </Button>
+                )}
+
+                {running ? (
+                  <Button
+                    size="icon-xs"
+                    variant="default"
+                    className="rounded-lg size-7"
+                    onClick={stop}
+                    aria-label="Stop generating"
+                    title="Stop generating"
+                  >
+                    <Square className="size-3 fill-current" />
+                  </Button>
+                ) : (
+                  <Button
+                    size="icon-xs"
+                    className="rounded-lg size-7"
+                    onClick={() => void submit()}
+                    disabled={(!input.trim() && attachments.length === 0) || createConversation.isPending}
+                    aria-label="Send message"
+                    title="Send message"
+                  >
+                    <ArrowUp className="size-3.5" />
+                  </Button>
+                )}
+              </div>
+            </div>
           </div>
+
+          <p className="px-1 pt-1.5 text-center text-[11px] text-muted-foreground/60">
+            {pending.length > 0
+              ? "Resolve the approval above to continue."
+              : "Golem can make mistakes. Consider checking important information."}
+          </p>
         </div>
-      </main>
+      </div>
 
       <ConversationSettingsDialog
         open={settingsOpen}
@@ -1022,51 +861,7 @@ export function ChatPage() {
         saving={updateSettings.isPending}
       />
 
-      <Dialog open={renaming !== null} onOpenChange={(open) => { if (!open) setRenaming(null); }}>
-        <DialogContent showCloseButton={false} className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Rename conversation</DialogTitle>
-            <DialogDescription>Give this conversation a title you'll recognize.</DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-2">
-            <Label htmlFor="rename-title">Title</Label>
-            <Input
-              id="rename-title"
-              value={renameTitle}
-              onChange={(e) => setRenameTitle(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") confirmRename();
-              }}
-              autoFocus
-            />
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setRenaming(null)}>Cancel</Button>
-            <Button onClick={confirmRename} disabled={renameMutation.isPending || !renameTitle.trim()}>
-              {renameMutation.isPending ? "Saving…" : "Save"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
       <ShareDialog conversation={sharing} onOpenChange={(open) => { if (!open) setSharing(null); }} />
-
-      <Dialog open={pendingDelete !== null} onOpenChange={(open) => { if (!open) setPendingDelete(null); }}>
-        <DialogContent showCloseButton={false}>
-          <DialogHeader>
-            <DialogTitle>Delete conversation?</DialogTitle>
-            <DialogDescription>
-              “{pendingDelete?.title || "Untitled"}” and all of its messages will be permanently removed.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setPendingDelete(null)}>Cancel</Button>
-            <Button variant="destructive" onClick={confirmDelete} disabled={deleteConversation.isPending}>
-              {deleteConversation.isPending ? "Deleting…" : "Delete"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       <Dialog open={pendingMessageDelete !== null} onOpenChange={(open) => { if (!open) setPendingMessageDelete(null); }}>
         <DialogContent showCloseButton={false}>

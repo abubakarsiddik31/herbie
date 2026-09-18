@@ -1,12 +1,12 @@
 import { useEffect } from "react";
-import { Link } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { toast } from "sonner";
-import { ArrowLeft } from "lucide-react";
+import { Gauge, Sidebar } from "lucide-react";
 import { ApiError, apiFetch } from "@/lib/api";
 import type { UsageSummary } from "@/lib/types";
 import { kindDescription, kindLabel } from "@/lib/usageKinds";
+import { useSidebar } from "@/components/layout/SidebarContext";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -28,6 +28,7 @@ function StatCard({ label, value }: { label: string; value: string }) {
 }
 
 export function UsagePage() {
+  const { toggleSidebar, setMobileOpen } = useSidebar();
   const { data, isLoading, isError, error, refetch, isFetching } = useQuery({
     queryKey: ["usage"],
     queryFn: () => apiFetch<UsageSummary>("/api/usage/summary?days=30"),
@@ -38,13 +39,34 @@ export function UsagePage() {
   }, [isError, error]);
 
   return (
-    <div className="mx-auto w-full max-w-4xl space-y-6 p-6">
-      <div className="flex items-center gap-1">
-        <Button variant="ghost" size="icon-sm" asChild aria-label="Back to chat">
-          <Link to="/"><ArrowLeft /></Link>
-        </Button>
-        <h1 className="text-lg font-semibold">Usage</h1>
-      </div>
+    <div className="flex h-full flex-col bg-background">
+      <header className="flex items-center justify-between gap-2 border-b border-border/60 px-4 py-2 bg-background/80 backdrop-blur-xs z-10 shrink-0">
+        <div className="flex items-center gap-2 min-w-0">
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            onClick={() => {
+              if (window.innerWidth < 768) {
+                setMobileOpen(true);
+              } else {
+                toggleSidebar();
+              }
+            }}
+            aria-label="Toggle sidebar"
+            title="Toggle sidebar (⌘B)"
+            className="text-muted-foreground hover:text-foreground"
+          >
+            <Sidebar className="size-4" />
+          </Button>
+          <div className="flex items-center gap-2">
+            <Gauge className="size-4 text-muted-foreground" />
+            <h1 className="text-sm font-semibold tracking-tight">Usage & Cost Ledger</h1>
+          </div>
+        </div>
+      </header>
+
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="mx-auto w-full max-w-4xl space-y-6 p-6">
 
       {isLoading && (
         <div className="space-y-6">
@@ -150,6 +172,8 @@ export function UsagePage() {
           )}
         </>
       )}
+        </div>
+      </div>
     </div>
   );
 }

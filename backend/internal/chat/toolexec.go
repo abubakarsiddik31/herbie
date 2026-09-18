@@ -231,6 +231,9 @@ func executeHTTPTool(ctx context.Context, cfg ToolConfig, env ToolEnv, client *h
 	for k, v := range cfg.Headers {
 		req.Header.Set(k, v)
 	}
+	if req.Header.Get("User-Agent") == "" {
+		req.Header.Set("User-Agent", "GolemChatbot/1.0 (https://github.com/abubakarsiddik31/golem)")
+	}
 	if hasBody && req.Header.Get("Content-Type") == "" {
 		req.Header.Set("Content-Type", "application/json")
 	}

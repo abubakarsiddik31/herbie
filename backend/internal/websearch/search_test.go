@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -94,5 +95,58 @@ func TestSearchHTTPError(t *testing.T) {
 	_, err := s.Search(context.Background(), "query")
 	if err == nil {
 		t.Fatal("expected error on 429")
+	}
+}
+
+func TestFreeSearchSuccess(t *testing.T) {
+	sampleHTML := `<!DOCTYPE html><html><body>
+		<ol id="b_results">
+			<li class="b_algo">
+				<h2><a href="https://example.com/golem"><strong>Golem</strong> - Legends</a></h2>
+				<p class="b_lineclamp2">A magical entity in folklore made of clay.</p>
+			</li>
+		</ol>
+	</body></html>`
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(sampleHTML))
+	}))
+	defer ts.Close()
+
+	s := New(Config{
+		Provider: "free",
+		BaseURL:  ts.URL,
+	})
+	results, err := s.Search(context.Background(), "golem")
+	if err != nil {
+		t.Fatalf("free search error: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	if results[0].Title != "Golem - Legends" {
+		t.Errorf("title = %q, want %q", results[0].Title, "Golem - Legends")
+	}
+	if results[0].URL != "https://example.com/golem" {
+		t.Errorf("url = %q, want %q", results[0].URL, "https://example.com/golem")
+	}
+	if !strings.Contains(results[0].Snippet, "magical entity") {
+		t.Errorf("snippet = %q, want to contain 'magical entity'", results[0].Snippet)
+	}
+}
+
+func TestDecodeBingTrackerURL(t *testing.T) {
+	tracker := "https://www.bing.com/ck/a?!&&p=abc&u=a1aHR0cHM6Ly9lbi53aWtpcGVkaWEub3JnL3dpa2kvR29sZW0&ntb=1"
+	want := "https://en.wikipedia.org/wiki/Golem"
+	got := decodeBingTrackerURL(tracker)
+	if got != want {
+		t.Errorf("decodeBingTrackerURL = %q, want %q", got, want)
+	}
+
+	direct := "https://example.com/page"
+	if decodeBingTrackerURL(direct) != direct {
+		t.Errorf("plain url changed: %q", decodeBingTrackerURL(direct))
 	}
 }

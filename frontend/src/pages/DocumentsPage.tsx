@@ -1,15 +1,13 @@
 import { useRef, useState } from "react";
-import { Link } from "react-router";
 import {
   CircleAlert,
   FileText,
   FileUp,
-  Gauge,
   Loader2,
-  MessageSquare,
+  Sidebar,
   Trash2,
-  Wrench,
 } from "lucide-react";
+import { useSidebar } from "@/components/layout/SidebarContext";
 import { cn } from "@/lib/utils";
 import type { DocumentRec } from "@/lib/types";
 import { Badge } from "@/components/ui/badge";
@@ -39,6 +37,7 @@ const STATUS_STYLES: Record<DocumentRec["status"], string> = {
 };
 
 export function DocumentsPage() {
+  const { toggleSidebar, setMobileOpen } = useSidebar();
   const { data: docs, isLoading, isError, error, refetch, isFetching } = useDocuments();
   const { upload, remove, progress, accepting } = useDocumentActions();
   const [dragging, setDragging] = useState(false);
@@ -52,24 +51,35 @@ export function DocumentsPage() {
   };
 
   return (
-    <div className="flex h-dvh flex-col bg-background">
-      <header className="flex items-center gap-1 border-b px-4 py-2.5">
-        <h1 className="min-w-0 flex-1 truncate text-sm font-medium">Documents</h1>
-        <Button variant="ghost" size="sm" asChild>
-          <Link to="/chat">
-            <MessageSquare /> Chat
-          </Link>
-        </Button>
-        <Button variant="ghost" size="sm" asChild>
-          <Link to="/tools">
-            <Wrench /> Tools
-          </Link>
-        </Button>
-        <Button variant="ghost" size="sm" asChild>
-          <Link to="/usage">
-            <Gauge /> Usage
-          </Link>
-        </Button>
+    <div className="flex h-full flex-col bg-background">
+      <header className="flex items-center justify-between gap-2 border-b border-border/60 px-4 py-2 bg-background/80 backdrop-blur-xs z-10 shrink-0">
+        <div className="flex items-center gap-2 min-w-0">
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            onClick={() => {
+              if (window.innerWidth < 768) {
+                setMobileOpen(true);
+              } else {
+                toggleSidebar();
+              }
+            }}
+            aria-label="Toggle sidebar"
+            title="Toggle sidebar (⌘B)"
+            className="text-muted-foreground hover:text-foreground"
+          >
+            <Sidebar className="size-4" />
+          </Button>
+          <div className="flex items-center gap-2">
+            <FileText className="size-4 text-muted-foreground" />
+            <h1 className="text-sm font-semibold tracking-tight">Documents</h1>
+            {docs && (
+              <Badge variant="secondary" className="font-mono text-xs px-1.5 py-0 h-4">
+                {docs.length}
+              </Badge>
+            )}
+          </div>
+        </div>
       </header>
 
       <div className="mx-auto w-full max-w-3xl space-y-4 overflow-y-auto p-4">

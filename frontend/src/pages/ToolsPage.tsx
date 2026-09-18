@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { Link } from "react-router";
 import { toast } from "sonner";
-import { Pencil, Plus, ShieldCheck, Trash2, TriangleAlert, Wrench } from "lucide-react";
+import { Pencil, Plus, ShieldCheck, Sidebar, Trash2, TriangleAlert, Wrench } from "lucide-react";
+import { useSidebar } from "@/components/layout/SidebarContext";
 import { cn } from "@/lib/utils";
 import type { ToolParam, UserTool } from "@/lib/types";
 import { Badge } from "@/components/ui/badge";
@@ -201,6 +201,7 @@ function ToolCard({
 }
 
 export function ToolsPage() {
+  const { toggleSidebar, setMobileOpen } = useSidebar();
   const { data: tools, isLoading, isError, refetch } = useTools();
   const createTool = useCreateTool();
   const updateTool = useUpdateTool();
@@ -271,26 +272,38 @@ export function ToolsPage() {
   }
 
   return (
-    <div className="flex h-svh flex-col bg-background">
-      <header className="flex items-center justify-between gap-2 border-b px-4 py-2.5">
-        <div className="flex min-w-0 items-center gap-2">
-          <Wrench className="size-4 shrink-0 text-muted-foreground" />
-          <h1 className="truncate text-sm font-semibold">Tools</h1>
-          {tools && (
-            <Badge variant="secondary" className="shrink-0 font-mono text-xs">
-              {tools.length}
-            </Badge>
-          )}
+    <div className="flex h-full flex-col bg-background">
+      <header className="flex items-center justify-between gap-2 border-b border-border/60 px-4 py-2 bg-background/80 backdrop-blur-xs z-10 shrink-0">
+        <div className="flex items-center gap-2 min-w-0">
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            onClick={() => {
+              if (window.innerWidth < 768) {
+                setMobileOpen(true);
+              } else {
+                toggleSidebar();
+              }
+            }}
+            aria-label="Toggle sidebar"
+            title="Toggle sidebar (⌘B)"
+            className="text-muted-foreground hover:text-foreground"
+          >
+            <Sidebar className="size-4" />
+          </Button>
+          <div className="flex items-center gap-2">
+            <Wrench className="size-4 shrink-0 text-muted-foreground" />
+            <h1 className="text-sm font-semibold tracking-tight">Tools</h1>
+            {tools && (
+              <Badge variant="secondary" className="shrink-0 font-mono text-xs px-1.5 py-0 h-4">
+                {tools.length}
+              </Badge>
+            )}
+          </div>
         </div>
         <div className="flex shrink-0 items-center gap-1">
-          <Button variant="ghost" size="sm" asChild>
-            <Link to="/">Chat</Link>
-          </Button>
-          <Button variant="ghost" size="sm" asChild>
-            <Link to="/usage">Usage</Link>
-          </Button>
           <Button size="sm" onClick={() => openEditor(emptyForm(), null, null)}>
-            <Plus /> New tool
+            <Plus className="size-3.5" /> New tool
           </Button>
         </div>
       </header>

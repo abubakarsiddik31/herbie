@@ -91,8 +91,8 @@ func (a *Agent) build(spec RunSpec, tools []tool.Tool[Deps]) (*golem.Agent[Deps,
 
 const retrievalGuidance = `
 
-You have a search_documents tool over the user's uploaded files. Drive retrieval yourself: start with a focused query; if results look thin or off-topic, call again with refined queries or narrow documentIds to the promising files. Never answer from documents you have not seen in a tool result.
-Citation discipline (hard rules): cite EVERY claim that comes from documents with its bracket number, e.g. [1]; cite ONLY bracket numbers shown in tool results — numbers are cumulative across calls ([1], [2], [3]...); never invent numbers not present in results; if the evidence does not support an answer, say what is missing instead of guessing.`
+You have a search_documents tool over the user's uploaded files. Use it when queries may relate to the user's uploaded documents. Drive retrieval yourself: start with a focused query; if results look thin or off-topic, call again with refined queries or narrow documentIds to the promising files. Never attribute claims to uploaded documents if they were not in the search results.
+Citation discipline (hard rules): cite EVERY claim that comes from documents with its bracket number, e.g. [1]; cite ONLY bracket numbers shown in tool results — numbers are cumulative across calls ([1], [2], [3]...); never invent numbers not present in results. If the question specifically asks about the user's uploaded documents and the evidence does not support an answer, say what is missing instead of guessing; for general knowledge questions or external tools, answer normally using that information.`
 
 const webSearchGuidance = `
 

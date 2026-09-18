@@ -3,6 +3,7 @@ import { ThemeProvider } from "next-themes";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router";
 import { Toaster } from "@/components/ui/sonner";
 import { RequireAuth } from "@/components/RequireAuth";
+import { AppLayout } from "@/components/layout/AppLayout";
 import { LoginPage } from "@/pages/LoginPage";
 import { RegisterPage } from "@/pages/RegisterPage";
 import { OAuthCallbackPage } from "@/pages/OAuthCallbackPage";
@@ -26,11 +27,13 @@ export default function App() {
           <Route path="/auth/callback" element={<OAuthCallbackPage />} />
           <Route path="/s/:token" element={<SharedPage />} />
           <Route element={<RequireAuth />}>
-            <Route path="/chat/:conversationId?" element={<ChatPage />} />
-            <Route path="/tools" element={<ToolsPage />} />
-            <Route path="/usage" element={<UsagePage />} />
-            <Route path="/preferences" element={<PreferencesPage />} />
-            <Route path="/documents" element={<DocumentsPage />} />
+            <Route element={<AppLayout />}>
+              <Route path="/chat/:conversationId?" element={<ChatPage />} />
+              <Route path="/tools" element={<ToolsPage />} />
+              <Route path="/usage" element={<UsagePage />} />
+              <Route path="/preferences" element={<PreferencesPage />} />
+              <Route path="/documents" element={<DocumentsPage />} />
+            </Route>
           </Route>
           <Route path="*" element={<Navigate to="/chat" replace />} />
         </Routes>

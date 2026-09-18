@@ -195,7 +195,11 @@ func Load() (Config, error) {
 		}
 	}
 	if wsProvider == "" {
-		wsProvider = "tavily"
+		if wsKey != "" {
+			wsProvider = "tavily"
+		} else {
+			wsProvider = "free"
+		}
 	}
 	wsTimeout, err := envInt("WEB_SEARCH_TIMEOUT", 15)
 	if err != nil {
@@ -235,7 +239,7 @@ func Load() (Config, error) {
 			BaseURL:  os.Getenv("WEB_SEARCH_BASE_URL"),
 			Timeout:  time.Duration(wsTimeout) * time.Second,
 		},
-		WebSearchRequireApproval: envBool("WEB_SEARCH_REQUIRE_APPROVAL", true),
+		WebSearchRequireApproval: envBool("WEB_SEARCH_REQUIRE_APPROVAL", false),
 
 		ToolHTTPTimeout:       time.Duration(toolTimeout) * time.Second,
 		ToolHTTPMaxBytes:      envInt64("TOOL_HTTP_MAX_BYTES", 1<<20),

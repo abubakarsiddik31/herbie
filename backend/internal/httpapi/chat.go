@@ -362,7 +362,16 @@ func (s *Server) userTools(ctx context.Context, userID string, ragEnabled bool) 
 		}
 	}
 	if s.deps.RagSearch != nil && ragEnabled {
-		tools = append(tools, chat.SearchTool())
+		hasDocs := true
+		if s.deps.Docs != nil {
+			docs, err := s.deps.Docs.List(ctx, userID)
+			if err == nil && len(docs) == 0 {
+				hasDocs = false
+			}
+		}
+		if hasDocs {
+			tools = append(tools, chat.SearchTool())
+		}
 	}
 	if s.deps.WebSearch != nil {
 		tools = append(tools, chat.WebSearchTool(s.deps.WebSearch, s.deps.Cfg.WebSearchRequireApproval))

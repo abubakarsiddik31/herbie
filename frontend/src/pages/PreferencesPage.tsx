@@ -1,11 +1,11 @@
 import React, { useState } from "react";
-import { Link } from "react-router";
 import { toast } from "sonner";
-import { ArrowLeft, Brain, Plus, Trash2 } from "lucide-react";
+import { Brain, Plus, Sidebar, Sparkles, Trash2 } from "lucide-react";
 import { ApiError } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useSidebar } from "@/components/layout/SidebarContext";
 import { useProfile, useUpdateProfile } from "@/features/profile/useProfile";
 import {
   useMemories,
@@ -18,6 +18,7 @@ export const MAX_INSTRUCTIONS_CHARS = 4000;
 export const MAX_MEMORY_CHARS = 1000;
 
 export function PreferencesPage() {
+  const { toggleSidebar, setMobileOpen } = useSidebar();
   const { data, isLoading, isError, refetch, isFetching } = useProfile();
   const update = useUpdateProfile();
   const [draft, setDraft] = useState<string | null>(null);
@@ -83,15 +84,34 @@ export function PreferencesPage() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-2xl space-y-6 p-6">
-      <div className="flex items-center gap-1">
-        <Button variant="ghost" size="icon-sm" asChild aria-label="Back to chat">
-          <Link to="/">
-            <ArrowLeft />
-          </Link>
-        </Button>
-        <h1 className="text-lg font-semibold">Preferences</h1>
-      </div>
+    <div className="flex h-full flex-col bg-background">
+      <header className="flex items-center justify-between gap-2 border-b border-border/60 px-4 py-2 bg-background/80 backdrop-blur-xs z-10 shrink-0">
+        <div className="flex items-center gap-2 min-w-0">
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            onClick={() => {
+              if (window.innerWidth < 768) {
+                setMobileOpen(true);
+              } else {
+                toggleSidebar();
+              }
+            }}
+            aria-label="Toggle sidebar"
+            title="Toggle sidebar (⌘B)"
+            className="text-muted-foreground hover:text-foreground"
+          >
+            <Sidebar className="size-4" />
+          </Button>
+          <div className="flex items-center gap-2">
+            <Sparkles className="size-4 text-muted-foreground" />
+            <h1 className="text-sm font-semibold tracking-tight">Preferences</h1>
+          </div>
+        </div>
+      </header>
+
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="mx-auto w-full max-w-2xl space-y-6 p-6">
 
       {isLoading && <Skeleton className="h-64 w-full" />}
 
@@ -229,6 +249,8 @@ export function PreferencesPage() {
           )}
         </CardContent>
       </Card>
+        </div>
+      </div>
     </div>
   );
 }
