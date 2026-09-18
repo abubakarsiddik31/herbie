@@ -21,6 +21,7 @@ import {
   FileUp,
   Search,
   Send,
+  Settings,
   Share2,
   ShieldCheck,
   Sparkles,
@@ -551,6 +552,11 @@ export function ChatPage() {
             </span>
             <Button variant="ghost" size="icon-sm" aria-label="Log out" onClick={() => void logout()}>
               <LogOut />
+            </Button>
+            <Button variant="ghost" size="icon-sm" asChild aria-label="Preferences">
+              <Link to="/preferences">
+                <Settings />
+              </Link>
             </Button>
             <ThemeToggle />
           </div>

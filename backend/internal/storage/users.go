@@ -56,3 +56,22 @@ func (u *Users) ByID(ctx context.Context, id string) (auth.UserRecord, error) {
 	}
 	return rec, nil
 }
+
+func (u *Users) Instructions(ctx context.Context, userID string) (string, error) {
+	var text string
+	if err := u.pool.QueryRow(ctx, `SELECT default_instructions FROM users WHERE id = $1`, userID).Scan(&text); err != nil {
+		return "", fmt.Errorf("user instructions: %w", err)
+	}
+	return text, nil
+}
+
+func (u *Users) SetInstructions(ctx context.Context, userID, text string) error {
+	tag, err := u.pool.Exec(ctx, `UPDATE users SET default_instructions = $2 WHERE id = $1`, userID, text)
+	if err != nil {
+		return fmt.Errorf("set user instructions: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}

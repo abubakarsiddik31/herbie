@@ -23,10 +23,11 @@ func newTestServer(t *testing.T) http.Handler {
 	}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	return NewServer(ServerDeps{
-		Cfg:    config.Config{FrontendOrigin: "http://localhost:5173"},
-		Log:    log,
-		Auth:   svc,
-		Tokens: tm,
+		Cfg:      config.Config{FrontendOrigin: "http://localhost:5173"},
+		Log:      log,
+		Auth:     svc,
+		Tokens:   tm,
+		Profiles: newFakeProfiles(),
 	})
 }
 

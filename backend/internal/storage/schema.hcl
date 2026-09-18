@@ -29,6 +29,11 @@ table "users" {
     type    = text
     null    = true
   }
+  column "default_instructions" {
+    type    = text
+    null    = false
+    default = ""
+  }
   column "created_at" {
     type    = timestamptz
     null    = false

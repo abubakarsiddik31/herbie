@@ -26,6 +26,7 @@ type ServerDeps struct {
 	// provider buttons.
 	OAuth     []*oauth.Provider
 	Shares    ShareStore
+	Profiles  ProfileStore
 	Convos    ConvoStore
 	Msgs      MsgStore
 	Usage     UsageStore
@@ -85,6 +86,8 @@ func NewServer(deps ServerDeps) http.Handler {
 	// requires a valid bearer token.
 	authed := http.NewServeMux()
 	authed.HandleFunc("GET /api/me", s.handleMe)
+	authed.HandleFunc("GET /api/profile", s.handleGetProfile)
+	authed.HandleFunc("PATCH /api/profile", s.handlePatchProfile)
 	authed.HandleFunc("GET /api/models", s.handleListModels)
 	authed.HandleFunc("GET /api/conversations", s.handleListConversations)
 	authed.HandleFunc("POST /api/conversations", s.handleCreateConversation)
