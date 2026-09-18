@@ -19,8 +19,9 @@ const SearchToolName = "search_documents"
 // SearchFunc retrieves the user's document chunks; wired per run by the
 // HTTP layer (embedding + Weaviate + usage metering behind it). An empty
 // docIDs means all user documents; otherwise search is restricted to those
-// document IDs (from an earlier result).
-type SearchFunc func(ctx context.Context, query string, k int, docIDs []string) ([]rag.Scored, error)
+// document IDs (from an earlier result). It returns retrieved chunks, the
+// 0-based offset in the run's cumulative sources list, and any error.
+type SearchFunc func(ctx context.Context, query string, k int, docIDs []string) ([]rag.Scored, int, error)
 
 const citationRules = `
 
@@ -77,7 +78,7 @@ func SearchTool() tool.Tool[Deps] {
 					break
 				}
 			}
-			scored, err := deps.Search(ctx, a.Query, k, docIDs)
+			scored, offset, err := deps.Search(ctx, a.Query, k, docIDs)
 			if err != nil {
 				return tool.Result{}, fmt.Errorf("search documents: %w", err)
 			}
@@ -97,7 +98,7 @@ func SearchTool() tool.Tool[Deps] {
 				if len(text) > 2000 {
 					text = text[:2000] + "…"
 				}
-				fmt.Fprintf(&sb, "[%d] (%s) %s\n\n", i+1, label, text)
+				fmt.Fprintf(&sb, "[%d] (%s) %s\n\n", offset+i+1, label, text)
 			}
 			return tool.Text("Sources — cite ONLY these bracket numbers:\n\n" + strings.TrimSpace(sb.String())), nil
 		},
