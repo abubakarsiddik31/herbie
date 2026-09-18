@@ -144,3 +144,16 @@ func TestPromptForCitations(t *testing.T) {
 		t.Fatalf("custom prompt lost citation rules: %q", custom)
 	}
 }
+
+func TestBuildAddsRetrievalGuidance(t *testing.T) {
+	got := promptFor(RunSpec{SystemPrompt: "base"}, []tool.Tool[Deps]{SearchTool()})
+	for _, want := range []string{"refined", "documentIds", "ONLY bracket numbers", "restart at 1"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("guidance lacks %q: %s", want, got)
+		}
+	}
+	plain := promptFor(RunSpec{SystemPrompt: "base"}, nil)
+	if strings.Contains(plain, "bracket numbers") {
+		t.Fatalf("guidance leaks into non-search runs: %s", plain)
+	}
+}
