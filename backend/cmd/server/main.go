@@ -161,6 +161,7 @@ func main() {
 		Msgs:      storage.NewMessages(pool),
 		Shares:    storage.NewShares(pool),
 		Profiles:  users,
+		Memories:  storage.NewMemories(pool),
 		Usage:     storage.NewUsage(pool),
 		Tools:     storage.NewTools(pool),
 		Pending:   storage.NewPendingCalls(pool),

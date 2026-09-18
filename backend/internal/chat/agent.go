@@ -17,6 +17,7 @@ type Deps struct {
 	UserID         string
 	ConversationID string
 	Search         SearchFunc
+	SaveMemory     func(ctx context.Context, fact string) error
 }
 
 // PendingApproval is one deferred tool call waiting on the user's decision.

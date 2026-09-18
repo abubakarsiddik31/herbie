@@ -209,6 +209,7 @@ func (s *Server) runTurn(ctx context.Context, userID, convID string, spec chat.R
 		UserID:         userID,
 		ConversationID: convID,
 		Search:         s.searchDeps(userID, convID, &sources),
+		SaveMemory:     s.saveMemoryFunc(userID),
 	}, history, prompt, parts, sink, tools, spec)
 	if err != nil {
 		s.persistFailure(ctx, userID, convID, spec, err, sink)
@@ -304,12 +305,39 @@ func (s *Server) runSpecFor(ctx context.Context, conv storage.Conversation) chat
 	if spec.Model == "" {
 		spec.Model = chat.DefaultModel(s.deps.ModelKeys).ID
 	}
-	if s.deps.Profiles != nil {
-		if global, err := s.deps.Profiles.Instructions(ctx, conv.UserID); err == nil && global != "" {
-			spec.SystemPrompt = "[User preferences]\n" + global + "\n\n" + spec.SystemPrompt
+	var prefix strings.Builder
+	if s.deps.Memories != nil {
+		if mems, err := s.deps.Memories.List(ctx, conv.UserID); err == nil && len(mems) > 0 {
+			prefix.WriteString("[User memory]\n")
+			for _, m := range mems {
+				prefix.WriteString("- ")
+				prefix.WriteString(m.Content)
+				prefix.WriteString("\n")
+			}
+			prefix.WriteString("\n")
 		}
 	}
+	if s.deps.Profiles != nil {
+		if global, err := s.deps.Profiles.Instructions(ctx, conv.UserID); err == nil && global != "" {
+			prefix.WriteString("[User preferences]\n")
+			prefix.WriteString(global)
+			prefix.WriteString("\n\n")
+		}
+	}
+	if prefix.Len() > 0 {
+		spec.SystemPrompt = prefix.String() + spec.SystemPrompt
+	}
 	return spec
+}
+
+func (s *Server) saveMemoryFunc(userID string) func(ctx context.Context, fact string) error {
+	if s.deps.Memories == nil {
+		return nil
+	}
+	return func(ctx context.Context, fact string) error {
+		_, err := s.deps.Memories.Create(ctx, userID, fact)
+		return err
+	}
 }
 
 // userTools builds the caller's enabled golem tools plus the built-in
@@ -338,6 +366,9 @@ func (s *Server) userTools(ctx context.Context, userID string, ragEnabled bool) 
 	}
 	if s.deps.WebSearch != nil {
 		tools = append(tools, chat.WebSearchTool(s.deps.WebSearch, s.deps.Cfg.WebSearchRequireApproval))
+	}
+	if s.deps.Memories != nil {
+		tools = append(tools, chat.RememberTool())
 	}
 	return tools, nil
 }
