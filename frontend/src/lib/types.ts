@@ -77,3 +77,72 @@ export interface UsageDocumentRow {
   inputTokens: number;
   costUsd: number;
 }
+
+export interface WorkflowNode {
+  id: string;
+  type: string;
+  name: string;
+  position: { x: number; y: number };
+  data: Record<string, unknown>;
+}
+
+export interface WorkflowEdge {
+  id: string;
+  source: string;
+  target: string;
+  sourceHandle?: string;
+  targetHandle?: string;
+}
+
+export interface Workflow {
+  id: string;
+  name: string;
+  description: string;
+  triggerType: string;
+  webhookSlug?: string | null;
+  webhookSecret?: string;
+  nodes: WorkflowNode[];
+  edges: WorkflowEdge[];
+  exposeAsTool: boolean;
+  toolName: string;
+  toolDescription: string;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface NodeExecutionResult {
+  nodeId: string;
+  nodeName: string;
+  nodeType: string;
+  status: "running" | "success" | "failed" | "skipped";
+  input?: unknown;
+  output?: unknown;
+  error?: string;
+  durationMs: number;
+  startedAt?: string;
+  finishedAt?: string;
+}
+
+export interface WorkflowRun {
+  id: string;
+  workflowId: string;
+  status: "pending" | "running" | "success" | "failed";
+  triggerSource: string;
+  inputData: unknown;
+  outputData: unknown;
+  nodeResults: Record<string, NodeExecutionResult>;
+  error?: string | null;
+  durationMs: number;
+  createdAt: string;
+  finishedAt?: string | null;
+}
+
+export interface WorkflowCredential {
+  id: string;
+  name: string;
+  type: string;
+  data: Record<string, string>;
+  createdAt: string;
+  updatedAt: string;
+}

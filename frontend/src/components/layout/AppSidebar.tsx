@@ -14,6 +14,7 @@ import {
   Settings,
   Share2,
   Trash2,
+  Workflow as WorkflowIcon,
   Wrench,
   X,
 } from "lucide-react";
@@ -42,6 +43,7 @@ import { ShareDialog } from "@/features/chat/ShareDialog";
 import { useConversations, useDeleteConversation } from "@/features/chat/useConversations";
 import { useTools } from "@/features/tools/useTools";
 import { useProjects } from "@/features/projects/useProjects";
+import { useWorkflows } from "@/features/workflows/useWorkflows";
 import { useSidebar } from "./SidebarContext";
 
 const GROUP_ORDER = ["Today", "Yesterday", "Previous 7 days", "Older"] as const;
@@ -84,6 +86,7 @@ export function AppSidebar() {
   const { data: conversations, isLoading: conversationsLoading } = useConversations(debouncedFilter.trim());
   const { data: tools } = useTools();
   const { data: projects } = useProjects();
+  const { data: workflows } = useWorkflows();
   const deleteConversation = useDeleteConversation();
 
   const renameMutation = useMutation({
@@ -258,6 +261,27 @@ export function AppSidebar() {
             {projects && projects.length > 0 && (
               <Badge variant="secondary" className="px-1.5 py-0 text-[10px] font-mono h-4">
                 {projects.length}
+              </Badge>
+            )}
+          </Link>
+
+          <Link
+            to="/workflows"
+            onClick={() => setMobileOpen(false)}
+            className={cn(
+              "flex items-center justify-between rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors",
+              isNavActive("/workflows")
+                ? "bg-sidebar-accent text-sidebar-accent-foreground font-semibold"
+                : "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
+            )}
+          >
+            <span className="flex items-center gap-2.5">
+              <WorkflowIcon className="size-3.5 shrink-0" />
+              <span>Workflows</span>
+            </span>
+            {workflows && workflows.length > 0 && (
+              <Badge variant="secondary" className="px-1.5 py-0 text-[10px] font-mono h-4">
+                {workflows.length}
               </Badge>
             )}
           </Link>
