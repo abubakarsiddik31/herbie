@@ -25,6 +25,7 @@ type ServerDeps struct {
 	// order. Empty = password auth only; the login UI hides the
 	// provider buttons.
 	OAuth     []*oauth.Provider
+	Shares    ShareStore
 	Convos    ConvoStore
 	Msgs      MsgStore
 	Usage     UsageStore
@@ -77,6 +78,7 @@ func NewServer(deps ServerDeps) http.Handler {
 	s.mux.HandleFunc("GET /api/auth/oauth/{provider}", s.handleOAuthStart)
 	s.mux.HandleFunc("GET /api/auth/oauth/{provider}/callback", s.handleOAuthCallback)
 	s.mux.HandleFunc("POST /api/auth/oauth/consume", s.handleOAuthConsume)
+	s.mux.HandleFunc("GET /api/shared/{token}", s.handleGetShared)
 
 	// Authenticated API: more specific patterns above win over this
 	// catch-all, so /api/auth/* stays public while the rest of /api/
@@ -89,6 +91,9 @@ func NewServer(deps ServerDeps) http.Handler {
 	authed.HandleFunc("GET /api/conversations/{id}", s.handleGetConversation)
 	authed.HandleFunc("PATCH /api/conversations/{id}", s.handlePatchConversation)
 	authed.HandleFunc("DELETE /api/conversations/{id}", s.handleDeleteConversation)
+	authed.HandleFunc("GET /api/conversations/{id}/shares", s.handleShareState)
+	authed.HandleFunc("POST /api/conversations/{id}/shares", s.handleShareConversation)
+	authed.HandleFunc("DELETE /api/conversations/{id}/shares", s.handleUnshareConversation)
 	authed.HandleFunc("POST /api/conversations/{id}/messages", s.handleSendMessage)
 	authed.HandleFunc("POST /api/conversations/{id}/messages/{messageId}/edit", s.handleEditMessage)
 	authed.HandleFunc("POST /api/conversations/{id}/regenerate", s.handleRegenerate)

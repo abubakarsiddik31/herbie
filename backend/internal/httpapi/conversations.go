@@ -123,31 +123,39 @@ func (s *Server) handleGetConversation(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal", "could not load messages")
 		return
 	}
-	type usageDTO struct {
-		InputTokens  int     `json:"inputTokens"`
-		OutputTokens int     `json:"outputTokens"`
-		CostUsd      float64 `json:"costUsd"`
-		Model        string  `json:"model"`
-	}
-	type msgDTO struct {
-		ID        string           `json:"id"`
-		Role      string           `json:"role"`
-		Content   string           `json:"content"`
-		Truncated bool             `json:"truncated"`
-		CreatedAt string           `json:"createdAt"`
-		Usage     *usageDTO        `json:"usage,omitempty"`
-		Images    []imageDTO       `json:"images,omitempty"`
-		Sources   *json.RawMessage `json:"sources,omitempty"`
-	}
+	writeJSON(w, http.StatusOK, map[string]any{"conversation": toConversationDTO(conv), "messages": transcriptMessages(msgs, true)})
+}
+
+type usageDTO struct {
+	InputTokens  int     `json:"inputTokens"`
+	OutputTokens int     `json:"outputTokens"`
+	CostUsd      float64 `json:"costUsd"`
+	Model        string  `json:"model"`
+}
+
+type msgDTO struct {
+	ID        string           `json:"id"`
+	Role      string           `json:"role"`
+	Content   string           `json:"content"`
+	Truncated bool             `json:"truncated"`
+	CreatedAt string           `json:"createdAt"`
+	Usage     *usageDTO        `json:"usage,omitempty"`
+	Images    []imageDTO       `json:"images,omitempty"`
+	Sources   *json.RawMessage `json:"sources,omitempty"`
+}
+
+// transcriptMessages renders stored rows for display, skipping tool
+// plumbing (tool-result rows and empty assistant tool-call rows are history
+// replay data only). Usage/cost ride along unless public is set — shared
+// threads never leak spend.
+func transcriptMessages(msgs []storage.Message, includeUsage bool) []msgDTO {
 	out := make([]msgDTO, 0, len(msgs))
 	for _, m := range msgs {
-		// Tool plumbing stays out of the transcript: tool-result rows and
-		// empty assistant tool-call rows are history replay data only.
 		if m.Role == string(model.RoleTool) || (m.Content == "" && !userHasImages(m.Data)) {
 			continue
 		}
 		var usage *usageDTO
-		if m.InputTokens > 0 || m.OutputTokens > 0 {
+		if includeUsage && (m.InputTokens > 0 || m.OutputTokens > 0) {
 			usage = &usageDTO{
 				InputTokens:  m.InputTokens,
 				OutputTokens: m.OutputTokens,
@@ -161,7 +169,7 @@ func (s *Server) handleGetConversation(w http.ResponseWriter, r *http.Request) {
 			Images: imagesOf(m.Data), Sources: storedSources(m.Sources),
 		})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"conversation": toConversationDTO(conv), "messages": out})
+	return out
 }
 
 // storedSources returns the persisted citation rows for a history message,

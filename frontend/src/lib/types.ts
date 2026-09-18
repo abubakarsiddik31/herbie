@@ -1,5 +1,6 @@
 export interface User { id: string; email: string }
 export interface OAuthProvider { id: string; name: string }
+export interface SharedThread { title: string; messages: ChatMessage[] }
 export interface Conversation {
   id: string; title: string; createdAt: string; updatedAt: string;
   model: string; temperature: number | null; systemPrompt: string; ragEnabled: boolean;
