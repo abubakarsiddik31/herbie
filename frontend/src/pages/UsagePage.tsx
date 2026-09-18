@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { ArrowLeft } from "lucide-react";
 import { ApiError, apiFetch } from "@/lib/api";
 import type { UsageSummary } from "@/lib/types";
+import { kindDescription, kindLabel } from "@/lib/usageKinds";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -109,7 +110,7 @@ export function UsagePage() {
                     {data.totals.map((t) => (
                       <tr key={`${t.kind}:${t.model}`} className="border-t">
                         <td className="px-4 py-2.5 font-medium">{t.model}</td>
-                        <td className="text-muted-foreground px-4 py-2.5">{t.kind}</td>
+                        <td className="text-muted-foreground px-4 py-2.5" title={kindDescription(t.kind) || undefined}>{kindLabel(t.kind)}</td>
                         <td className="px-4 py-2.5 tabular-nums">{t.inputTokens.toLocaleString()}</td>
                         <td className="px-4 py-2.5 tabular-nums">{t.outputTokens.toLocaleString()}</td>
                         <td className="px-4 py-2.5 tabular-nums">{t.requests.toLocaleString()}</td>

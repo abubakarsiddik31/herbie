@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useDocumentActions, useDocuments } from "@/features/documents/useDocuments";
+import { ApiError } from "@/lib/api";
 
 function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
@@ -38,11 +39,12 @@ const STATUS_STYLES: Record<DocumentRec["status"], string> = {
 };
 
 export function DocumentsPage() {
-  const { data: docs, isLoading } = useDocuments();
+  const { data: docs, isLoading, isError, error, refetch, isFetching } = useDocuments();
   const { upload, remove, progress, accepting } = useDocumentActions();
   const [dragging, setDragging] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<DocumentRec | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const ragDisabled = error instanceof ApiError && error.code === "rag_disabled";
 
   const pick = (files: FileList | null) => {
     if (!files) return;
@@ -125,6 +127,22 @@ export function DocumentsPage() {
             {[0, 1, 2].map((i) => (
               <Skeleton key={i} className="h-14 w-full" />
             ))}
+          </div>
+        )}
+
+        {isError && (
+          <div className="rounded-xl border border-dashed p-8 text-center">
+            <p className="text-sm font-medium">
+              {ragDisabled ? "Document search is disabled on this server" : "Couldn't load documents"}
+            </p>
+            <p className="mx-auto mt-1 max-w-sm text-muted-foreground text-xs">
+              {ragDisabled
+                ? "The backend runs without RAG_ENABLED and the rag compose profile. Start the stack with RAG on, then retry."
+                : (error instanceof ApiError ? error.message : "Something went wrong.")}
+            </p>
+            <Button variant="outline" size="sm" className="mt-3" onClick={() => void refetch()} disabled={isFetching}>
+              Retry
+            </Button>
           </div>
         )}
 
