@@ -19,7 +19,8 @@ type Scored struct {
 type VectorStore interface {
 	UpsertChunks(ctx context.Context, userID, documentID, docTitle string, chunks []Chunk, vectors [][]float32) error
 	DeleteDocument(ctx context.Context, documentID string) error
-	HybridSearch(ctx context.Context, userID, query string, queryVector []float32, k int) ([]Scored, error)
+	HybridSearch(ctx context.Context, userID, query string, queryVector []float32, alpha float64, limit int, docIDs []string) ([]Scored, error)
+	ExpandRange(ctx context.Context, userID, docID string, lo, hi int) ([]Chunk, error)
 }
 
 // ObjectUploader is the slice of the object store the pipeline needs:
@@ -102,7 +103,7 @@ func (s *Service) Search(ctx context.Context, userID, query string, k int) ([]Sc
 	if err != nil {
 		return nil, EmbedUsage{}, fmt.Errorf("embed query: %w", err)
 	}
-	scored, err := s.vs.HybridSearch(ctx, userID, query, res.Vectors[0], k)
+	scored, err := s.vs.HybridSearch(ctx, userID, query, res.Vectors[0], 0.5, k, nil)
 	if err != nil {
 		return nil, EmbedUsage{}, fmt.Errorf("search index: %w", err)
 	}

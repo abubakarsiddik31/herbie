@@ -45,9 +45,13 @@ func (f *fakeVS) DeleteDocument(_ context.Context, documentID string) error {
 	return nil
 }
 
-func (f *fakeVS) HybridSearch(_ context.Context, userID, query string, _ []float32, k int) ([]Scored, error) {
+func (f *fakeVS) HybridSearch(_ context.Context, userID, query string, _ []float32, _ float64, k int, _ []string) ([]Scored, error) {
 	f.searchCall = append(f.searchCall, searchCall{userID, query, k})
 	return f.results, nil
+}
+
+func (f *fakeVS) ExpandRange(_ context.Context, _, _ string, _, _ int) ([]Chunk, error) {
+	return nil, nil
 }
 
 type fakeObjects struct {

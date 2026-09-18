@@ -97,7 +97,10 @@ func (f *fakeVectors) DeleteDocument(_ context.Context, documentID string) error
 	f.deleted = append(f.deleted, documentID)
 	return nil
 }
-func (f *fakeVectors) HybridSearch(_ context.Context, _, _ string, _ []float32, _ int) ([]rag.Scored, error) {
+func (f *fakeVectors) HybridSearch(_ context.Context, _, _ string, _ []float32, _ float64, _ int, _ []string) ([]rag.Scored, error) {
+	return nil, nil
+}
+func (f *fakeVectors) ExpandRange(_ context.Context, _, _ string, _, _ int) ([]rag.Chunk, error) {
 	return nil, nil
 }
 
