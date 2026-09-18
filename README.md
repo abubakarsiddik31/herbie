@@ -136,6 +136,17 @@ startup:
   --dev-url "docker://postgres/16/dev?search_path=public"
 ```
 
+## Visual Workflows (n8n-style Automation)
+
+Create and execute multi-step automation flows using an interactive node-based canvas powered by `@xyflow/react` on the **Workflows** page (`/workflows`):
+
+- **Triggers**: Manual run / test payloads, unique public Webhook URLs (`/api/webhooks/:slug` with optional secret verification), or direct chat agent invocation.
+- **External Tools & Connectors**: Universal HTTP Request node (GET/POST/PUT/DELETE with Bearer, Basic, API Key auth and body templates), Golem Custom Tools bridge, GitHub (create issues/comments), Slack, and Discord.
+- **AI & LLM Nodes**: Prompt catalog models (Gemini, OpenAI, Anthropic) with prompt templates, system instructions, and structured JSON output extraction.
+- **Logic & Control Flow**: Conditional branching (If/Else evaluation with True/False path routing), field mapping transforms (`code_transform`), and execution delays.
+- **Agent Tool Bridge**: Toggle `Expose as Agent Tool` on any workflow to allow the main conversational chat assistant to autonomously execute the workflow as a native tool during chat!
+- **Tracing & History**: Inspect past execution runs, durations, node-by-node status, inputs, and outputs.
+
 ## RAG (Phase 2c)
 
 The agent owns retrieval — there is no fixed pipeline. On every turn it

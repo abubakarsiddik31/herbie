@@ -14,6 +14,8 @@ import { ToolsPage } from "@/pages/ToolsPage";
 import { UsagePage } from "@/pages/UsagePage";
 import { ProjectsPage } from "@/pages/ProjectsPage";
 import { ProjectWorkspacePage } from "@/pages/ProjectWorkspacePage";
+import { WorkflowsPage } from "@/pages/WorkflowsPage";
+import { WorkflowCanvasPage } from "@/pages/WorkflowCanvasPage";
 
 const queryClient = new QueryClient();
 
@@ -32,6 +34,8 @@ export default function App() {
               <Route path="/chat/:conversationId?" element={<ChatPage />} />
               <Route path="/projects" element={<ProjectsPage />} />
               <Route path="/projects/:projectId" element={<ProjectWorkspacePage />} />
+              <Route path="/workflows" element={<WorkflowsPage />} />
+              <Route path="/workflows/:workflowId" element={<WorkflowCanvasPage />} />
               <Route path="/tools" element={<ToolsPage />} />
               <Route path="/usage" element={<UsagePage />} />
               <Route path="/preferences" element={<PreferencesPage />} />

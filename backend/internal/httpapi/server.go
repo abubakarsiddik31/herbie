@@ -50,11 +50,12 @@ type ServerDeps struct {
 	Compactor *chat.Compactor
 	// The retrieval stack's collaborators for the documents API. All nil
 	// when RAG is disabled.
-	RAG      RagRunner
-	Docs     DocStore
-	Projects ProjectStore
-	Vectors  rag.VectorStore
-	Objects  storage.ObjectStore
+	RAG       RagRunner
+	Docs      DocStore
+	Projects  ProjectStore
+	Workflows WorkflowStore
+	Vectors   rag.VectorStore
+	Objects   storage.ObjectStore
 }
 
 // RagSearchFunc is rag.Service.Search narrowed to what the chat path
@@ -87,6 +88,8 @@ func NewServer(deps ServerDeps) http.Handler {
 	s.mux.HandleFunc("GET /api/auth/oauth/{provider}/callback", s.handleOAuthCallback)
 	s.mux.HandleFunc("POST /api/auth/oauth/consume", s.handleOAuthConsume)
 	s.mux.HandleFunc("GET /api/shared/{token}", s.handleGetShared)
+	s.mux.HandleFunc("POST /api/webhooks/{slug}", s.handlePublicWebhook)
+	s.mux.HandleFunc("GET /api/webhooks/{slug}", s.handlePublicWebhook)
 
 	// Authenticated API: more specific patterns above win over this
 	// catch-all, so /api/auth/* stays public while the rest of /api/
@@ -131,6 +134,17 @@ func NewServer(deps ServerDeps) http.Handler {
 	authed.HandleFunc("GET /api/projects/{id}/files", s.handleListProjectFiles)
 	authed.HandleFunc("POST /api/projects/{id}/conversations", s.handleCreateProjectConversation)
 	authed.HandleFunc("GET /api/projects/{id}/conversations", s.handleListProjectConversations)
+	authed.HandleFunc("GET /api/workflows", s.handleListWorkflows)
+	authed.HandleFunc("POST /api/workflows", s.handleCreateWorkflow)
+	authed.HandleFunc("GET /api/workflows/{id}", s.handleGetWorkflow)
+	authed.HandleFunc("PATCH /api/workflows/{id}", s.handlePatchWorkflow)
+	authed.HandleFunc("DELETE /api/workflows/{id}", s.handleDeleteWorkflow)
+	authed.HandleFunc("POST /api/workflows/{id}/run", s.handleRunWorkflow)
+	authed.HandleFunc("GET /api/workflows/{id}/runs", s.handleListWorkflowRuns)
+	authed.HandleFunc("GET /api/workflows/{id}/runs/{runId}", s.handleGetWorkflowRun)
+	authed.HandleFunc("GET /api/workflow-credentials", s.handleListWorkflowCredentials)
+	authed.HandleFunc("POST /api/workflow-credentials", s.handleCreateWorkflowCredential)
+	authed.HandleFunc("DELETE /api/workflow-credentials/{id}", s.handleDeleteWorkflowCredential)
 	s.mux.Handle("/api/", requireAuth(deps.Tokens, authed))
 
 	return withCORS(deps.Cfg.FrontendOrigin, logRequests(deps.Log, s.mux))
