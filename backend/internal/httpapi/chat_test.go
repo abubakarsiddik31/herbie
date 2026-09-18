@@ -246,6 +246,32 @@ func (f *fakeMsgs) DeleteAfter(_ context.Context, convID, userID string, after t
 
 func (f *fakeMsgs) count() int { return len(f.rows) }
 
+// DeleteMessage mirrors DeleteAfter's tuple comparison, anchored at the
+// target row: the row itself and everything after it goes.
+func (f *fakeMsgs) DeleteMessage(_ context.Context, convID, msgID, userID string) error {
+	var anchor *storage.Message
+	for i := range f.rows {
+		m := &f.rows[i]
+		if m.ID == msgID && m.ConversationID == convID && m.UserID == userID {
+			anchor = m
+			break
+		}
+	}
+	if anchor == nil {
+		return storage.ErrNotFound
+	}
+	var kept []storage.Message
+	for _, m := range f.rows {
+		if m.ConversationID == convID && m.UserID == userID &&
+			(m.CreatedAt.After(anchor.CreatedAt) || (m.CreatedAt.Equal(anchor.CreatedAt) && m.ID >= anchor.ID)) {
+			continue
+		}
+		kept = append(kept, m)
+	}
+	f.rows = kept
+	return nil
+}
+
 type fakeUsage struct{ events []storage.UsageEvent }
 
 func newFakeUsage() *fakeUsage { return &fakeUsage{} }

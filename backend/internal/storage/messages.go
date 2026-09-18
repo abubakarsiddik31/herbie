@@ -111,6 +111,29 @@ func (m *Messages) UpdateContent(ctx context.Context, msgID, userID, content str
 	return nil
 }
 
+// DeleteMessage removes one row plus everything after it in the
+// conversation's (created_at, id) order. Deleting a question drops the
+// answer that followed it; deleting an answer leaves prior context intact.
+// Unknown or foreign rows are ErrNotFound.
+func (m *Messages) DeleteMessage(ctx context.Context, convID, msgID, userID string) error {
+	var created time.Time
+	err := m.pool.QueryRow(ctx,
+		`SELECT created_at FROM messages WHERE id = $1 AND conversation_id = $2 AND user_id = $3`,
+		msgID, convID, userID).Scan(&created)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
+		return fmt.Errorf("delete message lookup: %w", err)
+	}
+	if _, err := m.pool.Exec(ctx,
+		`DELETE FROM messages WHERE conversation_id = $1 AND user_id = $2 AND (created_at, id) >= ($3, $4)`,
+		convID, userID, created, msgID); err != nil {
+		return fmt.Errorf("delete message: %w", err)
+	}
+	return nil
+}
+
 // DeleteAfter removes every row strictly after (after, afterID) in the
 // conversation's (created_at, id) order — the edit-and-resend truncation.
 func (m *Messages) DeleteAfter(ctx context.Context, convID, userID string, after time.Time, afterID string) (int64, error) {

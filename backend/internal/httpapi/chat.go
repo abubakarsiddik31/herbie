@@ -46,6 +46,7 @@ type MsgStore interface {
 	ByID(ctx context.Context, msgID, userID string) (storage.Message, error)
 	UpdateContent(ctx context.Context, msgID, userID, content string, data []byte) error
 	DeleteAfter(ctx context.Context, convID, userID string, after time.Time, afterID string) (int64, error)
+	DeleteMessage(ctx context.Context, convID, msgID, userID string) error
 }
 
 type UsageStore interface {
