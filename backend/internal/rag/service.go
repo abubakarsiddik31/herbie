@@ -9,9 +9,12 @@ import (
 )
 
 // Scored pairs a chunk with its retrieval score (hybrid BM25+vector).
+// Context optionally carries the expanded neighbor window; empty means
+// the core chunk content stands alone.
 type Scored struct {
-	Chunk Chunk
-	Score float64
+	Chunk   Chunk
+	Score   float64
+	Context string
 }
 
 // VectorStore is the retrieval index contract. internal/weaviate.Client
