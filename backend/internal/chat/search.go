@@ -86,13 +86,20 @@ func SearchTool() tool.Tool[Deps] {
 			}
 			var sb strings.Builder
 			for i, s := range scored {
-				content := s.Chunk.Content
-				if len(content) > 2000 {
-					content = content[:2000] + "…"
+				label := s.Chunk.DocTitle
+				if s.Chunk.Heading != "" {
+					label += " § " + s.Chunk.Heading
 				}
-				fmt.Fprintf(&sb, "[%d] (%s) %s\n\n", i+1, s.Chunk.DocTitle, content)
+				if s.Chunk.Page > 0 {
+					label += fmt.Sprintf(", p.%d", s.Chunk.Page)
+				}
+				text := rag.DisplayText(s)
+				if len(text) > 2000 {
+					text = text[:2000] + "…"
+				}
+				fmt.Fprintf(&sb, "[%d] (%s) %s\n\n", i+1, label, text)
 			}
-			return tool.Text(strings.TrimSpace(sb.String())), nil
+			return tool.Text("Sources — cite ONLY these bracket numbers:\n\n" + strings.TrimSpace(sb.String())), nil
 		},
 	}
 }

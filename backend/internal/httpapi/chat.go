@@ -203,13 +203,15 @@ func emitSources(sink *sseSink, sources []rag.Scored) {
 	}
 	rows := make([]map[string]any, len(sources))
 	for i, sc := range sources {
-		snippet := sc.Chunk.Content
+		snippet := rag.DisplayText(sc)
 		if len(snippet) > 160 {
 			snippet = strings.TrimSpace(snippet[:160]) + "…"
 		}
 		rows[i] = map[string]any{
 			"documentId": sc.Chunk.DocumentID,
 			"title":      sc.Chunk.DocTitle,
+			"heading":    sc.Chunk.Heading,
+			"page":       sc.Chunk.Page,
 			"snippet":    snippet,
 			"score":      sc.Score,
 		}

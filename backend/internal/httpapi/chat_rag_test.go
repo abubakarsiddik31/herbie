@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -163,6 +164,23 @@ func TestSendMessageRecordsRerankUsage(t *testing.T) {
 	}
 	if e.UserID != "u-1" {
 		t.Fatalf("user not attached: %+v", e)
+	}
+}
+
+func TestEmitSourcesExpandedContext(t *testing.T) {
+	rec := httptest.NewRecorder()
+	sink := &sseSink{w: rec, flush: rec}
+	sources := []rag.Scored{{
+		Chunk:   rag.Chunk{DocumentID: "d1", DocTitle: "notes.md", Heading: "Intro", Page: 2, Content: "core text"},
+		Context: "neighbor-before core text neighbor-after",
+		Score:   0.9,
+	}}
+	emitSources(sink, sources)
+	body := rec.Body.String()
+	for _, want := range []string{`"heading":"Intro"`, `"page":2`, "neighbor-before", "neighbor-after"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("missing %q in sources event:\n%s", want, body)
+		}
 	}
 }
 

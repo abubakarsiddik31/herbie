@@ -48,16 +48,17 @@ func TestSearchToolExec(t *testing.T) {
 		captured = append(captured, query+"/"+strconv.Itoa(k))
 		seenDocIDs = docIDs
 		return []rag.Scored{
-			{Chunk: rag.Chunk{DocTitle: "a.txt", Index: 0, Content: "alpha text"}, Score: 0.9},
-			{Chunk: rag.Chunk{DocTitle: "a.txt", Index: 1, Content: strings.Repeat("long ", 100)}, Score: 0.5},
+			{Chunk: rag.Chunk{DocTitle: "a.txt", Heading: "Intro", Page: 2, Index: 0, Content: "alpha text"}, Score: 0.9},
+			{Chunk: rag.Chunk{DocTitle: "a.txt", Index: 1, Content: "beta text"}, Score: 0.5},
 		}, nil
 	}}
 	out, err := SearchTool().Exec(context.Background(), deps, json.RawMessage(`{"query":"q","k":3}`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(out.Text, "[1] (a.txt) alpha text\n\n[2] (a.txt) long ") {
-		t.Fatalf("formatted results: %q", out.Text)
+	want := "Sources — cite ONLY these bracket numbers:\n\n[1] (a.txt § Intro, p.2) alpha text\n\n[2] (a.txt) beta text"
+	if out.Text != want {
+		t.Fatalf("formatted results:\n got %q\nwant %q", out.Text, want)
 	}
 	if captured[0] != "q/3" {
 		t.Fatalf("args not passed: %q", captured[0])
