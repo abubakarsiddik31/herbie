@@ -12,6 +12,7 @@ import (
 
 	"github.com/abubakarsiddik31/golem"
 	"github.com/abubakarsiddik31/golem-chatbot/internal/auth"
+	"github.com/abubakarsiddik31/golem-chatbot/internal/auth/oauth"
 	"github.com/abubakarsiddik31/golem-chatbot/internal/chat"
 	"github.com/abubakarsiddik31/golem-chatbot/internal/config"
 	"github.com/abubakarsiddik31/golem-chatbot/internal/cost"
@@ -44,7 +45,7 @@ func main() {
 
 	users := storage.NewUsers(pool)
 	refresh := storage.NewRefreshTokens(pool)
-	svc, err := auth.NewService(users, refresh, cfg.JWTSecret)
+	svc, err := auth.NewService(users, refresh, storage.NewOAuthIdentities(pool), cfg.JWTSecret)
 	if err != nil {
 		log.Error("auth", "err", err)
 		os.Exit(1)
@@ -148,6 +149,7 @@ func main() {
 		Log:       log,
 		Auth:      svc,
 		Tokens:    tokens,
+		OAuth:     oauthProviders(cfg),
 		Convos:    storage.NewConversations(pool),
 		Msgs:      storage.NewMessages(pool),
 		Usage:     storage.NewUsage(pool),
@@ -164,7 +166,6 @@ func main() {
 		Objects:   objects,
 	})
 	srv := &http.Server{Addr: ":" + cfg.Port, Handler: handler, ReadHeaderTimeout: 10 * time.Second}
-
 	errCh := make(chan error, 1)
 	go func() { errCh <- srv.ListenAndServe() }()
 	log.Info("listening", "port", cfg.Port)
@@ -181,4 +182,23 @@ func main() {
 		log.Error("shutdown", "err", err)
 	}
 	log.Info("stopped")
+}
+
+// oauthProviders builds the configured social-login providers in display
+// order. Unconfigured providers are omitted; with none set the server
+// offers password auth only.
+func oauthProviders(cfg config.Config) []*oauth.Provider {
+	callback := func(id string) string {
+		return cfg.OAuth.RedirectBase + "/api/auth/oauth/" + id + "/callback"
+	}
+	var providers []*oauth.Provider
+	if cfg.OAuth.Google.Enabled() {
+		providers = append(providers, oauth.Google(
+			cfg.OAuth.Google.ClientID, cfg.OAuth.Google.Secret, callback("google")))
+	}
+	if cfg.OAuth.GitHub.Enabled() {
+		providers = append(providers, oauth.GitHub(
+			cfg.OAuth.GitHub.ClientID, cfg.OAuth.GitHub.Secret, callback("github")))
+	}
+	return providers
 }
