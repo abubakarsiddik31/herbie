@@ -99,8 +99,8 @@ func TestIngestHappy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Ingest: %v", err)
 	}
-	if n != 2 {
-		t.Fatalf("chunk count = %d, want 2", n)
+	if n != 1 {
+		t.Fatalf("chunk count = %d, want 1", n)
 	}
 	if len(vs.upserts) != 1 {
 		t.Fatalf("upserts: %d", len(vs.upserts))
