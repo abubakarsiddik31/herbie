@@ -17,6 +17,7 @@ type Message struct {
 	Role           string
 	Content        string
 	Data           []byte // golem model.Message JSON (durable additive-only)
+	Sources        []byte // cited chunks as the sources SSE rows ([] when the run never searched)
 	InputTokens    int
 	OutputTokens   int
 	Requests       int
@@ -31,11 +32,14 @@ type Messages struct{ pool *pgxpool.Pool }
 func NewMessages(pool *pgxpool.Pool) *Messages { return &Messages{pool: pool} }
 
 func (m *Messages) Add(ctx context.Context, msg Message) error {
+	if len(msg.Sources) == 0 {
+		msg.Sources = []byte("[]")
+	}
 	_, err := m.pool.Exec(ctx,
 		`INSERT INTO messages
-		 (conversation_id, user_id, role, content, data, input_tokens, output_tokens, requests, cost_micro_usd, truncated, model)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
-		msg.ConversationID, msg.UserID, msg.Role, msg.Content, msg.Data,
+		 (conversation_id, user_id, role, content, data, sources, input_tokens, output_tokens, requests, cost_micro_usd, truncated, model)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+		msg.ConversationID, msg.UserID, msg.Role, msg.Content, msg.Data, msg.Sources,
 		msg.InputTokens, msg.OutputTokens, msg.Requests, msg.CostMicros, msg.Truncated, msg.Model)
 	if err != nil {
 		return fmt.Errorf("add message: %w", err)
@@ -43,20 +47,20 @@ func (m *Messages) Add(ctx context.Context, msg Message) error {
 	return nil
 }
 
-const messageColumns = `id, conversation_id::text, user_id::text, role, content, data,
+const messageColumns = `id, conversation_id::text, user_id::text, role, content, data, sources,
 		       input_tokens, output_tokens, requests, cost_micro_usd, truncated, model, created_at`
 
 func scanMessage(row pgx.Row) (Message, error) {
 	var msg Message
 	err := row.Scan(&msg.ID, &msg.ConversationID, &msg.UserID, &msg.Role, &msg.Content,
-		&msg.Data, &msg.InputTokens, &msg.OutputTokens, &msg.Requests, &msg.CostMicros,
+		&msg.Data, &msg.Sources, &msg.InputTokens, &msg.OutputTokens, &msg.Requests, &msg.CostMicros,
 		&msg.Truncated, &msg.Model, &msg.CreatedAt)
 	return msg, err
 }
 
 func (m *Messages) ForConversation(ctx context.Context, convID, userID string) ([]Message, error) {
 	rows, err := m.pool.Query(ctx,
-		`SELECT id, conversation_id::text, user_id::text, role, content, data,
+		`SELECT id, conversation_id::text, user_id::text, role, content, data, sources,
 		        input_tokens, output_tokens, requests, cost_micro_usd, truncated, model, created_at
 		 FROM messages WHERE conversation_id = $1 AND user_id = $2
 		 ORDER BY created_at, id`, convID, userID)
@@ -68,7 +72,7 @@ func (m *Messages) ForConversation(ctx context.Context, convID, userID string) (
 	for rows.Next() {
 		var msg Message
 		if err := rows.Scan(&msg.ID, &msg.ConversationID, &msg.UserID, &msg.Role, &msg.Content,
-			&msg.Data, &msg.InputTokens, &msg.OutputTokens, &msg.Requests, &msg.CostMicros,
+			&msg.Data, &msg.Sources, &msg.InputTokens, &msg.OutputTokens, &msg.Requests, &msg.CostMicros,
 			&msg.Truncated, &msg.Model, &msg.CreatedAt); err != nil {
 			return nil, err
 		}
@@ -80,7 +84,7 @@ func (m *Messages) ForConversation(ctx context.Context, convID, userID string) (
 // ByID loads one message row owned by userID.
 func (m *Messages) ByID(ctx context.Context, msgID, userID string) (Message, error) {
 	msg, err := scanMessage(m.pool.QueryRow(ctx,
-		`SELECT id, conversation_id::text, user_id::text, role, content, data,
+		`SELECT id, conversation_id::text, user_id::text, role, content, data, sources,
 		        input_tokens, output_tokens, requests, cost_micro_usd, truncated, model, created_at
 		 FROM messages WHERE id = $1 AND user_id = $2`, msgID, userID))
 	if err != nil {

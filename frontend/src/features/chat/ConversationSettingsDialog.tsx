@@ -9,6 +9,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import type { ConversationSettings, ModelsResponse } from "@/lib/types";
 
 interface Props {
@@ -27,12 +28,13 @@ const PROVIDER_LABEL: Record<string, string> = {
 };
 
 // ConversationSettingsDialog edits the per-conversation model, temperature,
-// and system prompt. For a not-yet-created chat the caller passes its draft
-// settings and applies them at create time.
+// system prompt, and document search. For a not-yet-created chat the caller
+// passes its draft settings and applies them at create time.
 export function ConversationSettingsDialog({ open, onOpenChange, models, settings, onApply, saving }: Props) {
   const [model, setModel] = useState(settings.model);
   const [temperature, setTemperature] = useState<number | null>(settings.temperature);
   const [systemPrompt, setSystemPrompt] = useState(settings.systemPrompt);
+  const [ragEnabled, setRagEnabled] = useState(settings.ragEnabled);
 
   // Re-seed the form each time the dialog opens so cancels never leak edits.
   useEffect(() => {
@@ -40,6 +42,7 @@ export function ConversationSettingsDialog({ open, onOpenChange, models, setting
       setModel(settings.model);
       setTemperature(settings.temperature);
       setSystemPrompt(settings.systemPrompt);
+      setRagEnabled(settings.ragEnabled);
     }
   }, [open, settings]);
 
@@ -122,6 +125,16 @@ export function ConversationSettingsDialog({ open, onOpenChange, models, setting
               className="max-h-40 min-h-18 resize-y rounded-md border border-input bg-transparent px-2.5 py-2 text-sm outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 field-sizing-content"
             />
           </div>
+
+          <div className="flex items-center justify-between gap-3">
+            <div className="grid gap-0.5">
+              <Label htmlFor="rag-switch">Search documents</Label>
+              <p className="text-muted-foreground text-xs">
+                Let the assistant retrieve from your uploaded documents in this chat.
+              </p>
+            </div>
+            <Switch id="rag-switch" checked={ragEnabled} onCheckedChange={setRagEnabled} />
+          </div>
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
@@ -133,6 +146,7 @@ export function ConversationSettingsDialog({ open, onOpenChange, models, setting
                 model: effectiveModel,
                 temperature,
                 systemPrompt: systemPrompt.trim(),
+                ragEnabled,
               })
             }
             disabled={saving}

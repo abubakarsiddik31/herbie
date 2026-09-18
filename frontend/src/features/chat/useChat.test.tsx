@@ -2,7 +2,7 @@ import { act } from "react";
 import { renderHook } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
-import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { useChat } from "./useChat";
 import { useAuth } from "@/stores/auth";
 
@@ -30,8 +30,10 @@ const server = setupServer(
   }),
 );
 
-beforeEach(() => {
+beforeAll(() => {
   server.listen({ onUnhandledRequest: "error" });
+});
+beforeEach(() => {
   useAuth.setState({ user: { id: "u", email: "a@b.co" }, accessToken: "stale" });
 });
 afterEach(() => server.resetHandlers());
@@ -46,5 +48,25 @@ describe("useChat send", () => {
     const assistant = result.current.messages.find((m) => m.role === "assistant");
     expect(assistant?.content).toBe("pong");
     expect(useAuth.getState().accessToken).toBe("fresh");
+  });
+
+  it("surfaces history compaction in the run trace", async () => {
+    server.use(
+      http.post("*/api/conversations/c1/messages", () =>
+        new HttpResponse(
+          sseBody([
+            'event: meta\ndata: {"type":"compacted"}\n\n',
+            'event: delta\ndata: {"text":"hi"}\n\n',
+            'event: done\ndata: {"messageId":"m1","inputTokens":1,"outputTokens":2,"requests":1,"costUsd":0.00001}\n\n',
+          ]),
+          { headers: { "Content-Type": "text/event-stream" } },
+        ),
+      ),
+    );
+    const { result } = renderHook(() => useChat());
+    await act(async () => {
+      await result.current.send("hi", "c1");
+    });
+    expect(result.current.trace).toContain("earlier history summarized");
   });
 });

@@ -99,7 +99,7 @@ func (s *Server) handleApprovals(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal", "could not load history")
 		return
 	}
-	tools, err := s.userTools(ctx, userID)
+	tools, err := s.userTools(ctx, userID, spec.RagEnabled)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal", "could not load tools")
 		return
@@ -112,7 +112,10 @@ func (s *Server) handleApprovals(w http.ResponseWriter, r *http.Request) {
 	}
 	var sources []rag.Scored
 	history := pausedRunHistory(msgs)
-	spec, history = s.maybeCompact(ctx, userID, convID, spec, history)
+	spec, history, compacted := s.maybeCompact(ctx, userID, convID, spec, history)
+	if compacted {
+		_ = sink.event("meta", map[string]any{"type": "compacted"})
+	}
 	outcome, err := s.deps.Agent.RunDeferred(ctx,
 		chat.Deps{UserID: userID, ConversationID: convID, Search: s.searchDeps(userID, convID, &sources)},
 		history, golem.DeferredResults{Approvals: resolutions},
@@ -129,7 +132,7 @@ func (s *Server) handleApprovals(w http.ResponseWriter, r *http.Request) {
 	for _, row := range msgs {
 		known[string(row.Data)] = true
 	}
-	idMap, err := s.persistRunMessages(ctx, userID, convID, spec.Model, outcome.Messages, outcome.Usage, outcome.Requests, false, known, 0)
+	idMap, err := s.persistRunMessages(ctx, userID, convID, spec.Model, outcome.Messages, outcome.Usage, outcome.Requests, false, known, 0, sourceJSON(sources))
 	if err != nil {
 		s.deps.Log.Error("persist resumed messages", "err", err)
 	}

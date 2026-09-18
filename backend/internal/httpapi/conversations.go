@@ -20,6 +20,7 @@ type conversationDTO struct {
 	Model        string   `json:"model"`
 	Temperature  *float64 `json:"temperature"`
 	SystemPrompt string   `json:"systemPrompt"`
+	RagEnabled   bool     `json:"ragEnabled"`
 	CreatedAt    string   `json:"createdAt"`
 	UpdatedAt    string   `json:"updatedAt"`
 }
@@ -27,7 +28,8 @@ type conversationDTO struct {
 func toConversationDTO(c storage.Conversation) conversationDTO {
 	return conversationDTO{
 		ID: c.ID, Title: c.Title, Model: c.Model, Temperature: c.Temperature, SystemPrompt: c.SystemPrompt,
-		CreatedAt: c.CreatedAt.UTC().Format(timeRFC3339), UpdatedAt: c.UpdatedAt.UTC().Format(timeRFC3339),
+		RagEnabled: c.RagEnabled,
+		CreatedAt:  c.CreatedAt.UTC().Format(timeRFC3339), UpdatedAt: c.UpdatedAt.UTC().Format(timeRFC3339),
 	}
 }
 
@@ -39,8 +41,8 @@ const maxSystemPromptChars = 4000
 // patch, validating the values against the server's model catalog. A nil
 // modelID leaves the stored model unchanged; an empty (but present) one
 // resets to the server default.
-func (s *Server) settingsPatch(modelID *string, temperature *float64, clearTemperature bool, systemPrompt *string) (storage.ConversationPatch, error) {
-	patch := storage.ConversationPatch{Temperature: temperature, ClearTemperature: clearTemperature, SystemPrompt: systemPrompt}
+func (s *Server) settingsPatch(modelID *string, temperature *float64, clearTemperature bool, systemPrompt *string, ragEnabled *bool) (storage.ConversationPatch, error) {
+	patch := storage.ConversationPatch{Temperature: temperature, ClearTemperature: clearTemperature, SystemPrompt: systemPrompt, RagEnabled: ragEnabled}
 	if modelID != nil {
 		if *modelID != "" {
 			spec, ok := chat.FindModel(*modelID)
@@ -86,12 +88,13 @@ func (s *Server) handleCreateConversation(w http.ResponseWriter, r *http.Request
 		Model            string   `json:"model"`
 		Temperature      *float64 `json:"temperature"`
 		SystemPrompt     string   `json:"systemPrompt"`
+		RagEnabled       *bool    `json:"ragEnabled"`
 		ClearTemperature bool     `json:"-"`
 	}
 	if r.Body != nil {
 		_ = json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req) // optional body
 	}
-	patch, err := s.settingsPatch(&req.Model, req.Temperature, req.ClearTemperature, &req.SystemPrompt)
+	patch, err := s.settingsPatch(&req.Model, req.Temperature, req.ClearTemperature, &req.SystemPrompt, req.RagEnabled)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "validation_error", err.Error())
 		return
@@ -127,13 +130,14 @@ func (s *Server) handleGetConversation(w http.ResponseWriter, r *http.Request) {
 		Model        string  `json:"model"`
 	}
 	type msgDTO struct {
-		ID        string     `json:"id"`
-		Role      string     `json:"role"`
-		Content   string     `json:"content"`
-		Truncated bool       `json:"truncated"`
-		CreatedAt string     `json:"createdAt"`
-		Usage     *usageDTO  `json:"usage,omitempty"`
-		Images    []imageDTO `json:"images,omitempty"`
+		ID        string           `json:"id"`
+		Role      string           `json:"role"`
+		Content   string           `json:"content"`
+		Truncated bool             `json:"truncated"`
+		CreatedAt string           `json:"createdAt"`
+		Usage     *usageDTO        `json:"usage,omitempty"`
+		Images    []imageDTO       `json:"images,omitempty"`
+		Sources   *json.RawMessage `json:"sources,omitempty"`
 	}
 	out := make([]msgDTO, 0, len(msgs))
 	for _, m := range msgs {
@@ -154,10 +158,24 @@ func (s *Server) handleGetConversation(w http.ResponseWriter, r *http.Request) {
 		out = append(out, msgDTO{
 			ID: m.ID, Role: m.Role, Content: m.Content, Truncated: m.Truncated,
 			CreatedAt: m.CreatedAt.UTC().Format(timeRFC3339), Usage: usage,
-			Images: imagesOf(m.Data),
+			Images: imagesOf(m.Data), Sources: storedSources(m.Sources),
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"conversation": toConversationDTO(conv), "messages": out})
+}
+
+// storedSources returns the persisted citation rows for a history message,
+// nil when the run never searched (empty arrays stay out of the payload).
+func storedSources(raw []byte) *json.RawMessage {
+	if len(raw) == 0 || string(raw) == "[]" || string(raw) == "null" {
+		return nil
+	}
+	var v []map[string]any
+	if json.Unmarshal(raw, &v) != nil || len(v) == 0 {
+		return nil
+	}
+	out := json.RawMessage(raw)
+	return &out
 }
 
 // imageDTO is one stored image attachment, served as a data URL.
@@ -195,6 +213,7 @@ func (s *Server) handlePatchConversation(w http.ResponseWriter, r *http.Request)
 		Model            *string  `json:"model"`
 		Temperature      *float64 `json:"temperature"`
 		SystemPrompt     *string  `json:"systemPrompt"`
+		RagEnabled       *bool    `json:"ragEnabled"`
 		ClearTemperature bool     `json:"clearTemperature"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
@@ -205,7 +224,7 @@ func (s *Server) handlePatchConversation(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusBadRequest, "bad_request", "title cannot be empty")
 		return
 	}
-	patch, err := s.settingsPatch(req.Model, req.Temperature, req.ClearTemperature, req.SystemPrompt)
+	patch, err := s.settingsPatch(req.Model, req.Temperature, req.ClearTemperature, req.SystemPrompt, req.RagEnabled)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "validation_error", err.Error())
 		return
