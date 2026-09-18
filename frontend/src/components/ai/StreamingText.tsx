@@ -27,7 +27,7 @@ export function StreamingText({
         // default protocol sanitization.
         urlTransform={(url) => (url.startsWith("cite:") ? url : defaultUrlTransform(url))}
         components={{
-          pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
+          pre: ({ children }) => <CodeBlock streaming={streaming}>{children}</CodeBlock>,
           a: ({ href, children }) => {
             const cite = citations && href?.startsWith("cite:") ? parseInt(href.slice(5), 10) : NaN;
             if (citations && Number.isInteger(cite)) {
