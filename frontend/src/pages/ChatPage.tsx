@@ -30,6 +30,7 @@ import {
   X,
 } from "lucide-react";
 import { ApiError, apiFetch } from "@/lib/api";
+import { useDebouncedValue } from "@/lib/useDebouncedValue";
 import { MAX_IMAGES_PER_MESSAGE, readImageFiles, type PendingImage } from "@/lib/images";
 import { cn, fmtTokens } from "@/lib/utils";
 import type { ChatMessage, Conversation, ConversationSettings } from "@/lib/types";
@@ -137,6 +138,7 @@ export function ChatPage() {
   const [renaming, setRenaming] = useState<Conversation | null>(null);
   const [renameTitle, setRenameTitle] = useState("");
   const [filter, setFilter] = useState("");
+  const debouncedFilter = useDebouncedValue(filter);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   // The user message currently being edited inline (null = none).
@@ -162,7 +164,7 @@ export function ChatPage() {
     void queryClient.invalidateQueries({ queryKey: ["conversations"] });
   });
 
-  const { data: conversations, isLoading: conversationsLoading } = useConversations();
+  const { data: conversations, isLoading: conversationsLoading } = useConversations(debouncedFilter.trim());
   const { data: tools } = useTools();
   const { data: models } = useModels();
   const createConversation = useCreateConversation();
@@ -370,9 +372,10 @@ export function ChatPage() {
     navigate("/login", { replace: true });
   }
 
-  const activeConversation = conversations?.find((c) => c.id === selectedId);
+  const activeConversation =
+    conversations?.find((c) => c.id === selectedId) ??
+    (detail?.conversation.id === selectedId ? detail.conversation : undefined);
   const running = status === "running";
-  const showFilters = (conversations?.length ?? 0) >= 6;
 
   // The settings the composer's model chip shows and the dialog edits: the
   // stored conversation's when one is open, the draft otherwise.
@@ -408,15 +411,12 @@ export function ChatPage() {
     });
   }
 
-  const visibleConversations = (conversations ?? []).filter((c) =>
-    (c.title || "Untitled").toLowerCase().includes(filter.trim().toLowerCase()),
-  );
   const groups = GROUP_ORDER.map((label) => ({
     label,
-    items: visibleConversations.filter((c) => groupKey(c.updatedAt) === label),
+    items: (conversations ?? []).filter((c) => groupKey(c.updatedAt) === label),
   })).filter((g) => g.items.length > 0);
   const nothingMatches =
-    !conversationsLoading && visibleConversations.length === 0 && (conversations?.length ?? 0) > 0;
+    !conversationsLoading && (conversations?.length ?? 0) === 0 && debouncedFilter.trim() !== "";
 
   return (
     <div className="flex h-svh bg-background">
@@ -456,9 +456,8 @@ export function ChatPage() {
           </Button>
         </div>
 
-        {showFilters && (
-          <div className="px-3 pb-2">
-            <div className="relative">
+        <div className="px-3 pb-2">
+          <div className="relative">
               <Search className="absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
               <input
                 value={filter}
@@ -467,9 +466,8 @@ export function ChatPage() {
                 aria-label="Search conversations"
                 className="h-8 w-full rounded-md border border-input bg-transparent pr-2 pl-7 text-xs outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
               />
-            </div>
           </div>
-        )}
+        </div>
 
         <ScrollArea className="min-h-0 flex-1">
           <nav className="space-y-0.5 px-2 pb-3">
@@ -480,7 +478,7 @@ export function ChatPage() {
                 ))}
               </div>
             )}
-            {!conversationsLoading && (conversations?.length ?? 0) === 0 && (
+            {!conversationsLoading && (conversations?.length ?? 0) === 0 && debouncedFilter.trim() === "" && (
               <p className="px-3 py-6 text-muted-foreground text-sm">
                 No conversations yet. Send a message to start one.
               </p>

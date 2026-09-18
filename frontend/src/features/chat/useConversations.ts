@@ -2,10 +2,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/api";
 import type { Conversation, ConversationSettings } from "@/lib/types";
 
-export function useConversations() {
+export function useConversations(search = "") {
   return useQuery({
-    queryKey: ["conversations"],
-    queryFn: () => apiFetch<Conversation[]>("/api/conversations"),
+    queryKey: ["conversations", search],
+    queryFn: () =>
+      apiFetch<Conversation[]>(search ? `/api/conversations?q=${encodeURIComponent(search)}` : "/api/conversations"),
   });
 }
 
