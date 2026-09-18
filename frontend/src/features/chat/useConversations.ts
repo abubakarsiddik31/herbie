@@ -14,7 +14,7 @@ export function useCreateConversation() {
   return useMutation({
     mutationFn: (settings?: ConversationSettings) => {
       const body = settings
-        ? { model: settings.model, temperature: settings.temperature ?? undefined, systemPrompt: settings.systemPrompt }
+        ? { model: settings.model, temperature: settings.temperature ?? undefined, systemPrompt: settings.systemPrompt, ragEnabled: settings.ragEnabled }
         : {};
       return apiFetch<Conversation>("/api/conversations", { method: "POST", json: body });
     },
@@ -31,7 +31,7 @@ export function useUpdateConversationSettings(id: string | null) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (settings: ConversationSettings) => {
-      const body: Record<string, unknown> = { model: settings.model, systemPrompt: settings.systemPrompt };
+      const body: Record<string, unknown> = { model: settings.model, systemPrompt: settings.systemPrompt, ragEnabled: settings.ragEnabled };
       if (settings.temperature === null) body.clearTemperature = true;
       else body.temperature = settings.temperature;
       return apiFetch<void>(`/api/conversations/${id}`, { method: "PATCH", json: body });

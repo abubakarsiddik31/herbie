@@ -171,7 +171,7 @@ func (s *Server) runTurn(ctx context.Context, userID, convID string, spec chat.R
 	// Tools load before the SSE sink goes out so failures can still be
 	// plain HTTP errors. One broken config skips that tool only (logged by
 	// DecodeConfigs's returned error).
-	tools, err := s.userTools(ctx, userID)
+	tools, err := s.userTools(ctx, userID, spec.RagEnabled)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal", "could not load tools")
 		return
@@ -278,7 +278,7 @@ func sourceRows(sources []rag.Scored) []map[string]any {
 // configured key), an empty system prompt to the built-in one (applied at
 // agent build), and nil temperature to the provider default.
 func (s *Server) runSpecFor(conv storage.Conversation) chat.RunSpec {
-	spec := chat.RunSpec{Model: conv.Model, Temperature: conv.Temperature, SystemPrompt: conv.SystemPrompt}
+	spec := chat.RunSpec{Model: conv.Model, Temperature: conv.Temperature, SystemPrompt: conv.SystemPrompt, RagEnabled: conv.RagEnabled}
 	if spec.Model == "" {
 		spec.Model = chat.DefaultModel(s.deps.ModelKeys).ID
 	}
@@ -286,10 +286,11 @@ func (s *Server) runSpecFor(conv storage.Conversation) chat.RunSpec {
 }
 
 // userTools builds the caller's enabled golem tools plus the built-in
-// document search when RAG is enabled. A nil Tools store (tests without
-// the tools feature) means user tools only. Every run path (send, edit,
-// regenerate, approvals resume) loads tools through here.
-func (s *Server) userTools(ctx context.Context, userID string) ([]tool.Tool[chat.Deps], error) {
+// document search when RAG is enabled globally and for this conversation.
+// A nil Tools store (tests without the tools feature) means user tools
+// only. Every run path (send, edit, regenerate, approvals resume) loads
+// tools through here.
+func (s *Server) userTools(ctx context.Context, userID string, ragEnabled bool) ([]tool.Tool[chat.Deps], error) {
 	var tools []tool.Tool[chat.Deps]
 	if s.deps.Tools != nil {
 		rows, err := s.deps.Tools.ListEnabled(ctx, userID)
@@ -305,7 +306,7 @@ func (s *Server) userTools(ctx context.Context, userID string) ([]tool.Tool[chat
 			return nil, fmt.Errorf("build tools: %w", err)
 		}
 	}
-	if s.deps.RagSearch != nil {
+	if s.deps.RagSearch != nil && ragEnabled {
 		tools = append(tools, chat.SearchTool())
 	}
 	return tools, nil

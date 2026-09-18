@@ -96,7 +96,7 @@ func newFakeConvos(msgs *fakeMsgs) *fakeConvos {
 var _ ConvoStore = (*fakeConvos)(nil)
 
 func (f *fakeConvos) Create(_ context.Context, userID, title string, patch storage.ConversationPatch) (storage.Conversation, error) {
-	conv := storage.Conversation{ID: fmt.Sprintf("c-%d", len(f.convs)+1), UserID: userID, Title: title}
+	conv := storage.Conversation{ID: fmt.Sprintf("c-%d", len(f.convs)+1), UserID: userID, Title: title, RagEnabled: true}
 	if patch.Model != nil {
 		conv.Model = *patch.Model
 	}
@@ -106,6 +106,9 @@ func (f *fakeConvos) Create(_ context.Context, userID, title string, patch stora
 	}
 	if patch.SystemPrompt != nil {
 		conv.SystemPrompt = *patch.SystemPrompt
+	}
+	if patch.RagEnabled != nil {
+		conv.RagEnabled = *patch.RagEnabled
 	}
 	f.convs[conv.ID] = conv
 	return conv, nil
@@ -142,6 +145,9 @@ func (f *fakeConvos) SetSettings(_ context.Context, id, _ string, patch storage.
 	}
 	if patch.SystemPrompt != nil {
 		conv.SystemPrompt = *patch.SystemPrompt
+	}
+	if patch.RagEnabled != nil {
+		conv.RagEnabled = *patch.RagEnabled
 	}
 	f.convs[id] = conv
 	return nil

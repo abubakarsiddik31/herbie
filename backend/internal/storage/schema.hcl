@@ -122,6 +122,11 @@ table "conversations" {
     null    = false
     default = ""
   }
+  column "rag_enabled" {
+    type    = boolean
+    null    = false
+    default = true
+  }
   column "created_at" {
     type    = timestamptz
     null    = false

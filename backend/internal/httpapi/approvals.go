@@ -99,7 +99,7 @@ func (s *Server) handleApprovals(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal", "could not load history")
 		return
 	}
-	tools, err := s.userTools(ctx, userID)
+	tools, err := s.userTools(ctx, userID, spec.RagEnabled)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal", "could not load tools")
 		return

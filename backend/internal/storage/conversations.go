@@ -19,6 +19,7 @@ type Conversation struct {
 	// Temperature nil = provider default.
 	Temperature  *float64
 	SystemPrompt string // "" = built-in prompt
+	RagEnabled   bool   // per-conversation document search (default true)
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 }
@@ -31,6 +32,7 @@ type ConversationPatch struct {
 	Model            *string
 	Temperature      *float64
 	SystemPrompt     *string
+	RagEnabled       *bool
 	ClearTemperature bool
 }
 
@@ -38,20 +40,20 @@ type Conversations struct{ pool *pgxpool.Pool }
 
 func NewConversations(pool *pgxpool.Pool) *Conversations { return &Conversations{pool: pool} }
 
-const conversationColumns = `id, user_id::text, title, model, temperature, system_prompt, created_at, updated_at`
+const conversationColumns = `id, user_id::text, title, model, temperature, system_prompt, rag_enabled, created_at, updated_at`
 
 func scanConversation(row pgx.Row) (Conversation, error) {
 	var conv Conversation
 	err := row.Scan(&conv.ID, &conv.UserID, &conv.Title, &conv.Model, &conv.Temperature,
-		&conv.SystemPrompt, &conv.CreatedAt, &conv.UpdatedAt)
+		&conv.SystemPrompt, &conv.RagEnabled, &conv.CreatedAt, &conv.UpdatedAt)
 	return conv, err
 }
 
 func (c *Conversations) Create(ctx context.Context, userID, title string, patch ConversationPatch) (Conversation, error) {
 	row := c.pool.QueryRow(ctx,
-		`INSERT INTO conversations (user_id, title, model, temperature, system_prompt) VALUES ($1, $2, $3, $4, $5)
+		`INSERT INTO conversations (user_id, title, model, temperature, system_prompt, rag_enabled) VALUES ($1, $2, $3, $4, $5, $6)
 		 RETURNING `+conversationColumns,
-		userID, title, derefString(patch.Model), patch.Temperature, derefString(patch.SystemPrompt))
+		userID, title, derefString(patch.Model), patch.Temperature, derefString(patch.SystemPrompt), derefBool(patch.RagEnabled, true))
 	conv, err := scanConversation(row)
 	if err != nil {
 		return Conversation{}, fmt.Errorf("create conversation: %w", err)
@@ -114,6 +116,10 @@ func (c *Conversations) SetSettings(ctx context.Context, id, userID string, patc
 		args = append(args, *patch.SystemPrompt)
 		sets = append(sets, fmt.Sprintf("system_prompt = $%d", len(args)))
 	}
+	if patch.RagEnabled != nil {
+		args = append(args, *patch.RagEnabled)
+		sets = append(sets, fmt.Sprintf("rag_enabled = $%d", len(args)))
+	}
 	if len(sets) == 0 {
 		return nil
 	}
@@ -151,4 +157,11 @@ func derefString(s *string) string {
 		return ""
 	}
 	return *s
+}
+
+func derefBool(b *bool, def bool) bool {
+	if b == nil {
+		return def
+	}
+	return *b
 }

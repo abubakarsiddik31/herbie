@@ -20,6 +20,7 @@ type conversationDTO struct {
 	Model        string   `json:"model"`
 	Temperature  *float64 `json:"temperature"`
 	SystemPrompt string   `json:"systemPrompt"`
+	RagEnabled   bool     `json:"ragEnabled"`
 	CreatedAt    string   `json:"createdAt"`
 	UpdatedAt    string   `json:"updatedAt"`
 }
@@ -27,7 +28,8 @@ type conversationDTO struct {
 func toConversationDTO(c storage.Conversation) conversationDTO {
 	return conversationDTO{
 		ID: c.ID, Title: c.Title, Model: c.Model, Temperature: c.Temperature, SystemPrompt: c.SystemPrompt,
-		CreatedAt: c.CreatedAt.UTC().Format(timeRFC3339), UpdatedAt: c.UpdatedAt.UTC().Format(timeRFC3339),
+		RagEnabled: c.RagEnabled,
+		CreatedAt:  c.CreatedAt.UTC().Format(timeRFC3339), UpdatedAt: c.UpdatedAt.UTC().Format(timeRFC3339),
 	}
 }
 
@@ -39,8 +41,8 @@ const maxSystemPromptChars = 4000
 // patch, validating the values against the server's model catalog. A nil
 // modelID leaves the stored model unchanged; an empty (but present) one
 // resets to the server default.
-func (s *Server) settingsPatch(modelID *string, temperature *float64, clearTemperature bool, systemPrompt *string) (storage.ConversationPatch, error) {
-	patch := storage.ConversationPatch{Temperature: temperature, ClearTemperature: clearTemperature, SystemPrompt: systemPrompt}
+func (s *Server) settingsPatch(modelID *string, temperature *float64, clearTemperature bool, systemPrompt *string, ragEnabled *bool) (storage.ConversationPatch, error) {
+	patch := storage.ConversationPatch{Temperature: temperature, ClearTemperature: clearTemperature, SystemPrompt: systemPrompt, RagEnabled: ragEnabled}
 	if modelID != nil {
 		if *modelID != "" {
 			spec, ok := chat.FindModel(*modelID)
@@ -86,12 +88,13 @@ func (s *Server) handleCreateConversation(w http.ResponseWriter, r *http.Request
 		Model            string   `json:"model"`
 		Temperature      *float64 `json:"temperature"`
 		SystemPrompt     string   `json:"systemPrompt"`
+		RagEnabled       *bool    `json:"ragEnabled"`
 		ClearTemperature bool     `json:"-"`
 	}
 	if r.Body != nil {
 		_ = json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req) // optional body
 	}
-	patch, err := s.settingsPatch(&req.Model, req.Temperature, req.ClearTemperature, &req.SystemPrompt)
+	patch, err := s.settingsPatch(&req.Model, req.Temperature, req.ClearTemperature, &req.SystemPrompt, req.RagEnabled)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "validation_error", err.Error())
 		return
@@ -210,6 +213,7 @@ func (s *Server) handlePatchConversation(w http.ResponseWriter, r *http.Request)
 		Model            *string  `json:"model"`
 		Temperature      *float64 `json:"temperature"`
 		SystemPrompt     *string  `json:"systemPrompt"`
+		RagEnabled       *bool    `json:"ragEnabled"`
 		ClearTemperature bool     `json:"clearTemperature"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
@@ -220,7 +224,7 @@ func (s *Server) handlePatchConversation(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusBadRequest, "bad_request", "title cannot be empty")
 		return
 	}
-	patch, err := s.settingsPatch(req.Model, req.Temperature, req.ClearTemperature, req.SystemPrompt)
+	patch, err := s.settingsPatch(req.Model, req.Temperature, req.ClearTemperature, req.SystemPrompt, req.RagEnabled)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "validation_error", err.Error())
 		return

@@ -18,6 +18,9 @@ type RunSpec struct {
 	Model        string
 	Temperature  *float64
 	SystemPrompt string
+	// RagEnabled gates the built-in document search for this run; the
+	// citation guidance joins the prompt exactly when the tool registers.
+	RagEnabled bool
 }
 
 // clientFactory builds a streaming client for one (provider, model,

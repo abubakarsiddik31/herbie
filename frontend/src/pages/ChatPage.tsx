@@ -141,6 +141,7 @@ export function ChatPage() {
     model: "",
     temperature: null,
     systemPrompt: "",
+    ragEnabled: true,
   });
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const seededRef = useRef<string | null>(null);
@@ -359,6 +360,7 @@ export function ChatPage() {
         model: activeConversation.model || models?.default || "",
         temperature: activeConversation.temperature,
         systemPrompt: activeConversation.systemPrompt,
+        ragEnabled: activeConversation.ragEnabled,
       }
     : draftSettings;
 
