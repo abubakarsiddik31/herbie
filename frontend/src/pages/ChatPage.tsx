@@ -6,6 +6,7 @@ import {
   BookOpen,
   Check,
   Copy,
+  Download,
   Flame,
   Gauge,
   Globe,
@@ -53,6 +54,7 @@ import { RunLoader } from "@/components/ai/RunLoader";
 import { StreamingText } from "@/components/ai/StreamingText";
 import { ThinkingTrace } from "@/components/ai/ThinkingTrace";
 import { ConversationSettingsDialog } from "@/features/chat/ConversationSettingsDialog";
+import { conversationFilename, downloadMarkdown, toMarkdown } from "@/features/chat/exportMarkdown";
 import { ShareDialog } from "@/features/chat/ShareDialog";
 import { SourceCards, type CiteJump } from "@/features/chat/SourceCards";
 import { useChat } from "@/features/chat/useChat";
@@ -373,6 +375,12 @@ export function ChatPage() {
       }
     : draftSettings;
 
+  function exportConversation() {
+    if (!activeConversation || messages.length === 0) return;
+    downloadMarkdown(conversationFilename(activeConversation.title), toMarkdown(activeConversation, messages));
+    toast.success("Conversation exported");
+  }
+
   function modelLabel(modelID: string): string {
     if (!modelID) return models?.models.find((m) => m.id === models.default)?.label ?? "Model";
     return models?.models.find((m) => m.id === modelID)?.label ?? modelID;
@@ -569,6 +577,16 @@ export function ChatPage() {
             <Link to="/usage">
               <Gauge /> Usage
             </Link>
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label="Export conversation"
+            title="Export conversation as Markdown"
+            disabled={!activeConversation || messages.length === 0}
+            onClick={exportConversation}
+          >
+            <Download />
           </Button>
         </header>
 
