@@ -93,18 +93,33 @@ const retrievalGuidance = `
 You have a search_documents tool over the user's uploaded files. Drive retrieval yourself: start with a focused query; if results look thin or off-topic, call again with refined queries or narrow documentIds to the promising files. Never answer from documents you have not seen in a tool result.
 Citation discipline (hard rules): cite EVERY claim that comes from documents with its bracket number, e.g. [1]; cite ONLY bracket numbers shown in a tool result — numbers restart at 1 on every call, never invent or carry numbers across calls; if the evidence does not support an answer, say what is missing instead of guessing.`
 
+const webSearchGuidance = `
+
+You have a web_search tool to search the live web. Call it whenever the user asks about current events, breaking news, live data, or facts not present in your knowledge. Cite web sources with their titles and URLs e.g. [Title](URL) in your answer.`
+
 // promptFor resolves the run's system prompt: the conversation's prompt,
-// else the built-in one, plus citation rules and retrieval guidance when
-// document search is registered.
+// else the built-in one, plus citation rules, retrieval guidance, or web search
+// guidance when those tools are registered.
 func promptFor(spec RunSpec, tools []tool.Tool[Deps]) string {
 	prompt := spec.SystemPrompt
 	if prompt == "" {
 		prompt = systemPrompt
 	}
+	hasDocSearch := false
+	hasWebSearch := false
 	for _, t := range tools {
 		if t.Name == SearchToolName {
-			return prompt + citationRules + retrievalGuidance
+			hasDocSearch = true
 		}
+		if t.Name == WebSearchToolName {
+			hasWebSearch = true
+		}
+	}
+	if hasDocSearch {
+		prompt += citationRules + retrievalGuidance
+	}
+	if hasWebSearch {
+		prompt += webSearchGuidance
 	}
 	return prompt
 }

@@ -106,6 +106,15 @@ stored server-side, masked as `••••` in the API, and never sent to the m
 `Ask before running` gates a tool behind golem's deferred-tools flow: the chat
 pauses, an approval card appears, and Approve/Deny resumes the run.
 
+### Built-in web search
+
+In addition to custom tools, the server bundles a built-in `web_search` tool
+powered by Tavily or Brave Search. Set `TAVILY_API_KEY=...` or `BRAVE_API_KEY=...`
+in `.env`. When configured, the model can search the public web for real-time facts
+and recent developments; searches trigger an approval card by default
+(`WEB_SEARCH_REQUIRE_APPROVAL=true`), and the answer cites web sources with
+markdown links. When unset, web search remains disabled.
+
 Execution is guarded and graceful: DNS-level SSRF block of loopback/private/
 link-local hosts (`TOOL_ALLOW_PRIVATE_HOSTS=true` disables the guard for
 dev), request timeout and size caps (`TOOL_HTTP_TIMEOUT`, `TOOL_HTTP_MAX_BYTES`,

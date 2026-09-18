@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/abubakarsiddik31/golem-chatbot/internal/websearch"
 )
 
 // Config carries every runtime setting. Values come from the environment;
@@ -43,6 +45,11 @@ type Config struct {
 	// active only when both its client ID and secret are set; the login
 	// UI hides providers that are not configured.
 	OAuth OAuthConfig
+
+	// WebSearch configures live web search (Tavily or Brave). When an API key
+	// is provided, the built-in web_search tool is registered.
+	WebSearch                websearch.Config
+	WebSearchRequireApproval bool
 }
 
 type RAGConfig struct {
@@ -171,6 +178,30 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+
+	wsProvider := strings.ToLower(env("WEB_SEARCH_PROVIDER", ""))
+	wsKey := os.Getenv("WEB_SEARCH_API_KEY")
+	tavilyKey := os.Getenv("TAVILY_API_KEY")
+	braveKey := os.Getenv("BRAVE_API_KEY")
+	if tavilyKey != "" && wsKey == "" {
+		wsKey = tavilyKey
+		if wsProvider == "" {
+			wsProvider = "tavily"
+		}
+	} else if braveKey != "" && wsKey == "" {
+		wsKey = braveKey
+		if wsProvider == "" {
+			wsProvider = "brave"
+		}
+	}
+	if wsProvider == "" {
+		wsProvider = "tavily"
+	}
+	wsTimeout, err := envInt("WEB_SEARCH_TIMEOUT", 15)
+	if err != nil {
+		return Config{}, err
+	}
+
 	cfg := Config{
 		Port:             env("APP_PORT", "8080"),
 		DatabaseURL:      os.Getenv("DATABASE_URL"),
@@ -197,6 +228,14 @@ func Load() (Config, error) {
 			},
 			RedirectBase: os.Getenv("OAUTH_REDIRECT_BASE"),
 		},
+
+		WebSearch: websearch.Config{
+			Provider: wsProvider,
+			APIKey:   wsKey,
+			BaseURL:  os.Getenv("WEB_SEARCH_BASE_URL"),
+			Timeout:  time.Duration(wsTimeout) * time.Second,
+		},
+		WebSearchRequireApproval: envBool("WEB_SEARCH_REQUIRE_APPROVAL", true),
 
 		ToolHTTPTimeout:       time.Duration(toolTimeout) * time.Second,
 		ToolHTTPMaxBytes:      envInt64("TOOL_HTTP_MAX_BYTES", 1<<20),
