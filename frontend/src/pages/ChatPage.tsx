@@ -10,6 +10,7 @@ import {
   Flame,
   Gauge,
   Globe,
+  HelpCircle,
   LogOut,
   Menu,
   Mic,
@@ -55,9 +56,11 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 import { RunLoader } from "@/components/ai/RunLoader";
 import { StreamingText } from "@/components/ai/StreamingText";
 import { ThinkingTrace } from "@/components/ai/ThinkingTrace";
+import { CommandPalette } from "@/features/chat/CommandPalette";
 import { ConversationSettingsDialog } from "@/features/chat/ConversationSettingsDialog";
 import { conversationFilename, downloadMarkdown, toMarkdown } from "@/features/chat/exportMarkdown";
 import { ShareDialog } from "@/features/chat/ShareDialog";
+import { ShortcutsDialog } from "@/features/chat/ShortcutsDialog";
 import { SourceCards, type CiteJump } from "@/features/chat/SourceCards";
 import { useChat } from "@/features/chat/useChat";
 import { useModels } from "@/features/chat/useModels";
@@ -142,6 +145,9 @@ export function ChatPage() {
   const debouncedFilter = useDebouncedValue(filter);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   // The user message currently being edited inline (null = none).
   const [editing, setEditing] = useState<{ id: string; draft: string } | null>(null);
   // Images picked for the next message (cleared on send).
@@ -412,6 +418,65 @@ export function ChatPage() {
     });
   }
 
+  const startNewChatRef = useRef(startNewChat);
+  const regenerateLastRef = useRef(regenerateLast);
+  const stopRef = useRef(stop);
+  const runningRef = useRef(running);
+
+  useEffect(() => {
+    startNewChatRef.current = startNewChat;
+    regenerateLastRef.current = regenerateLast;
+    stopRef.current = stop;
+    runningRef.current = running;
+  });
+
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setPaletteOpen((o) => !o);
+        return;
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key === "/") {
+        e.preventDefault();
+        setShortcutsOpen((o) => !o);
+        return;
+      }
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === "o") {
+        e.preventDefault();
+        startNewChatRef.current();
+        return;
+      }
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === "r") {
+        e.preventDefault();
+        regenerateLastRef.current();
+        return;
+      }
+      if (e.key === "Escape" && runningRef.current) {
+        stopRef.current();
+        return;
+      }
+
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName;
+      const isEditable = target?.isContentEditable;
+      if (tag === "INPUT" || tag === "TEXTAREA" || isEditable) {
+        return;
+      }
+
+      if (e.key === "?") {
+        e.preventDefault();
+        setShortcutsOpen(true);
+      } else if (e.key === "/") {
+        e.preventDefault();
+        textareaRef.current?.focus();
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
   const groups = GROUP_ORDER.map((label) => ({
     label,
     items: (conversations ?? []).filter((c) => groupKey(c.updatedAt) === label),
@@ -601,6 +666,15 @@ export function ChatPage() {
             onClick={exportConversation}
           >
             <Download />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label="Keyboard shortcuts"
+            title="Keyboard shortcuts (?)"
+            onClick={() => setShortcutsOpen(true)}
+          >
+            <HelpCircle />
           </Button>
         </header>
 
@@ -881,6 +955,7 @@ export function ChatPage() {
                 <Paperclip />
               </Button>
               <textarea
+                ref={textareaRef}
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={(e) => {
@@ -1009,6 +1084,20 @@ export function ChatPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <CommandPalette
+        open={paletteOpen}
+        onOpenChange={setPaletteOpen}
+        conversations={conversations}
+        activeConversation={activeConversation}
+        onNewChat={startNewChat}
+        onExport={exportConversation}
+        onShare={() => activeConversation && setSharing(activeConversation)}
+        onOpenSettings={() => setSettingsOpen(true)}
+        onOpenShortcuts={() => setShortcutsOpen(true)}
+      />
+
+      <ShortcutsDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
     </div>
   );
 }
