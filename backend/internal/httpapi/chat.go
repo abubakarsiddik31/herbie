@@ -380,6 +380,14 @@ func (s *Server) userTools(ctx context.Context, userID string, ragEnabled bool) 
 	if s.deps.Memories != nil {
 		tools = append(tools, chat.RememberTool())
 	}
+	if s.deps.Workflows != nil {
+		wfTools, err := s.workflowTools(ctx, userID)
+		if err != nil {
+			s.deps.Log.Error("skip broken workflow tools", "err", err)
+		} else {
+			tools = append(tools, wfTools...)
+		}
+	}
 	return tools, nil
 }
 

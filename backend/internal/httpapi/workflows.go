@@ -9,11 +9,13 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/abubakarsiddik31/golem-chatbot/internal/chat"
 	"github.com/abubakarsiddik31/golem-chatbot/internal/storage"
 	"github.com/abubakarsiddik31/golem-chatbot/internal/workflow"
 	"github.com/abubakarsiddik31/golem/model"
+	"github.com/abubakarsiddik31/golem/tool"
 	"github.com/google/uuid"
 )
 
@@ -749,4 +751,105 @@ func (s *Server) handlePublicWebhook(w http.ResponseWriter, r *http.Request) {
 		"output":     res.Output,
 		"durationMs": res.DurationMs,
 	})
+}
+
+func (s *Server) workflowTools(ctx context.Context, userID string) ([]tool.Tool[chat.Deps], error) {
+	if s.deps.Workflows == nil {
+		return nil, nil
+	}
+	activeFlows, err := s.deps.Workflows.ListActiveTools(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("list active workflow tools: %w", err)
+	}
+	var tools []tool.Tool[chat.Deps]
+	for _, wf := range activeFlows {
+		toolName := wf.ToolName
+		if toolName == "" {
+			toolName = "workflow_" + strings.ToLower(strings.ReplaceAll(wf.Name, " ", "_"))
+		}
+		toolName = sanitizeToolName(toolName)
+		toolDesc := wf.ToolDescription
+		if toolDesc == "" {
+			toolDesc = wf.Description
+		}
+		if toolDesc == "" {
+			toolDesc = "Executes the " + wf.Name + " automated workflow."
+		}
+
+		flow := wf
+		t, terr := tool.New(tool.Tool[chat.Deps]{
+			Name:        toolName,
+			Description: toolDesc,
+			Schema: json.RawMessage(`{
+				"type": "object",
+				"properties": {
+					"input": {"type": "string", "description": "Input parameters or prompt for the workflow"}
+				}
+			}`),
+			Timeout: 60 * time.Second,
+			Exec: func(ctx context.Context, _ chat.Deps, args json.RawMessage) (tool.Result, error) {
+				nodes, edges, perr := workflow.ParseWorkflowGraph(flow.Nodes, flow.Edges)
+				if perr != nil {
+					return tool.Text("Workflow error: " + perr.Error()), nil
+				}
+				var parsedArgs any
+				_ = json.Unmarshal(args, &parsedArgs)
+
+				credList, _ := s.deps.Workflows.ListCredentials(ctx, flow.UserID)
+				credentialsMap := make(map[string]map[string]any, len(credList))
+				for _, c := range credList {
+					var d map[string]any
+					_ = json.Unmarshal(c.Data, &d)
+					credentialsMap[c.Name] = d
+				}
+
+				env := &workflow.ExecutionEnvironment{
+					HTTPClient:        http.DefaultClient,
+					AllowPrivateHosts: s.deps.Cfg.ToolAllowPrivateHosts,
+					UserID:            flow.UserID,
+					ModelResolver: func(modelName string) (model.StreamingModel, error) {
+						reg := chat.NewModelRegistry(s.deps.ModelKeys)
+						return reg.Resolve(chat.RunSpec{Model: modelName})
+					},
+				}
+				engine := workflow.NewEngine(nil)
+				runRes, rerr := engine.Execute(ctx, nodes, edges, workflow.RunOptions{
+					WorkflowID:    flow.ID,
+					UserID:        flow.UserID,
+					TriggerSource: "chat",
+					InputData:     parsedArgs,
+					Credentials:   credentialsMap,
+					Env:           env,
+				})
+				if rerr != nil {
+					return tool.Text("Workflow error: " + rerr.Error()), nil
+				}
+				if runRes.Status == "failed" {
+					return tool.Text("Workflow failed: " + runRes.Error), nil
+				}
+				b, _ := json.Marshal(runRes.Output)
+				return tool.Text(string(b)), nil
+			},
+		})
+		if terr == nil {
+			tools = append(tools, t)
+		}
+	}
+	return tools, nil
+}
+
+func sanitizeToolName(name string) string {
+	var sb strings.Builder
+	for _, ch := range name {
+		if (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '_' {
+			sb.WriteRune(ch)
+		} else {
+			sb.WriteRune('_')
+		}
+	}
+	s := strings.Trim(sb.String(), "_")
+	if s == "" {
+		return "workflow_tool"
+	}
+	return s
 }
