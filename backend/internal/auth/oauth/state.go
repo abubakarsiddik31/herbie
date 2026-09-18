@@ -20,6 +20,8 @@ func Seal(secret []byte, state, verifier string, exp time.Time) string {
 		base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }
 
+var rawURLStrict = base64.RawURLEncoding.Strict()
+
 // Open verifies a sealed value and returns the state/verifier when the
 // signature checks out and the value has not expired.
 func Open(secret []byte, sealed string, now time.Time) (state, verifier string, ok bool) {
@@ -27,11 +29,11 @@ func Open(secret []byte, sealed string, now time.Time) (state, verifier string, 
 	if len(parts) != 2 {
 		return "", "", false
 	}
-	payload, err := base64.RawURLEncoding.DecodeString(parts[0])
+	payload, err := rawURLStrict.DecodeString(parts[0])
 	if err != nil {
 		return "", "", false
 	}
-	sig, err := base64.RawURLEncoding.DecodeString(parts[1])
+	sig, err := rawURLStrict.DecodeString(parts[1])
 	if err != nil {
 		return "", "", false
 	}

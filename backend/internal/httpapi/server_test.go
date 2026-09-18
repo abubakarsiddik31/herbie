@@ -18,3 +18,21 @@ func TestHealthz(t *testing.T) {
 		t.Fatalf("healthz: %d %q", rec.Code, rec.Body.String())
 	}
 }
+
+func TestStatusResponseWriter(t *testing.T) {
+	rec := httptest.NewRecorder()
+	sw := &statusResponseWriter{ResponseWriter: rec, status: http.StatusOK}
+	sw.WriteHeader(http.StatusNotFound)
+	_, _ = sw.Write([]byte("not found"))
+	sw.Flush()
+
+	if sw.status != http.StatusNotFound {
+		t.Fatalf("expected status %d, got %d", http.StatusNotFound, sw.status)
+	}
+	if sw.Unwrap() != rec {
+		t.Fatalf("unwrap mismatch")
+	}
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("recorder code = %d", rec.Code)
+	}
+}

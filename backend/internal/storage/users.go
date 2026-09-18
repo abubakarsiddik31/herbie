@@ -7,7 +7,6 @@ import (
 
 	"github.com/abubakarsiddik31/golem-chatbot/internal/auth"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -24,8 +23,7 @@ func (u *Users) Create(ctx context.Context, email, passwordHash string) (auth.Us
 		email, passwordHash)
 	var rec auth.UserRecord
 	if err := row.Scan(&rec.ID, &rec.Email); err != nil {
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+		if isDuplicate(err) {
 			return auth.UserRecord{}, auth.ErrEmailTaken
 		}
 		return auth.UserRecord{}, fmt.Errorf("create user: %w", err)
@@ -38,7 +36,7 @@ func (u *Users) ByEmail(ctx context.Context, email string) (auth.UserRecord, err
 		`SELECT id, email::text, password_hash FROM users WHERE email = $1`, email))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return auth.UserRecord{}, auth.ErrInvalidCredentials
+			return auth.UserRecord{}, fmt.Errorf("%w: %w", ErrNotFound, auth.ErrUserNotFound)
 		}
 		return auth.UserRecord{}, fmt.Errorf("user by email: %w", err)
 	}
@@ -50,7 +48,7 @@ func (u *Users) ByID(ctx context.Context, id string) (auth.UserRecord, error) {
 		`SELECT id, email::text, password_hash FROM users WHERE id = $1`, id))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return auth.UserRecord{}, auth.ErrInvalidRefresh
+			return auth.UserRecord{}, fmt.Errorf("%w: %w", ErrNotFound, auth.ErrUserNotFound)
 		}
 		return auth.UserRecord{}, fmt.Errorf("user by id: %w", err)
 	}

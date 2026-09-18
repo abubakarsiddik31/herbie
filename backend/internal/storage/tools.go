@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -139,11 +138,8 @@ func (s *Tools) Delete(ctx context.Context, id, userID string) error {
 
 func (s *Tools) Count(ctx context.Context, userID string) (int, error) {
 	var n int
-	err := s.pool.QueryRow(ctx, `SELECT count(*) FROM tools WHERE user_id = $1`, userID).Scan(&n)
-	return n, fmt.Errorf("count tools: %w", err)
-}
-
-func isDuplicate(err error) bool {
-	var pgErr *pgconn.PgError
-	return errors.As(err, &pgErr) && pgErr.Code == "23505"
+	if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM tools WHERE user_id = $1`, userID).Scan(&n); err != nil {
+		return 0, fmt.Errorf("count tools: %w", err)
+	}
+	return n, nil
 }

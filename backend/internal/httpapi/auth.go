@@ -1,9 +1,7 @@
 package httpapi
 
 import (
-	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 
 	"github.com/abubakarsiddik31/golem-chatbot/internal/auth"
@@ -34,7 +32,7 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	s.setRefreshCookie(w, res)
+	s.setRefreshCookie(w, r, res)
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"accessToken": res.AccessToken,
 		"user":        map[string]string{"id": res.User.ID, "email": res.User.Email},
@@ -52,7 +50,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "invalid_credentials", "invalid email or password")
 		return
 	}
-	s.setRefreshCookie(w, res)
+	s.setRefreshCookie(w, r, res)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"accessToken": res.AccessToken,
 		"user":        map[string]string{"id": res.User.ID, "email": res.User.Email},
@@ -70,7 +68,7 @@ func (s *Server) handleRefresh(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "refresh rejected")
 		return
 	}
-	s.setRefreshCookie(w, res)
+	s.setRefreshCookie(w, r, res)
 	writeJSON(w, http.StatusOK, map[string]any{"accessToken": res.AccessToken})
 }
 
@@ -79,7 +77,7 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 		_ = s.deps.Auth.Logout(r.Context(), cookie.Value)
 	}
 	http.SetCookie(w, &http.Cookie{Name: refreshCookie, Value: "", Path: "/api/auth",
-		MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteLaxMode})
+		MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteLaxMode, Secure: s.isSecure(r)})
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -90,7 +88,7 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 
 // setRefreshCookie sends the opaque refresh token as an HttpOnly cookie
 // scoped to the auth endpoints; the access token goes in the JSON body.
-func (s *Server) setRefreshCookie(w http.ResponseWriter, res auth.AuthResult) {
+func (s *Server) setRefreshCookie(w http.ResponseWriter, r *http.Request, res auth.AuthResult) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     refreshCookie,
 		Value:    res.RefreshToken,
@@ -98,11 +96,6 @@ func (s *Server) setRefreshCookie(w http.ResponseWriter, res auth.AuthResult) {
 		Expires:  res.RefreshExpiresAt,
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
+		Secure:   s.isSecure(r),
 	})
-}
-
-func decodeJSON(r *http.Request, v any) error {
-	defer r.Body.Close()
-	dec := json.NewDecoder(io.LimitReader(r.Body, 1<<20))
-	return dec.Decode(v)
 }

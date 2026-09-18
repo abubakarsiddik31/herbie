@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { toast } from "sonner";
-import { Brain, Plus, Sidebar, Sparkles, Trash2 } from "lucide-react";
+import { Brain, Plus, Sidebar, Sliders, Trash2 } from "lucide-react";
 import { ApiError } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -104,7 +104,7 @@ export function PreferencesPage() {
             <Sidebar className="size-4" />
           </Button>
           <div className="flex items-center gap-2">
-            <Sparkles className="size-4 text-muted-foreground" />
+            <Sliders className="size-4 text-muted-foreground" />
             <h1 className="text-sm font-semibold tracking-tight">Preferences</h1>
           </div>
         </div>

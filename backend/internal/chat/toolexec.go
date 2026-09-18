@@ -178,10 +178,77 @@ func checkPublicHost(ctx context.Context, hostPort string) error {
 }
 
 func checkIP(ip net.IP) error {
+	if ip4 := ip.To4(); ip4 != nil {
+		ip = ip4
+	}
 	if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() {
 		return fmt.Errorf("private or link-local address %s", ip)
 	}
 	return nil
+}
+
+// newToolHTTPClient builds an HTTP client bounded by the tool environment,
+// with socket-level IP validation against SSRF / DNS rebinding and redirect
+// filtering when private hosts are disallowed.
+func newToolHTTPClient(env ToolEnv) *http.Client {
+	dialer := &net.Dialer{
+		Timeout:   env.HTTPTimeout,
+		KeepAlive: 30 * time.Second,
+	}
+	transport := &http.Transport{
+		Proxy:                 http.ProxyFromEnvironment,
+		ForceAttemptHTTP2:     true,
+		MaxIdleConns:          100,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+	}
+	if !env.AllowPrivateHosts {
+		transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+			host, port, err := net.SplitHostPort(addr)
+			if err != nil {
+				return nil, err
+			}
+			ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+			if err != nil {
+				return nil, fmt.Errorf("resolve %q: %w", host, err)
+			}
+			var lastErr error
+			for _, ip := range ips {
+				if err := checkIP(ip.IP); err != nil {
+					lastErr = fmt.Errorf("host %s resolved to blocked address: %w", host, err)
+					continue
+				}
+				target := net.JoinHostPort(ip.IP.String(), port)
+				conn, err := dialer.DialContext(ctx, network, target)
+				if err == nil {
+					return conn, nil
+				}
+				lastErr = err
+			}
+			if lastErr != nil {
+				return nil, lastErr
+			}
+			return nil, fmt.Errorf("no allowed addresses for %s", host)
+		}
+	} else {
+		transport.DialContext = dialer.DialContext
+	}
+
+	return &http.Client{
+		Transport: transport,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 10 {
+				return fmt.Errorf("stopped after 10 redirects")
+			}
+			if !env.AllowPrivateHosts {
+				if err := checkPublicHost(req.Context(), req.URL.Host); err != nil {
+					return fmt.Errorf("redirect blocked: %w", err)
+				}
+			}
+			return nil
+		},
+	}
 }
 
 // truncateResult caps the tool result handed back to the model, keeping the
@@ -202,6 +269,9 @@ func truncateResult(s string, limit int64) string {
 // *model.ModelRetry, and API/network problems come back as text results the
 // model can explain to the user. Only ctx cancellation propagates.
 func executeHTTPTool(ctx context.Context, cfg ToolConfig, env ToolEnv, client *http.Client, args json.RawMessage) (string, error) {
+	if client == nil {
+		client = newToolHTTPClient(env)
+	}
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}

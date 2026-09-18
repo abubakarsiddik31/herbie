@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"strings"
 	"testing"
 	"time"
 )
@@ -96,7 +95,10 @@ func TestSealRoundTrip(t *testing.T) {
 	if _, _, ok := Open([]byte("other-secret-long-enough-here"), sealed, time.Now()); ok {
 		t.Fatal("wrong secret accepted")
 	}
-	if _, _, ok := Open(secret, strings.TrimSuffix(sealed, "A")+"B", time.Now()); ok {
-		t.Fatal("tampered seal accepted")
+	if _, _, ok := Open(secret, "x"+sealed[1:], time.Now()); ok {
+		t.Fatal("tampered seal payload accepted")
+	}
+	if _, _, ok := Open(secret, sealed[:len(sealed)-5]+"xxxxx", time.Now()); ok {
+		t.Fatal("tampered seal signature accepted")
 	}
 }

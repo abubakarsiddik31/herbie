@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/abubakarsiddik31/golem-chatbot/internal/auth"
 	"github.com/abubakarsiddik31/golem-chatbot/internal/auth/authtest"
@@ -54,6 +55,40 @@ func TestRefreshRotationAndReuseDetection(t *testing.T) {
 	}
 	if _, err := svc.Refresh(ctx, second.RefreshToken); !errors.Is(err, auth.ErrInvalidRefresh) {
 		t.Fatalf("family should be revoked after reuse, got %v", err)
+	}
+}
+
+type failRotateStore struct {
+	*authtest.FakeRefreshStore
+}
+
+func (s *failRotateStore) Rotate(_ context.Context, _, _ string, _ time.Time) error {
+	return auth.ErrInvalidRefresh
+}
+
+func TestRefreshRotationConflictRevokesFamily(t *testing.T) {
+	ctx := context.Background()
+	users := authtest.NewFakeUsers()
+	fakeRefresh := authtest.NewFakeRefreshStore()
+	store := &failRotateStore{FakeRefreshStore: fakeRefresh}
+	svc, err := auth.NewService(users, store, authtest.NewFakeOAuthStore(users), "0123456789abcdef0123456789abcdef")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	reg, err := svc.Register(ctx, "race@b.co", "longenough1")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Rotate returning ErrInvalidRefresh represents concurrent rotation
+	if _, err := svc.Refresh(ctx, reg.RefreshToken); !errors.Is(err, auth.ErrInvalidRefresh) {
+		t.Fatalf("expected ErrInvalidRefresh on rotate conflict, got %v", err)
+	}
+	// Verify family was revoked
+	rec, err := fakeRefresh.Get(ctx, auth.HashRefreshToken(reg.RefreshToken))
+	if err != nil || !rec.Revoked {
+		t.Fatalf("family should have been revoked on conflict: %+v %v", rec, err)
 	}
 }
 

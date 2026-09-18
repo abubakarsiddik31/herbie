@@ -28,7 +28,7 @@ type Client struct {
 
 func New(baseURL string, dims int, hc *http.Client) *Client {
 	if hc == nil {
-		hc = http.DefaultClient
+		hc = &http.Client{Timeout: 30 * time.Second}
 	}
 	return &Client{base: baseURL, dims: dims, http: hc}
 }

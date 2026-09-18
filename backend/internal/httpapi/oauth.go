@@ -54,6 +54,7 @@ func (s *Server) handleOAuthStart(w http.ResponseWriter, r *http.Request) {
 			time.Now().Add(oauthStateTTL)),
 		Path: "/api/auth", MaxAge: int(oauthStateTTL.Seconds()),
 		HttpOnly: true, SameSite: http.SameSiteLaxMode,
+		Secure: s.isSecure(r),
 	})
 	http.Redirect(w, r, p.StartURL(state, challenge), http.StatusFound)
 }
@@ -65,7 +66,7 @@ func (s *Server) handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fail := func(reason string) {
-		http.SetCookie(w, &http.Cookie{Name: oauthStateCookie, Path: "/api/auth", MaxAge: -1})
+		http.SetCookie(w, &http.Cookie{Name: oauthStateCookie, Path: "/api/auth", MaxAge: -1, Secure: s.isSecure(r)})
 		http.Redirect(w, r, s.deps.Cfg.FrontendOrigin+"/auth/callback?error="+reason, http.StatusFound)
 	}
 	query := r.URL.Query()
@@ -74,7 +75,7 @@ func (s *Server) handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cookie, err := r.Cookie(oauthStateCookie)
-	http.SetCookie(w, &http.Cookie{Name: oauthStateCookie, Path: "/api/auth", MaxAge: -1})
+	http.SetCookie(w, &http.Cookie{Name: oauthStateCookie, Path: "/api/auth", MaxAge: -1, Secure: s.isSecure(r)})
 	if err != nil {
 		fail("invalid_state")
 		return
@@ -133,7 +134,7 @@ func (s *Server) handleOAuthConsume(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "invalid_code", "invalid or expired oauth code")
 		return
 	}
-	s.setRefreshCookie(w, res)
+	s.setRefreshCookie(w, r, res)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"accessToken": res.AccessToken,
 		"user":        map[string]string{"id": res.User.ID, "email": res.User.Email},

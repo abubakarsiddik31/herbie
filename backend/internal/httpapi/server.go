@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/abubakarsiddik31/golem-chatbot/internal/auth"
 	"github.com/abubakarsiddik31/golem-chatbot/internal/auth/oauth"
@@ -133,4 +134,14 @@ func NewServer(deps ServerDeps) http.Handler {
 	s.mux.Handle("/api/", requireAuth(deps.Tokens, authed))
 
 	return withCORS(deps.Cfg.FrontendOrigin, logRequests(deps.Log, s.mux))
+}
+
+func (s *Server) isSecure(r *http.Request) bool {
+	if r != nil {
+		if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
+			return true
+		}
+	}
+	return strings.HasPrefix(s.deps.Cfg.FrontendOrigin, "https://") ||
+		strings.HasPrefix(s.deps.Cfg.OAuth.RedirectBase, "https://")
 }

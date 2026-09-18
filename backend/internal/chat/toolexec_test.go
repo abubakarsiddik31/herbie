@@ -185,10 +185,32 @@ func TestExecuteBlockedHost(t *testing.T) {
 }
 
 func TestCheckPublicHost(t *testing.T) {
-	blocked := []string{"127.0.0.1:8080", "10.0.0.1:443", "192.168.1.1:443", "169.254.169.254:80", "0.0.0.0:80", "[::1]:8080"}
+	blocked := []string{
+		"127.0.0.1:8080", "10.0.0.1:443", "192.168.1.1:443", "169.254.169.254:80",
+		"0.0.0.0:80", "[::1]:8080", "[::ffff:127.0.0.1]:80", "[::ffff:169.254.169.254]:80",
+	}
 	for _, host := range blocked {
 		if err := checkPublicHost(context.Background(), host); err == nil {
 			t.Errorf("host %q should be blocked", host)
 		}
+	}
+}
+
+func TestNewToolHTTPClientBlocksPrivateRedirect(t *testing.T) {
+	privateSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, "private data")
+	}))
+	defer privateSrv.Close()
+
+	redirectSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, privateSrv.URL, http.StatusFound)
+	}))
+	defer redirectSrv.Close()
+
+	client := newToolHTTPClient(DefaultToolEnv()) // AllowPrivateHosts = false
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, redirectSrv.URL, nil)
+	_, err := client.Do(req)
+	if err == nil {
+		t.Fatal("expected request or redirect to private server to be blocked")
 	}
 }

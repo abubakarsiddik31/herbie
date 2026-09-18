@@ -4,22 +4,17 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"time"
 
 	"github.com/abubakarsiddik31/golem/tool"
 )
-
-// httpAgent is the shared transport for every user tool call. It has no
-// overall timeout: each tool's Timeout (via ctx) bounds the request, keeping
-// the approved re-run and deferred pass on one policy.
-var httpAgent = &http.Client{}
 
 // BuildTools turns validated user tool configs into golem tools: one
 // tool.Tool per config, advertising the config's schema and executing the
 // configured HTTP request. Approval-gated tools defer instead of executing
 // until golem re-runs them with the approved marker set.
 func BuildTools(cfgs []ToolConfig, env ToolEnv) ([]tool.Tool[Deps], error) {
+	client := newToolHTTPClient(env)
 	tools := make([]tool.Tool[Deps], 0, len(cfgs))
 	for _, cfg := range cfgs {
 		if err := cfg.Validate(); err != nil {
@@ -42,7 +37,7 @@ func BuildTools(cfgs []ToolConfig, env ToolEnv) ([]tool.Tool[Deps], error) {
 				if created.RequireApproval && !tool.CallApproved(ctx) {
 					return tool.Result{}, &tool.Deferred{Kind: tool.DeferApproval, Reason: "user approval required"}
 				}
-				out, err := executeHTTPTool(ctx, created, env, httpAgent, args)
+				out, err := executeHTTPTool(ctx, created, env, client, args)
 				return tool.Text(out), err
 			},
 		})

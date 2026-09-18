@@ -25,10 +25,19 @@ type PendingCalls struct{ pool *pgxpool.Pool }
 
 func NewPendingCalls(pool *pgxpool.Pool) *PendingCalls { return &PendingCalls{pool: pool} }
 
-// Add persists the pending calls of a paused run (one insert per call).
+// Add persists the pending calls of a paused run atomically in a transaction.
 func (p *PendingCalls) Add(ctx context.Context, calls []PendingToolCall) error {
+	if len(calls) == 0 {
+		return nil
+	}
+	tx, err := p.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin add pending tool calls: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
 	for _, c := range calls {
-		_, err := p.pool.Exec(ctx,
+		_, err := tx.Exec(ctx,
 			`INSERT INTO pending_tool_calls (call_id, conversation_id, user_id, tool_name, args, reason)
 			 VALUES ($1,$2,$3,$4,$5,$6)`,
 			c.CallID, c.ConversationID, c.UserID, c.ToolName, c.Args, c.Reason)
@@ -36,7 +45,7 @@ func (p *PendingCalls) Add(ctx context.Context, calls []PendingToolCall) error {
 			return fmt.Errorf("add pending tool call: %w", err)
 		}
 	}
-	return nil
+	return tx.Commit(ctx)
 }
 
 // ForConversation returns the conversation's unresolved (pending) calls.

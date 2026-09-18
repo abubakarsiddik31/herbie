@@ -10,7 +10,6 @@ import {
   Moon,
   Plus,
   Settings,
-  Sparkles,
   Sun,
   Trash2,
   User,
@@ -117,7 +116,7 @@ export function SettingsDialog({ open, onOpenChange, defaultTab = "general" }: P
 
   const tabs: Array<{ id: SettingsTab; label: string; icon: React.ComponentType<{ className?: string }> }> = [
     { id: "general", label: "General", icon: Settings },
-    { id: "personalization", label: "Personalization", icon: Sparkles },
+    { id: "personalization", label: "Personalization", icon: Brain },
     { id: "tools", label: "Tools", icon: Wrench },
     { id: "documents", label: "Documents", icon: FileText },
     { id: "account", label: "Account", icon: User },

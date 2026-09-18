@@ -52,10 +52,14 @@ func (r *RefreshTokens) Rotate(ctx context.Context, oldHash, newHash string, exp
 		return fmt.Errorf("begin rotate: %w", err)
 	}
 	defer tx.Rollback(ctx)
-	if _, err := tx.Exec(ctx,
-		`UPDATE refresh_tokens SET revoked_at = now(), replaced_by = $2 WHERE token_hash = $1`,
-		oldHash, newHash); err != nil {
+	tag, err := tx.Exec(ctx,
+		`UPDATE refresh_tokens SET revoked_at = now(), replaced_by = $2 WHERE token_hash = $1 AND revoked_at IS NULL AND replaced_by IS NULL`,
+		oldHash, newHash)
+	if err != nil {
 		return fmt.Errorf("revoke old token: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return auth.ErrInvalidRefresh
 	}
 	var userID string
 	if err := tx.QueryRow(ctx,

@@ -35,7 +35,7 @@ func (f *FakeUsers) Create(_ context.Context, email, hash string) (auth.UserReco
 func (f *FakeUsers) ByEmail(_ context.Context, email string) (auth.UserRecord, error) {
 	rec, ok := f.byEmail[email]
 	if !ok {
-		return auth.UserRecord{}, auth.ErrInvalidCredentials
+		return auth.UserRecord{}, auth.ErrUserNotFound
 	}
 	return rec, nil
 }
@@ -46,7 +46,7 @@ func (f *FakeUsers) ByID(_ context.Context, id string) (auth.UserRecord, error) 
 			return rec, nil
 		}
 	}
-	return auth.UserRecord{}, auth.ErrInvalidRefresh
+	return auth.UserRecord{}, auth.ErrUserNotFound
 }
 
 // FakeRefreshStore is an in-memory auth.RefreshStore keyed by token hash.
@@ -73,7 +73,10 @@ func (f *FakeRefreshStore) Get(_ context.Context, hash string) (auth.RefreshReco
 }
 
 func (f *FakeRefreshStore) Rotate(_ context.Context, oldHash, newHash string, exp time.Time) error {
-	old := f.tokens[oldHash]
+	old, ok := f.tokens[oldHash]
+	if !ok || old.Revoked {
+		return auth.ErrInvalidRefresh
+	}
 	old.Revoked = true
 	f.tokens[oldHash] = old
 	f.tokens[newHash] = auth.RefreshRecord{UserID: old.UserID, ExpiresAt: exp}

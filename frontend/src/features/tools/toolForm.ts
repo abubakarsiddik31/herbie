@@ -178,3 +178,99 @@ export function splitTemplate(tpl: string): TemplateSegment[] {
   if (prev < tpl.length) segments.push({ text: tpl.slice(prev) });
   return segments;
 }
+
+export function extractUrlPlaceholders(tpl: string): string[] {
+  const matches = tpl.matchAll(PLACEHOLDER_RE);
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const m of matches) {
+    if (!seen.has(m[1])) {
+      seen.add(m[1]);
+      out.push(m[1]);
+    }
+  }
+  return out;
+}
+
+export function formFromDuplicate(t: UserTool): ToolForm {
+  const base = formFromTool(t);
+  const cleanName = base.name.replace(/_copy\d*$/, "");
+  return {
+    ...base,
+    name: `${cleanName}_copy`,
+  };
+}
+
+export function generateAgentSchema(tool: ToolForm | UserTool): Record<string, unknown> {
+  const properties: Record<string, { type: string; description: string }> = {};
+  const required: string[] = [];
+
+  for (const p of tool.params) {
+    properties[p.name] = {
+      type: p.type,
+      description: p.description,
+    };
+    if (p.required) {
+      required.push(p.name);
+    }
+  }
+
+  const parameters: Record<string, unknown> = {
+    type: "object",
+    properties,
+  };
+  if (required.length > 0) {
+    parameters.required = required;
+  }
+
+  return {
+    name: tool.name,
+    description: tool.description,
+    parameters,
+  };
+}
+
+export function generateCurlSnippet(tool: ToolForm | UserTool): string {
+  let url = tool.urlTemplate;
+
+  // Substitute path parameters with sample representations
+  for (const p of tool.params) {
+    if (p.in === "path") {
+      url = url.replaceAll(`{{${p.name}}}`, `{${p.name}}`);
+    }
+  }
+
+  // Build query string sample
+  const queryParams = tool.params.filter((p) => p.in === "query");
+  if (queryParams.length > 0) {
+    const glue = url.includes("?") ? "&" : "?";
+    const qs = queryParams.map((p) => `${p.name}={${p.name}}`).join("&");
+    url = `${url}${glue}${qs}`;
+  }
+
+  const lines: string[] = [`curl -X ${tool.method} "${url}"`];
+
+  // Headers
+  const headerMap: Record<string, string> = {};
+  if ("headers" in tool) {
+    if (Array.isArray(tool.headers)) {
+      for (const h of tool.headers) {
+        if (h.key.trim()) headerMap[h.key.trim()] = h.value;
+      }
+    } else if (typeof tool.headers === "object" && tool.headers !== null) {
+      Object.assign(headerMap, tool.headers);
+    }
+  }
+
+  for (const [k, v] of Object.entries(headerMap)) {
+    const val = v === HEADER_MASK ? "<SECRET_TOKEN>" : v || "<VALUE>";
+    lines.push(`  -H "${k}: ${val}"`);
+  }
+
+  if (tool.method !== "GET" && tool.method !== "DELETE" && tool.bodyTemplate) {
+    lines.push(`  -H "Content-Type: application/json"`);
+    lines.push(`  -d '${tool.bodyTemplate.trim()}'`);
+  }
+
+  return lines.join(" \\\n");
+}

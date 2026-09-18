@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import {
   ArrowUp,
   BookOpen,
+  Bot,
   Check,
   ChevronDown,
   Copy,
@@ -23,7 +24,6 @@ import {
   ShieldCheck,
   Sidebar,
   SlidersHorizontal,
-  Sparkles,
   Square,
   Trash2,
   X,
@@ -484,7 +484,7 @@ export function ChatPage() {
             className="flex items-center gap-1.5 rounded-lg border border-border/60 bg-muted/30 px-2.5 py-1 text-xs font-medium text-foreground transition-all hover:bg-accent hover:border-foreground/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             title="Model & chat configuration"
           >
-            <Sparkles className="size-3.5 text-primary" />
+            <Bot className="size-3.5 text-primary" />
             <span className="font-semibold">{modelLabel(activeSettings.model)}</span>
             <ChevronDown className="size-3 text-muted-foreground" />
           </button>
@@ -897,7 +897,7 @@ export function ChatPage() {
                   className="rounded-lg text-[11px] text-muted-foreground hover:text-foreground gap-1 px-2 h-7"
                   title="Model & Prompt Settings"
                 >
-                  <Sparkles className="size-3 text-primary" />
+                  <Bot className="size-3 text-primary" />
                   <span className="hidden sm:inline font-mono">{modelLabel(activeSettings.model)}</span>
                 </Button>
               </div>

@@ -5,13 +5,14 @@ import { toast } from "sonner";
 import {
   ArrowLeft,
   ArrowUp,
+  CheckCircle2,
   FileCode,
   FileText,
   FolderGit2,
   Mic,
   Paperclip,
   Sidebar,
-  Sparkles,
+  SlidersHorizontal,
   Square,
   Trash2,
   Upload,
@@ -285,7 +286,7 @@ export function ProjectWorkspacePage() {
             title="Project guidelines & instructions"
             className="text-muted-foreground hover:text-foreground"
           >
-            <Sparkles className="size-3.5" />
+            <SlidersHorizontal className="size-3.5" />
           </Button>
         </div>
       </header>
@@ -309,7 +310,7 @@ export function ProjectWorkspacePage() {
                   </div>
                   {projectFiles.length > 0 ? (
                     <div className="rounded-xl border border-border/60 bg-muted/20 px-3 py-2 text-xs text-muted-foreground flex items-center gap-2">
-                      <Sparkles className="size-3.5 text-primary" />
+                      <CheckCircle2 className="size-3.5 text-primary" />
                       <span>{projectFiles.length} {projectFiles.length === 1 ? "file" : "files"} indexed and ready for retrieval</span>
                     </div>
                   ) : (

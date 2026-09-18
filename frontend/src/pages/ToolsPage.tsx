@@ -1,9 +1,27 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { toast } from "sonner";
-import { Pencil, Plus, ShieldCheck, Sidebar, Trash2, TriangleAlert, Wrench } from "lucide-react";
+import {
+  ArrowRight,
+  BookOpen,
+  Copy,
+  Eye,
+  Filter,
+  Layers,
+  Pencil,
+  Plus,
+  Search,
+  ShieldAlert,
+  ShieldCheck,
+  Sidebar,
+  SlidersHorizontal,
+  Trash2,
+  TriangleAlert,
+  Wrench,
+  X,
+} from "lucide-react";
 import { useSidebar } from "@/components/layout/SidebarContext";
 import { cn } from "@/lib/utils";
-import type { ToolParam, UserTool } from "@/lib/types";
+import type { UserTool } from "@/lib/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -15,7 +33,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import {
@@ -26,14 +43,11 @@ import {
 } from "@/features/tools/templates";
 import {
   emptyForm,
+  formFromDuplicate,
   formFromTemplate,
   formFromTool,
   formToPayload,
-  HEADER_MASK,
-  splitTemplate,
   validateForm,
-  type FormErrors,
-  type HeaderRow,
   type ToolForm,
 } from "@/features/tools/toolForm";
 import {
@@ -42,163 +56,22 @@ import {
   useTools,
   useUpdateTool,
 } from "@/features/tools/useTools";
+import { ToolDetailsDialog } from "@/features/tools/ToolDetailsDialog";
+import { TemplatePreviewDialog } from "@/features/tools/TemplatePreviewDialog";
+import { ToolEditorDialog } from "@/features/tools/ToolEditorDialog";
 
-const METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"];
-const PARAM_TYPES = ["string", "number", "boolean"] as const;
-
-// Semantic method coding — desaturated tints so the grid scans at a glance
-// without turning into a color wall.
 const METHOD_STYLES: Record<string, string> = {
-  GET: "border-emerald-600/25 bg-emerald-600/10 text-emerald-700 dark:text-emerald-400",
-  POST: "border-sky-600/25 bg-sky-600/10 text-sky-700 dark:text-sky-400",
-  PUT: "border-amber-600/25 bg-amber-600/10 text-amber-700 dark:text-amber-400",
-  PATCH: "border-violet-600/25 bg-violet-600/10 text-violet-700 dark:text-violet-400",
-  DELETE: "border-rose-600/25 bg-rose-600/10 text-rose-700 dark:text-rose-400",
+  GET: "border-emerald-600/30 bg-emerald-600/10 text-emerald-700 dark:text-emerald-400",
+  POST: "border-sky-600/30 bg-sky-600/10 text-sky-700 dark:text-sky-400",
+  PUT: "border-amber-600/30 bg-amber-600/10 text-amber-700 dark:text-amber-400",
+  PATCH: "border-violet-600/30 bg-violet-600/10 text-violet-700 dark:text-violet-400",
+  DELETE: "border-rose-600/30 bg-rose-600/10 text-rose-700 dark:text-rose-400",
 };
 
-const fieldCls =
-  "w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-50";
-const selectCls =
-  "h-9 rounded-md border border-input bg-transparent px-3 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50";
-const selectClsSm =
-  "h-8 rounded-md border border-input bg-transparent px-2 text-xs shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50";
+type FilterStatus = "all" | "active" | "paused" | "approval";
 
-const enter = "animate-in fade-in slide-in-from-bottom-2 duration-300 [animation-fill-mode:backwards] motion-reduce:animate-none";
-
-function UrlPreview({ template }: { template: string }) {
-  if (template.trim() === "") return null;
-  return (
-    <div className="rounded-lg border bg-muted/40 px-3 py-2.5">
-      <p className="text-[11px] font-medium tracking-wider text-muted-foreground uppercase">Preview</p>
-      <p className="mt-1 break-all font-mono text-xs leading-relaxed">
-        {splitTemplate(template).map((seg, i) =>
-          seg.placeholder ? (
-            <span
-              key={i}
-              className="rounded-sm bg-amber-500/15 px-0.5 font-semibold text-amber-700 dark:text-amber-400"
-            >
-              {`{{${seg.placeholder}}}`}
-            </span>
-          ) : (
-            <span key={i}>{seg.text}</span>
-          ),
-        )}
-      </p>
-    </div>
-  );
-}
-
-function TemplateCard({ template, index, onPick }: { template: ToolTemplate; index: number; onPick: () => void }) {
-  const Icon = template.icon;
-  return (
-    <button
-      type="button"
-      onClick={onPick}
-      style={{ animationDelay: `${Math.min(index, 10) * 35}ms` }}
-      className={cn(
-        "group w-56 shrink-0 snap-start rounded-xl border bg-card p-4 text-left shadow-xs transition-all duration-200",
-        "hover:-translate-y-0.5 hover:border-foreground/25 hover:shadow-md hover:shadow-black/5",
-        "active:translate-y-0 active:scale-[0.99]",
-        "focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50",
-        enter,
-      )}
-    >
-      <div className="flex items-start justify-between">
-        <span className="flex size-9 items-center justify-center rounded-lg border bg-muted/60 text-foreground/80">
-          <Icon className="size-4" />
-        </span>
-        <Plus className="size-4 text-muted-foreground/30 transition-all duration-200 group-hover:translate-x-0.5 group-hover:text-foreground" />
-      </div>
-      <p className="mt-3 text-sm font-semibold tracking-tight">{template.title}</p>
-      <p className="mt-1 line-clamp-2 min-h-8 text-xs leading-relaxed text-muted-foreground">{template.tagline}</p>
-      <p className="mt-2 truncate font-mono text-[11px] text-muted-foreground/70">
-        {templateHost(template.tool.urlTemplate)}
-      </p>
-    </button>
-  );
-}
-
-function ToolCard({
-  tool,
-  index,
-  onEdit,
-  onDelete,
-  onToggle,
-}: {
-  tool: UserTool;
-  index: number;
-  onEdit: () => void;
-  onDelete: () => void;
-  onToggle: (enabled: boolean) => void;
-}) {
-  return (
-    <div
-      style={{ animationDelay: `${Math.min(index, 8) * 40}ms` }}
-      className={cn(
-        "group relative flex flex-col rounded-xl border bg-card p-4 shadow-xs transition-all duration-200",
-        "hover:-translate-y-0.5 hover:shadow-md hover:shadow-black/5",
-        !tool.enabled && "opacity-70 saturate-[0.85]",
-        enter,
-      )}
-    >
-      <div className="flex items-center gap-2">
-        <span
-          className={cn(
-            "shrink-0 rounded-md border px-1.5 py-0.5 font-mono text-[11px] font-semibold tracking-wide",
-            METHOD_STYLES[tool.method] ?? "border-border bg-muted text-muted-foreground",
-          )}
-        >
-          {tool.method}
-        </span>
-        <span className="truncate font-mono text-sm font-semibold">{tool.name}</span>
-        <div className="ml-auto flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity duration-150 group-focus-within:opacity-100 group-hover:opacity-100 max-md:opacity-100">
-          <Button variant="ghost" size="icon-xs" aria-label={`Edit ${tool.name}`} onClick={onEdit}>
-            <Pencil />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            aria-label={`Delete ${tool.name}`}
-            className="text-muted-foreground hover:text-destructive"
-            onClick={onDelete}
-          >
-            <Trash2 />
-          </Button>
-        </div>
-      </div>
-
-      <p className="mt-2 line-clamp-2 min-h-10 text-sm leading-snug text-muted-foreground">{tool.description}</p>
-
-      <div className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground/80">
-        <span className="truncate font-mono">{templateHost(tool.urlTemplate)}</span>
-        <span className="shrink-0 text-muted-foreground/50">·</span>
-        <span className="shrink-0">
-          {tool.params.length === 0 ? "no params" : `${tool.params.length} param${tool.params.length === 1 ? "" : "s"}`}
-        </span>
-      </div>
-
-      <div className="mt-3 flex items-center justify-between gap-2 border-t pt-3">
-        <div className="flex min-w-0 items-center gap-1.5">
-          {tool.requireApproval && (
-            <Badge
-              variant="outline"
-              className="gap-1 border-amber-500/40 bg-amber-500/10 font-normal text-amber-700 dark:text-amber-400"
-            >
-              <ShieldCheck className="size-3" /> approval
-            </Badge>
-          )}
-          {!tool.enabled && (
-            <Badge variant="outline" className="font-normal text-muted-foreground">hidden from agent</Badge>
-          )}
-        </div>
-        <label className="flex shrink-0 cursor-pointer items-center gap-2 text-xs text-muted-foreground">
-          <Switch checked={tool.enabled} onCheckedChange={onToggle} aria-label={`Toggle ${tool.name}`} />
-          {tool.enabled ? "Enabled" : "Disabled"}
-        </label>
-      </div>
-    </div>
-  );
-}
+// Quick starter template slugs for empty state onboarding
+const STARTER_TEMPLATE_SLUGS = ["weather-current", "github-repo", "read-webpage"];
 
 export function ToolsPage() {
   const { toggleSidebar, setMobileOpen } = useSidebar();
@@ -207,63 +80,135 @@ export function ToolsPage() {
   const updateTool = useUpdateTool();
   const deleteTool = useDeleteTool();
 
+  // Top level view tab
+  const [activeView, setActiveView] = useState<"tools" | "templates">("tools");
+
+  // Search & Filter state for user tools
+  const [toolsSearch, setToolsSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<FilterStatus>("all");
+
+  // Search & Filter state for templates
+  const [templateSearch, setTemplateSearch] = useState("");
+  const [templateCategory, setTemplateCategory] = useState<string>("All");
+
+  // Dialog states
   const [editorOpen, setEditorOpen] = useState(false);
   const [editing, setEditing] = useState<UserTool | null>(null);
   const [basedOn, setBasedOn] = useState<ToolTemplate | null>(null);
   const [form, setForm] = useState<ToolForm>(emptyForm());
-  const [errors, setErrors] = useState<FormErrors>({});
+
+  const [inspectingTool, setInspectingTool] = useState<UserTool | null>(null);
+  const [inspectingTemplate, setInspectingTemplate] = useState<ToolTemplate | null>(null);
   const [deleting, setDeleting] = useState<UserTool | null>(null);
-  const [category, setCategory] = useState<string>("All");
+  const [addingTemplateSlug, setAddingTemplateSlug] = useState<string | null>(null);
 
-  const visibleTemplates = category === "All" ? TEMPLATES : TEMPLATES.filter((t) => t.category === category);
-  const saving = createTool.isPending || updateTool.isPending;
+  // Filtered user tools
+  const filteredTools = useMemo(() => {
+    if (!tools) return [];
+    return tools.filter((t) => {
+      // Status filter
+      if (statusFilter === "active" && !t.enabled) return false;
+      if (statusFilter === "paused" && t.enabled) return false;
+      if (statusFilter === "approval" && !t.requireApproval) return false;
 
-  function openEditor(next: ToolForm, template: ToolTemplate | null, editingTool: UserTool | null) {
-    setForm(next);
+      // Search filter
+      if (toolsSearch.trim() !== "") {
+        const query = toolsSearch.toLowerCase().trim();
+        const matchesName = t.name.toLowerCase().includes(query);
+        const matchesDesc = t.description.toLowerCase().includes(query);
+        const matchesMethod = t.method.toLowerCase().includes(query);
+        const matchesHost = templateHost(t.urlTemplate).toLowerCase().includes(query);
+        return matchesName || matchesDesc || matchesMethod || matchesHost;
+      }
+      return true;
+    });
+  }, [tools, statusFilter, toolsSearch]);
+
+  // Filtered templates
+  const filteredTemplates = useMemo(() => {
+    return TEMPLATES.filter((t) => {
+      // Category filter
+      if (templateCategory !== "All" && t.category !== templateCategory) {
+        return false;
+      }
+      // Search filter
+      if (templateSearch.trim() !== "") {
+        const query = templateSearch.toLowerCase().trim();
+        const matchesTitle = t.title.toLowerCase().includes(query);
+        const matchesTagline = t.tagline.toLowerCase().includes(query);
+        const matchesName = t.tool.name.toLowerCase().includes(query);
+        const matchesDesc = t.tool.description.toLowerCase().includes(query);
+        const matchesHost = templateHost(t.tool.urlTemplate).toLowerCase().includes(query);
+        return matchesTitle || matchesTagline || matchesName || matchesDesc || matchesHost;
+      }
+      return true;
+    });
+  }, [templateCategory, templateSearch]);
+
+  // Statistics
+  const stats = useMemo(() => {
+    if (!tools) return { total: 0, active: 0, paused: 0, approval: 0 };
+    return {
+      total: tools.length,
+      active: tools.filter((t) => t.enabled).length,
+      paused: tools.filter((t) => !t.enabled).length,
+      approval: tools.filter((t) => t.requireApproval).length,
+    };
+  }, [tools]);
+
+  // Category template count map
+  const categoryCounts = useMemo(() => {
+    const counts: Record<string, number> = { All: TEMPLATES.length };
+    for (const t of TEMPLATES) {
+      counts[t.category] = (counts[t.category] || 0) + 1;
+    }
+    return counts;
+  }, []);
+
+  function openEditor(nextForm: ToolForm, template: ToolTemplate | null, editingTool: UserTool | null) {
+    setForm(nextForm);
     setBasedOn(template);
     setEditing(editingTool);
-    setErrors({});
     setEditorOpen(true);
   }
 
-  function setParam(i: number, patch: Partial<ToolParam>) {
-    setForm((f) => ({
-      ...f,
-      params: f.params.map((p, idx) => (idx === i ? { ...p, ...patch } : p)),
-    }));
+  function handleDuplicate(tool: UserTool) {
+    openEditor(formFromDuplicate(tool), null, null);
   }
 
-  function setHeader(i: number, patch: Partial<HeaderRow>) {
-    setForm((f) => ({
-      ...f,
-      headers: f.headers.map((row, idx) => (idx === i ? { ...row, ...patch } : row)),
-    }));
-  }
+  async function handleSaveTool() {
+    const foundErrors = validateForm(form);
+    if (Object.keys(foundErrors).length > 0) return;
 
-  async function save() {
-    const found = validateForm(form);
-    if (Object.keys(found).length > 0) {
-      setErrors(found);
-      return;
-    }
     const payload = formToPayload(form);
+    if (editing) {
+      await updateTool.mutateAsync({ id: editing.id, patch: payload });
+      toast.success(`Tool “${form.name.trim()}” updated`);
+    } else {
+      await createTool.mutateAsync(payload);
+      toast.success(`Tool “${form.name.trim()}” created`);
+    }
+    setEditorOpen(false);
+  }
+
+  async function handleAddTemplateDirectly(template: ToolTemplate) {
+    setAddingTemplateSlug(template.slug);
     try {
-      if (editing) {
-        await updateTool.mutateAsync({ id: editing.id, patch: payload });
-      } else {
-        await createTool.mutateAsync(payload);
-      }
-      toast.success(editing ? "Tool updated" : `Tool “${form.name.trim()}” saved`);
-      setEditorOpen(false);
+      const payload = formToPayload(formFromTemplate(template));
+      await createTool.mutateAsync(payload);
+      toast.success(`“${template.title}” installed to your tools!`);
+      // Switch to tools view so user sees it right away
+      setActiveView("tools");
     } catch {
-      // the mutation hook already surfaced the API error as a toast
+      // Error handled by mutation hook toast
+    } finally {
+      setAddingTemplateSlug(null);
     }
   }
 
   function confirmDelete() {
     if (!deleting) return;
-    const id = deleting.id;
-    deleteTool.mutate(id, {
+    deleteTool.mutate(deleting.id, {
       onSuccess: () => {
         setDeleting(null);
         toast.success("Tool deleted");
@@ -271,9 +216,14 @@ export function ToolsPage() {
     });
   }
 
+  const starterTemplates = useMemo(() => {
+    return TEMPLATES.filter((t) => STARTER_TEMPLATE_SLUGS.includes(t.slug));
+  }, []);
+
   return (
     <div className="flex h-full flex-col bg-background">
-      <header className="flex items-center justify-between gap-2 border-b border-border/60 px-4 py-2 bg-background/80 backdrop-blur-xs z-10 shrink-0">
+      {/* App Header Bar */}
+      <header className="flex items-center justify-between gap-3 border-b border-border/60 px-4 py-2.5 bg-background/80 backdrop-blur-xs z-10 shrink-0">
         <div className="flex items-center gap-2 min-w-0">
           <Button
             variant="ghost"
@@ -291,464 +241,750 @@ export function ToolsPage() {
           >
             <Sidebar className="size-4" />
           </Button>
+
           <div className="flex items-center gap-2">
-            <Wrench className="size-4 shrink-0 text-muted-foreground" />
-            <h1 className="text-sm font-semibold tracking-tight">Tools</h1>
-            {tools && (
-              <Badge variant="secondary" className="shrink-0 font-mono text-xs px-1.5 py-0 h-4">
-                {tools.length}
-              </Badge>
+            <div className="flex size-7 items-center justify-center rounded-lg bg-primary/10 text-primary">
+              <Wrench className="size-3.5" />
+            </div>
+            <h1 className="text-sm font-semibold tracking-tight">Agent Tools</h1>
+            {tools && tools.length > 0 && (
+              <span className="rounded-full bg-muted px-2 py-0.5 font-mono text-[10px] text-muted-foreground font-medium">
+                {tools.length} configured
+              </span>
             )}
           </div>
         </div>
-        <div className="flex shrink-0 items-center gap-1">
-          <Button size="sm" onClick={() => openEditor(emptyForm(), null, null)}>
-            <Plus className="size-3.5" /> New tool
+
+        <div className="flex items-center gap-2">
+          {activeView === "tools" ? (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setActiveView("templates")}
+              className="text-xs gap-1.5"
+            >
+              <BookOpen className="size-3.5 text-primary" />
+              <span>Explore Templates</span>
+              <span className="rounded-full bg-muted px-1.5 py-0 text-[10px] font-mono text-muted-foreground">
+                18
+              </span>
+            </Button>
+          ) : (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setActiveView("tools")}
+              className="text-xs gap-1.5"
+            >
+              <Layers className="size-3.5" />
+              <span>My Tools</span>
+              {tools && (
+                <span className="rounded-full bg-muted px-1.5 py-0 text-[10px] font-mono text-muted-foreground">
+                  {tools.length}
+                </span>
+              )}
+            </Button>
+          )}
+
+          <Button
+            size="sm"
+            onClick={() => openEditor(emptyForm(), null, null)}
+            className="text-xs gap-1"
+          >
+            <Plus className="size-3.5" /> New Tool
           </Button>
         </div>
       </header>
 
+      {/* Main Content Area */}
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto w-full max-w-5xl space-y-10 px-4 py-8">
-          <section>
-            <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
-              <div>
-                <h2 className="text-base font-semibold tracking-tight">Start from a template</h2>
-                <p className="mt-0.5 text-sm text-muted-foreground">
-                  Prebuilt tools on free, open APIs — pick one, tweak it, save.
-                </p>
+        <div className="mx-auto w-full max-w-5xl space-y-6 px-4 py-6 sm:px-6">
+          {/* Capabilities & Stats Bar */}
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <div className="rounded-xl border bg-card p-3.5 shadow-2xs">
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-muted-foreground">Active in Agent</span>
+                <span className="flex size-2 rounded-full bg-emerald-500 animate-pulse" />
               </div>
-              <div className="flex flex-wrap gap-1.5">
-                {["All", ...TEMPLATE_CATEGORIES].map((cat) => (
-                  <button
-                    key={cat}
-                    type="button"
-                    onClick={() => setCategory(cat)}
-                    className={cn(
-                      "rounded-full border px-3 py-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50",
-                      category === cat
-                        ? "border-transparent bg-primary text-primary-foreground"
-                        : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
-                    )}
-                  >
-                    {cat}
-                  </button>
-                ))}
-              </div>
+              <p className="mt-2 font-mono text-2xl font-bold tracking-tight text-foreground">
+                {stats.active}
+              </p>
+              <p className="mt-0.5 text-[11px] text-muted-foreground">
+                Ready for chat invocation
+              </p>
             </div>
+
+            <div className="rounded-xl border bg-card p-3.5 shadow-2xs">
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-muted-foreground">Require Approval</span>
+                <ShieldCheck className="size-3.5 text-amber-600 dark:text-amber-400" />
+              </div>
+              <p className="mt-2 font-mono text-2xl font-bold tracking-tight text-foreground">
+                {stats.approval}
+              </p>
+              <p className="mt-0.5 text-[11px] text-muted-foreground">
+                Prompt for user confirmation
+              </p>
+            </div>
+
+            <div className="rounded-xl border bg-card p-3.5 shadow-2xs">
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-muted-foreground">Total Configured</span>
+                <Layers className="size-3.5 text-muted-foreground" />
+              </div>
+              <p className="mt-2 font-mono text-2xl font-bold tracking-tight text-foreground">
+                {stats.total}
+              </p>
+              <p className="mt-0.5 text-[11px] text-muted-foreground">
+                {stats.paused} currently paused
+              </p>
+            </div>
+
             <div
-              key={category}
-              className="-mx-1 flex snap-x snap-mandatory gap-3 overflow-x-auto px-1 pb-1 [scrollbar-width:thin]"
+              role="button"
+              tabIndex={0}
+              onClick={() => setActiveView("templates")}
+              onKeyDown={(e) => e.key === "Enter" && setActiveView("templates")}
+              className="rounded-xl border border-primary/20 bg-primary/5 p-3.5 shadow-2xs cursor-pointer transition-all hover:bg-primary/10 hover:border-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
-              {visibleTemplates.map((t, i) => (
-                <TemplateCard
-                  key={t.slug}
-                  template={t}
-                  index={i}
-                  onPick={() => openEditor(formFromTemplate(t), t, null)}
-                />
-              ))}
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium text-primary">Prebuilt Library</span>
+                <BookOpen className="size-3.5 text-primary" />
+              </div>
+              <p className="mt-2 font-mono text-2xl font-bold tracking-tight text-foreground">
+                {TEMPLATES.length}
+              </p>
+              <p className="mt-0.5 flex items-center gap-1 text-[11px] text-primary font-medium">
+                Browse templates <ArrowRight className="size-3" />
+              </p>
             </div>
-          </section>
+          </div>
 
-          <section>
-            <div className="mb-4 flex items-end justify-between gap-3">
-              <div>
-                <h2 className="text-base font-semibold tracking-tight">Your tools</h2>
-                <p className="mt-0.5 text-sm text-muted-foreground">
-                  Enabled tools are available to the agent in every chat.
-                </p>
+          {/* Primary View Switcher & Toolbar */}
+          <div className="flex flex-col gap-4 border-b border-border/60 pb-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              {/* View Toggle Tabs */}
+              <div className="flex items-center rounded-xl bg-muted/70 p-1">
+                <button
+                  type="button"
+                  onClick={() => setActiveView("tools")}
+                  className={cn(
+                    "flex items-center gap-2 rounded-lg px-3.5 py-1.5 text-xs font-medium transition-all",
+                    activeView === "tools"
+                      ? "bg-background text-foreground shadow-xs"
+                      : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  <Wrench className="size-3.5" />
+                  <span>My Configured Tools</span>
+                  {tools && (
+                    <Badge variant="secondary" className="px-1.5 py-0 font-mono text-[10px]">
+                      {tools.length}
+                    </Badge>
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveView("templates")}
+                  className={cn(
+                    "flex items-center gap-2 rounded-lg px-3.5 py-1.5 text-xs font-medium transition-all",
+                    activeView === "templates"
+                      ? "bg-background text-foreground shadow-xs"
+                      : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  <BookOpen className="size-3.5" />
+                  <span>Template Directory</span>
+                  <Badge variant="secondary" className="px-1.5 py-0 font-mono text-[10px]">
+                    18
+                  </Badge>
+                </button>
               </div>
-              {tools && tools.length > 0 && (
-                <span className="shrink-0 text-sm text-muted-foreground">
-                  {tools.length} total
-                </span>
-              )}
+
+              {/* Status explanation */}
+              <p className="text-xs text-muted-foreground">
+                {activeView === "tools"
+                  ? "Tools let Golem query live APIs with structured JSON schema arguments."
+                  : "Verified, zero-setup HTTP APIs ready to install in 1 click."}
+              </p>
             </div>
 
-            {isLoading && (
-              <div className="grid gap-3 sm:grid-cols-2">
-                {[0, 1, 2, 3].map((i) => (
-                  <Skeleton key={i} className="h-40 rounded-xl" />
-                ))}
-              </div>
-            )}
-
-            {isError && (
-              <div className={cn("flex flex-col items-center gap-3 rounded-xl border border-destructive/30 bg-destructive/5 px-6 py-12 text-center", enter)}>
-                <TriangleAlert className="size-5 text-destructive" />
-                <p className="text-sm text-muted-foreground">Couldn’t load your tools.</p>
-                <Button variant="outline" size="sm" onClick={() => void refetch()}>
-                  Try again
-                </Button>
-              </div>
-            )}
-
-            {!isLoading && !isError && tools?.length === 0 && (
-              <div className={cn("flex flex-col items-center gap-3 rounded-xl border border-dashed px-6 py-14 text-center", enter)}>
-                <span className="flex size-12 items-center justify-center rounded-full bg-muted">
-                  <Wrench className="size-5 text-muted-foreground" />
-                </span>
-                <div>
-                  <p className="font-medium">No tools yet</p>
-                  <p className="mx-auto mt-1 max-w-sm text-sm text-muted-foreground">
-                    Tools are HTTP APIs Golem can call mid-conversation. Pick a template above, or define
-                    your own from scratch.
-                  </p>
-                </div>
-                <Button size="sm" variant="outline" onClick={() => openEditor(emptyForm(), null, null)}>
-                  <Plus /> Define a custom tool
-                </Button>
-              </div>
-            )}
-
-            {tools && tools.length > 0 && (
-              <div className="grid gap-3 sm:grid-cols-2">
-                {tools.map((t, i) => (
-                  <ToolCard
-                    key={t.id}
-                    tool={t}
-                    index={i}
-                    onEdit={() => openEditor(formFromTool(t), null, t)}
-                    onDelete={() => setDeleting(t)}
-                    onToggle={(enabled) => updateTool.mutate({ id: t.id, patch: { enabled } })}
-                  />
-                ))}
-              </div>
-            )}
-          </section>
-        </div>
-      </div>
-
-      <Dialog open={editorOpen} onOpenChange={(open) => { if (!open) setEditorOpen(false); }}>
-        <DialogContent className="flex max-h-[92dvh] flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl">
-          <DialogHeader className="border-b px-6 py-4 text-left">
-            <DialogTitle className="text-base">
-              {editing ? `Edit ${editing.name}` : basedOn ? basedOn.title : "New tool"}
-            </DialogTitle>
-            <DialogDescription>
-              {editing
-                ? "Changes apply from the next chat turn on."
-                : basedOn
-                  ? `Prefilled from the ${basedOn.title} template — adjust anything before saving.`
-                  : "Define an HTTP API the agent can call during chat."}
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="min-h-0 flex-1 space-y-6 overflow-y-auto px-6 py-5">
-            <section className="space-y-4">
-              <div className="grid gap-2">
-                <Label htmlFor="tool-name">Name</Label>
-                <Input
-                  id="tool-name"
-                  value={form.name}
-                  onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-                  placeholder="get_weather"
-                  className="font-mono"
-                  autoComplete="off"
-                  spellCheck={false}
-                />
-                {errors.name ? (
-                  <p className="text-xs text-destructive">{errors.name}</p>
-                ) : (
-                  <p className="text-xs text-muted-foreground">
-                    Lowercase letters, digits and underscores. This is the name the model sees.
-                  </p>
-                )}
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="tool-desc">Description</Label>
-                <textarea
-                  id="tool-desc"
-                  value={form.description}
-                  onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
-                  rows={2}
-                  placeholder="Get the current temperature and wind for coordinates."
-                  className={cn(fieldCls, "min-h-0 resize-none")}
-                />
-                <p className="text-xs text-muted-foreground">
-                  The model reads this to decide when to call the tool — say what it does and when to use it.
-                </p>
-              </div>
-            </section>
-
-            <section className="space-y-3 border-t pt-5">
-              <div className="grid gap-3 sm:grid-cols-[7rem_1fr]">
-                <div className="grid gap-2">
-                  <Label htmlFor="tool-method">Method</Label>
-                  <select
-                    id="tool-method"
-                    value={form.method}
-                    onChange={(e) => setForm((f) => ({ ...f, method: e.target.value }))}
-                    className={selectCls}
-                  >
-                    {METHODS.map((m) => <option key={m} value={m}>{m}</option>)}
-                  </select>
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="tool-url">URL template</Label>
+            {/* View-specific Search & Filters */}
+            {activeView === "tools" ? (
+              <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+                {/* Search Input */}
+                <div className="relative flex-1 min-w-[220px] max-w-md">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground pointer-events-none" />
                   <Input
-                    id="tool-url"
-                    value={form.urlTemplate}
-                    onChange={(e) => setForm((f) => ({ ...f, urlTemplate: e.target.value }))}
-                    placeholder="https://api.example.com/v1/forecast"
-                    className="font-mono"
-                    autoComplete="off"
-                    spellCheck={false}
+                    value={toolsSearch}
+                    onChange={(e) => setToolsSearch(e.target.value)}
+                    placeholder="Search tools by name, description, method, host..."
+                    className="h-9 pl-9 pr-8 text-xs bg-card"
                   />
-                  {errors.url ? (
-                    <p className="text-xs text-destructive">{errors.url}</p>
-                  ) : (
-                    <p className="text-xs text-muted-foreground">
-                      Path params go inline as <code className="font-mono">{"{{name}}"}</code>; query params
-                      are appended automatically.
-                    </p>
+                  {toolsSearch && (
+                    <button
+                      type="button"
+                      onClick={() => setToolsSearch("")}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                    >
+                      <X className="size-3.5" />
+                    </button>
                   )}
                 </div>
-              </div>
-              <UrlPreview template={form.urlTemplate} />
-            </section>
 
-            <section className="space-y-3 border-t pt-5">
-              <div className="flex items-center justify-between gap-2">
-                <div>
-                  <h3 className="text-sm font-semibold">Parameters</h3>
-                  <p className="text-xs text-muted-foreground">Arguments the model fills in for each call.</p>
-                </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() =>
-                    setForm((f) => ({
-                      ...f,
-                      params: [...f.params, { name: "", in: "query", type: "string", required: false, description: "" }],
-                    }))
-                  }
-                >
-                  <Plus /> Add
-                </Button>
-              </div>
-              {errors.params && <p className="text-xs text-destructive">{errors.params}</p>}
-              {form.params.length === 0 && !errors.params && (
-                <p className="rounded-lg border border-dashed px-3 py-3 text-center text-xs text-muted-foreground">
-                  No parameters — the tool takes no arguments.
-                </p>
-              )}
-              {form.params.length > 0 && (
-                <div className="overflow-hidden rounded-lg border">
-                  <div className="hidden grid-cols-[1.1fr_4.5rem_5rem_4rem_1.4fr_2rem] gap-2 border-b bg-muted/40 px-3 py-2 text-[11px] font-medium tracking-wider text-muted-foreground uppercase sm:grid">
-                    <span>Name</span>
-                    <span>In</span>
-                    <span>Type</span>
-                    <span className="text-center">Req</span>
-                    <span>Description</span>
-                    <span />
-                  </div>
-                  <div className="divide-y">
-                    {form.params.map((p, i) => (
-                      <div
-                        key={i}
-                        className="grid gap-2 px-3 py-2 sm:grid-cols-[1.1fr_4.5rem_5rem_4rem_1.4fr_2rem] sm:items-center"
+                {/* Status Filter Chips */}
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {(
+                    [
+                      { id: "all", label: "All", count: stats.total },
+                      { id: "active", label: "Active", count: stats.active },
+                      { id: "paused", label: "Paused", count: stats.paused },
+                      { id: "approval", label: "Needs Approval", count: stats.approval },
+                    ] as const
+                  ).map((f) => (
+                    <button
+                      key={f.id}
+                      type="button"
+                      onClick={() => setStatusFilter(f.id)}
+                      className={cn(
+                        "flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors",
+                        statusFilter === f.id
+                          ? "border-primary bg-primary text-primary-foreground"
+                          : "border-border text-muted-foreground hover:bg-muted hover:text-foreground",
+                      )}
+                    >
+                      <span>{f.label}</span>
+                      <span
+                        className={cn(
+                          "rounded-full px-1.5 py-0 text-[10px] font-mono",
+                          statusFilter === f.id
+                            ? "bg-primary-foreground/20 text-primary-foreground"
+                            : "bg-muted text-muted-foreground",
+                        )}
                       >
-                        <Input
-                          value={p.name}
-                          onChange={(e) => setParam(i, { name: e.target.value })}
-                          placeholder="city"
-                          aria-label={`Parameter ${i + 1} name`}
-                          className="h-8 font-mono text-xs"
-                          autoComplete="off"
-                          spellCheck={false}
-                        />
-                        <select
-                          value={p.in}
-                          onChange={(e) => setParam(i, { in: e.target.value as ToolParam["in"] })}
-                          aria-label={`Parameter ${i + 1} location`}
-                          className={selectClsSm}
-                        >
-                          <option value="query">query</option>
-                          <option value="path">path</option>
-                        </select>
-                        <select
-                          value={p.type}
-                          onChange={(e) => setParam(i, { type: e.target.value as ToolParam["type"] })}
-                          aria-label={`Parameter ${i + 1} type`}
-                          className={selectClsSm}
-                        >
-                          {PARAM_TYPES.map((tp) => <option key={tp} value={tp}>{tp}</option>)}
-                        </select>
-                        <label className="flex items-center gap-1.5 text-xs text-muted-foreground sm:justify-center">
-                          <input
-                            type="checkbox"
-                            checked={p.required}
-                            onChange={(e) => setParam(i, { required: e.target.checked })}
-                            aria-label={`Parameter ${i + 1} required`}
-                            className="size-3.5 accent-[var(--primary)]"
-                          />
-                          <span className="sm:hidden">required</span>
-                        </label>
-                        <Input
-                          value={p.description}
-                          onChange={(e) => setParam(i, { description: e.target.value })}
-                          placeholder="What it means"
-                          aria-label={`Parameter ${i + 1} description`}
-                          className="h-8 text-xs"
-                        />
-                        <Button
-                          variant="ghost"
-                          size="icon-xs"
-                          aria-label={`Remove parameter ${i + 1}`}
-                          className="justify-self-end text-muted-foreground hover:text-destructive"
-                          onClick={() => setForm((f) => ({ ...f, params: f.params.filter((_, idx) => idx !== i) }))}
-                        >
-                          <Trash2 />
-                        </Button>
-                      </div>
-                    ))}
-                  </div>
+                        {f.count}
+                      </span>
+                    </button>
+                  ))}
                 </div>
-              )}
-            </section>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-3 pt-1">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  {/* Template Search */}
+                  <div className="relative flex-1 min-w-[240px] max-w-md">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground pointer-events-none" />
+                    <Input
+                      value={templateSearch}
+                      onChange={(e) => setTemplateSearch(e.target.value)}
+                      placeholder="Search templates (e.g. crypto, github, weather, news)..."
+                      className="h-9 pl-9 pr-8 text-xs bg-card"
+                    />
+                    {templateSearch && (
+                      <button
+                        type="button"
+                        onClick={() => setTemplateSearch("")}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                      >
+                        <X className="size-3.5" />
+                      </button>
+                    )}
+                  </div>
 
-            {(form.method === "POST" || form.method === "PUT" || form.method === "PATCH") && (
-              <section className="space-y-2 border-t pt-5">
-                <Label htmlFor="tool-body">Body template</Label>
-                <textarea
-                  id="tool-body"
-                  value={form.bodyTemplate}
-                  onChange={(e) => setForm((f) => ({ ...f, bodyTemplate: e.target.value }))}
-                  rows={3}
-                  placeholder={`{"city": {{city}}}`}
-                  className={cn(fieldCls, "max-h-48 resize-none font-mono text-xs")}
-                  spellCheck={false}
-                />
-                {errors.body ? (
-                  <p className="text-xs text-destructive">{errors.body}</p>
-                ) : (
-                  <p className="text-xs text-muted-foreground">
-                    JSON sent with the request; <code className="font-mono">{"{{placeholders}}"}</code> are
-                    substituted from the parameters.
-                  </p>
-                )}
-              </section>
+                  <span className="text-xs text-muted-foreground font-mono">
+                    Showing {filteredTemplates.length} of {TEMPLATES.length} templates
+                  </span>
+                </div>
+
+                {/* Category Pills */}
+                <div className="flex flex-wrap gap-1.5">
+                  {["All", ...TEMPLATE_CATEGORIES].map((cat) => {
+                    const isSelected = templateCategory === cat;
+                    const count = categoryCounts[cat] || 0;
+                    return (
+                      <button
+                        key={cat}
+                        type="button"
+                        onClick={() => setTemplateCategory(cat)}
+                        className={cn(
+                          "flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors",
+                          isSelected
+                            ? "border-primary bg-primary text-primary-foreground"
+                            : "border-border text-muted-foreground hover:bg-muted hover:text-foreground",
+                        )}
+                      >
+                        <span>{cat}</span>
+                        <span
+                          className={cn(
+                            "rounded-full px-1.5 py-0 text-[10px] font-mono",
+                            isSelected
+                              ? "bg-primary-foreground/20 text-primary-foreground"
+                              : "bg-muted text-muted-foreground",
+                          )}
+                        >
+                          {count}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
             )}
+          </div>
 
-            <section className="space-y-3 border-t pt-5">
-              <div className="flex items-center justify-between gap-2">
-                <div>
-                  <h3 className="text-sm font-semibold">Headers</h3>
-                  <p className="text-xs text-muted-foreground">
-                    Sent with every call. Values are masked after save.
-                  </p>
-                </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setForm((f) => ({ ...f, headers: [...f.headers, { key: "", value: "" }] }))}
-                >
-                  <Plus /> Add
-                </Button>
-              </div>
-              {form.headers.length === 0 && (
-                <p className="rounded-lg border border-dashed px-3 py-3 text-center text-xs text-muted-foreground">
-                  No headers — add e.g. <code className="font-mono">Authorization</code> for APIs that need a key.
-                </p>
-              )}
-              {form.headers.length > 0 && (
-                <div className="space-y-2">
-                  {form.headers.map((h, i) => (
-                    <div key={i} className="grid grid-cols-[1fr_1.4fr_2rem] items-center gap-2">
-                      <Input
-                        value={h.key}
-                        onChange={(e) => setHeader(i, { key: e.target.value })}
-                        placeholder="Authorization"
-                        aria-label={`Header ${i + 1} name`}
-                        className="h-8 font-mono text-xs"
-                        autoComplete="off"
-                        spellCheck={false}
-                      />
-                      <Input
-                        value={h.value}
-                        onChange={(e) => setHeader(i, { value: e.target.value })}
-                        placeholder={h.value === HEADER_MASK ? "keep stored secret" : "Bearer …"}
-                        type={h.value === HEADER_MASK ? "password" : "text"}
-                        aria-label={`Header ${i + 1} value`}
-                        className="h-8 font-mono text-xs"
-                        autoComplete="off"
-                      />
-                      <Button
-                        variant="ghost"
-                        size="icon-xs"
-                        aria-label={`Remove header ${i + 1}`}
-                        className="justify-self-end text-muted-foreground hover:text-destructive"
-                        onClick={() => setForm((f) => ({ ...f, headers: f.headers.filter((_, idx) => idx !== i) }))}
-                      >
-                        <Trash2 />
-                      </Button>
-                    </div>
+          {/* VIEW 1: USER CONFIGURED TOOLS */}
+          {activeView === "tools" && (
+            <div>
+              {isLoading && (
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  {[0, 1, 2, 3, 4, 5].map((i) => (
+                    <Skeleton key={i} className="h-44 rounded-xl" />
                   ))}
                 </div>
               )}
-              <p className="text-xs text-muted-foreground">
-                Secrets are stored server-side, never sent to the model, and shown masked — resending the
-                mask keeps the stored value.
-              </p>
-            </section>
 
-            <section className="space-y-3 border-t pt-5">
-              <h3 className="text-sm font-semibold">Behavior</h3>
-              <div className="divide-y overflow-hidden rounded-lg border">
-                <div className="flex items-center justify-between gap-4 px-3 py-3">
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium">Ask before running</p>
-                    <p className="text-xs text-muted-foreground">
-                      Golem pauses for your approval every time the model calls this tool.
+              {isError && (
+                <div className="flex flex-col items-center gap-3 rounded-xl border border-destructive/30 bg-destructive/5 px-6 py-12 text-center">
+                  <TriangleAlert className="size-5 text-destructive" />
+                  <p className="text-sm font-medium text-foreground">Couldn’t load your tools</p>
+                  <p className="text-xs text-muted-foreground max-w-sm">
+                    An error occurred while communicating with the tools API.
+                  </p>
+                  <Button variant="outline" size="sm" onClick={() => void refetch()}>
+                    Try again
+                  </Button>
+                </div>
+              )}
+
+              {/* Empty state: No tools installed at all */}
+              {!isLoading && !isError && tools?.length === 0 && (
+                <div className="rounded-2xl border border-dashed bg-card/60 p-8 text-center space-y-6">
+                  <div className="mx-auto flex size-14 items-center justify-center rounded-2xl border bg-muted/80 text-foreground">
+                    <Wrench className="size-7 text-primary" />
+                  </div>
+                  <div className="space-y-1.5 max-w-md mx-auto">
+                    <h3 className="text-base font-semibold">Equip Golem with Live Web APIs</h3>
+                    <p className="text-xs text-muted-foreground leading-relaxed">
+                      Custom tools allow Golem to fetch live weather data, check GitHub repositories, search Hacker News, read webpages, and perform actions mid-conversation.
                     </p>
                   </div>
-                  <Switch
-                    checked={form.requireApproval}
-                    onCheckedChange={(v) => setForm((f) => ({ ...f, requireApproval: v }))}
-                  />
-                </div>
-                <div className="flex items-center justify-between gap-4 px-3 py-3">
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium">Enabled</p>
-                    <p className="text-xs text-muted-foreground">Disabled tools are hidden from the agent.</p>
+
+                  {/* Starter recommendations */}
+                  <div className="space-y-3 max-w-xl mx-auto text-left">
+                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider text-center">
+                      Quick Install Starters (Zero Configuration)
+                    </p>
+                    <div className="grid gap-2 sm:grid-cols-3">
+                      {starterTemplates.map((t) => {
+                        const Icon = t.icon;
+                        const isAdding = addingTemplateSlug === t.slug;
+                        return (
+                          <div
+                            key={t.slug}
+                            className="flex flex-col justify-between rounded-xl border bg-card p-3 shadow-xs hover:border-foreground/25 transition-all"
+                          >
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <span className="flex size-7 items-center justify-center rounded-lg border bg-muted/60">
+                                  <Icon className="size-3.5 text-foreground" />
+                                </span>
+                                <span className="truncate text-xs font-semibold">{t.title}</span>
+                              </div>
+                              <p className="mt-2 line-clamp-2 text-[11px] text-muted-foreground">
+                                {t.tagline}
+                              </p>
+                            </div>
+                            <Button
+                              size="xs"
+                              variant="outline"
+                              className="mt-3 w-full text-xs font-medium"
+                              onClick={() => void handleAddTemplateDirectly(t)}
+                              disabled={isAdding}
+                            >
+                              <Plus className="size-3 mr-1" />
+                              {isAdding ? "Adding…" : "Add Tool"}
+                            </Button>
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
-                  <Switch
-                    checked={form.enabled}
-                    onCheckedChange={(v) => setForm((f) => ({ ...f, enabled: v }))}
-                  />
+
+                  <div className="flex items-center justify-center gap-3 pt-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setActiveView("templates")}
+                    >
+                      <BookOpen className="size-3.5 mr-1" /> Browse All 18 Templates
+                    </Button>
+                    <Button
+                      size="sm"
+                      onClick={() => openEditor(emptyForm(), null, null)}
+                    >
+                      <Plus className="size-3.5 mr-1" /> Create Custom Tool
+                    </Button>
+                  </div>
                 </div>
-              </div>
-            </section>
-          </div>
+              )}
 
-          <DialogFooter className="border-t bg-muted/30 px-6 py-3.5">
-            <Button variant="outline" size="sm" onClick={() => setEditorOpen(false)}>Cancel</Button>
-            <Button
-              size="sm"
-              onClick={() => void save()}
-              disabled={!form.name.trim() || !form.description.trim() || saving}
-            >
-              {saving ? "Saving…" : "Save tool"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+              {/* Empty state: Tools exist, but search / filter returns 0 */}
+              {!isLoading && !isError && tools && tools.length > 0 && filteredTools.length === 0 && (
+                <div className="flex flex-col items-center justify-center rounded-xl border border-dashed p-12 text-center">
+                  <Filter className="size-8 text-muted-foreground/60 mb-2" />
+                  <p className="text-sm font-medium text-foreground">No tools match your criteria</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Try adjusting your search query or clearing the status filter.
+                  </p>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="mt-4"
+                    onClick={() => {
+                      setToolsSearch("");
+                      setStatusFilter("all");
+                    }}
+                  >
+                    Reset Filters
+                  </Button>
+                </div>
+              )}
 
-      <Dialog open={deleting !== null} onOpenChange={(open) => { if (!open) setDeleting(null); }}>
+              {/* Tools Grid */}
+              {!isLoading && !isError && filteredTools.length > 0 && (
+                <div className="grid gap-3.5 sm:grid-cols-2 lg:grid-cols-3">
+                  {filteredTools.map((tool) => {
+                    const host = templateHost(tool.urlTemplate);
+                    const isUpdating = updateTool.isPending;
+
+                    return (
+                      <div
+                        key={tool.id}
+                        className={cn(
+                          "group relative flex flex-col justify-between rounded-xl border bg-card p-4 shadow-2xs transition-all duration-200",
+                          "hover:-translate-y-0.5 hover:shadow-md hover:border-foreground/25",
+                          !tool.enabled && "border-dashed bg-muted/10",
+                        )}
+                      >
+                        <div>
+                          {/* Card Header: Method + Name + Action Buttons */}
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              <span
+                                className={cn(
+                                  "shrink-0 rounded-md border px-1.5 py-0.5 font-mono text-[10px] font-semibold",
+                                  METHOD_STYLES[tool.method] ?? "border-border bg-muted text-muted-foreground",
+                                )}
+                              >
+                                {tool.method}
+                              </span>
+                              <span
+                                className="truncate font-mono text-xs font-semibold text-foreground cursor-pointer hover:underline"
+                                onClick={() => setInspectingTool(tool)}
+                                title={tool.name}
+                              >
+                                {tool.name}
+                              </span>
+                            </div>
+
+                            {/* Actions cluster */}
+                            <div className="flex items-center gap-0.5 shrink-0">
+                              <Button
+                                variant="ghost"
+                                size="icon-xs"
+                                aria-label={`Inspect ${tool.name}`}
+                                title="Inspect tool details"
+                                onClick={() => setInspectingTool(tool)}
+                                className="text-muted-foreground hover:text-foreground"
+                              >
+                                <Eye className="size-3" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon-xs"
+                                aria-label={`Edit ${tool.name}`}
+                                title="Edit tool"
+                                onClick={() => openEditor(formFromTool(tool), null, tool)}
+                                className="text-muted-foreground hover:text-foreground"
+                              >
+                                <Pencil className="size-3" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon-xs"
+                                aria-label={`Duplicate ${tool.name}`}
+                                title="Duplicate tool"
+                                onClick={() => handleDuplicate(tool)}
+                                className="text-muted-foreground hover:text-foreground"
+                              >
+                                <Copy className="size-3" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon-xs"
+                                aria-label={`Delete ${tool.name}`}
+                                title="Delete tool"
+                                className="text-muted-foreground hover:text-destructive"
+                                onClick={() => setDeleting(tool)}
+                              >
+                                <Trash2 className="size-3" />
+                              </Button>
+                            </div>
+                          </div>
+
+                          {/* Description */}
+                          <p
+                            className="mt-2.5 line-clamp-2 min-h-8 text-xs leading-relaxed text-muted-foreground cursor-pointer"
+                            onClick={() => setInspectingTool(tool)}
+                          >
+                            {tool.description}
+                          </p>
+
+                          {/* Meta Endpoint & Params */}
+                          <div className="mt-3 flex flex-wrap items-center gap-1.5 text-[11px]">
+                            <span className="rounded-md bg-muted/60 px-2 py-0.5 font-mono text-[10px] text-muted-foreground truncate max-w-[160px]">
+                              {host}
+                            </span>
+                            <span className="rounded-md bg-muted/60 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+                              {tool.params.length === 0
+                                ? "0 params"
+                                : `${tool.params.length} param${tool.params.length === 1 ? "" : "s"}`}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Card Footer: Status Badges & Toggle */}
+                        <div className="mt-4 flex items-center justify-between border-t border-border/60 pt-3">
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            {tool.requireApproval ? (
+                              <Badge
+                                variant="outline"
+                                className="gap-1 border-amber-500/40 bg-amber-500/10 text-[10px] font-medium text-amber-700 dark:text-amber-400 px-1.5 py-0"
+                              >
+                                <ShieldCheck className="size-3" /> approval
+                              </Badge>
+                            ) : (
+                              <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
+                                <span
+                                  className={cn(
+                                    "size-1.5 rounded-full",
+                                    tool.enabled ? "bg-emerald-500" : "bg-muted-foreground/40",
+                                  )}
+                                />
+                                {tool.enabled ? "Active" : "Paused"}
+                              </span>
+                            )}
+                          </div>
+
+                          <label className="flex items-center gap-2 cursor-pointer text-xs text-muted-foreground select-none">
+                            <span className="text-[11px] font-medium">
+                              {tool.enabled ? "Enabled" : "Disabled"}
+                            </span>
+                            <Switch
+                              checked={tool.enabled}
+                              onCheckedChange={(enabled) =>
+                                updateTool.mutate({ id: tool.id, patch: { enabled } })
+                              }
+                              aria-label={`Toggle ${tool.name} active`}
+                              disabled={isUpdating}
+                            />
+                          </label>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* VIEW 2: TEMPLATE DIRECTORY */}
+          {activeView === "templates" && (
+            <div>
+              {filteredTemplates.length === 0 ? (
+                <div className="flex flex-col items-center justify-center rounded-xl border border-dashed p-12 text-center">
+                  <Search className="size-8 text-muted-foreground/60 mb-2" />
+                  <p className="text-sm font-medium text-foreground">No templates match “{templateSearch}”</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Try searching for different keywords or select “All” categories.
+                  </p>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="mt-4"
+                    onClick={() => {
+                      setTemplateSearch("");
+                      setTemplateCategory("All");
+                    }}
+                  >
+                    Reset Template Search
+                  </Button>
+                </div>
+              ) : (
+                <div className="grid gap-3.5 sm:grid-cols-2 lg:grid-cols-3">
+                  {filteredTemplates.map((template) => {
+                    const Icon = template.icon;
+                    const host = templateHost(template.tool.urlTemplate);
+                    const isAdding = addingTemplateSlug === template.slug;
+
+                    return (
+                      <div
+                        key={template.slug}
+                        className="group flex flex-col justify-between rounded-xl border bg-card p-4 shadow-2xs transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md hover:border-foreground/25"
+                      >
+                        <div>
+                          {/* Template Header */}
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="flex items-center gap-2.5">
+                              <span className="flex size-9 items-center justify-center rounded-xl border bg-muted/60 text-foreground transition-transform group-hover:scale-105">
+                                <Icon className="size-4" />
+                              </span>
+                              <div>
+                                <h3 className="text-xs font-semibold tracking-tight text-foreground">
+                                  {template.title}
+                                </h3>
+                                <div className="flex items-center gap-1.5 mt-0.5">
+                                  <Badge
+                                    variant="outline"
+                                    className="font-normal text-[10px] px-1 py-0 h-4 text-muted-foreground"
+                                  >
+                                    {template.category}
+                                  </Badge>
+                                  <span className="rounded bg-emerald-600/10 px-1 py-0 font-mono text-[9px] font-semibold text-emerald-700 dark:text-emerald-400">
+                                    {template.tool.method}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Tagline */}
+                          <p className="mt-2.5 line-clamp-2 min-h-8 text-xs leading-relaxed text-muted-foreground">
+                            {template.tagline}
+                          </p>
+
+                          {/* Host & Parameters Meta */}
+                          <div className="mt-3 flex flex-wrap items-center gap-1.5 text-[11px]">
+                            <span className="rounded-md bg-muted/60 px-2 py-0.5 font-mono text-[10px] text-muted-foreground truncate max-w-[160px]">
+                              {host}
+                            </span>
+                            <span className="rounded-md bg-muted/60 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+                              {template.tool.params.length === 0
+                                ? "0 params"
+                                : `${template.tool.params.length} param${template.tool.params.length === 1 ? "" : "s"}`}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Template Footer Actions */}
+                        <div className="mt-4 flex items-center justify-between gap-2 border-t border-border/60 pt-3">
+                          <Button
+                            variant="ghost"
+                            size="xs"
+                            onClick={() => setInspectingTemplate(template)}
+                            className="text-xs text-muted-foreground hover:text-foreground"
+                          >
+                            <Eye className="size-3 mr-1" /> Preview
+                          </Button>
+
+                          <div className="flex items-center gap-1.5">
+                            <Button
+                              variant="outline"
+                              size="xs"
+                              onClick={() => openEditor(formFromTemplate(template), template, null)}
+                              title="Customize in editor before saving"
+                              className="text-xs"
+                            >
+                              <SlidersHorizontal className="size-3" />
+                            </Button>
+                            <Button
+                              size="xs"
+                              onClick={() => void handleAddTemplateDirectly(template)}
+                              disabled={isAdding}
+                              className="text-xs font-medium"
+                            >
+                              <Plus className="size-3 mr-1" />
+                              {isAdding ? "Adding…" : "Add"}
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Tool Details Inspector Dialog */}
+      <ToolDetailsDialog
+        tool={inspectingTool}
+        open={inspectingTool !== null}
+        onOpenChange={(open) => {
+          if (!open) setInspectingTool(null);
+        }}
+        onEdit={(tool) => openEditor(formFromTool(tool), null, tool)}
+        onDelete={(tool) => setDeleting(tool)}
+        onToggle={(tool, enabled) => updateTool.mutate({ id: tool.id, patch: { enabled } })}
+        onDuplicate={handleDuplicate}
+      />
+
+      {/* Template Preview Dialog */}
+      <TemplatePreviewDialog
+        template={inspectingTemplate}
+        open={inspectingTemplate !== null}
+        onOpenChange={(open) => {
+          if (!open) setInspectingTemplate(null);
+        }}
+        onUseTemplate={(template) => void handleAddTemplateDirectly(template)}
+        onCustomize={(template) => openEditor(formFromTemplate(template), template, null)}
+        isAdding={addingTemplateSlug !== null}
+      />
+
+      {/* Tool Creation & Editing Dialog */}
+      <ToolEditorDialog
+        open={editorOpen}
+        onOpenChange={(open) => {
+          if (!open) setEditorOpen(false);
+        }}
+        form={form}
+        setForm={setForm}
+        editing={editing}
+        basedOn={basedOn}
+        onSave={handleSaveTool}
+        saving={createTool.isPending || updateTool.isPending}
+      />
+
+      {/* Deletion Confirmation Dialog */}
+      <Dialog
+        open={deleting !== null}
+        onOpenChange={(open) => {
+          if (!open) setDeleting(null);
+        }}
+      >
         <DialogContent showCloseButton={false} className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Delete tool?</DialogTitle>
-            <DialogDescription>
-              “{deleting?.name}” will be removed and the agent will no longer be able to call it.
-              Conversations that used it keep their history.
+            <div className="flex items-center gap-2 text-destructive">
+              <ShieldAlert className="size-5" />
+              <DialogTitle className="text-base">Delete Tool?</DialogTitle>
+            </div>
+            <DialogDescription className="text-xs text-muted-foreground mt-1.5 leading-relaxed">
+              Are you sure you want to delete <code className="font-mono font-semibold text-foreground">“{deleting?.name}”</code>? Golem will no longer be able to call this tool in future conversations. Previous chat messages that referenced it will remain intact.
             </DialogDescription>
           </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDeleting(null)}>Cancel</Button>
-            <Button variant="destructive" onClick={confirmDelete} disabled={deleteTool.isPending}>
-              {deleteTool.isPending ? "Deleting…" : "Delete"}
+          <DialogFooter className="mt-4 gap-2">
+            <Button variant="outline" size="sm" onClick={() => setDeleting(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={confirmDelete}
+              disabled={deleteTool.isPending}
+            >
+              {deleteTool.isPending ? "Deleting…" : "Delete Tool"}
             </Button>
           </DialogFooter>
         </DialogContent>

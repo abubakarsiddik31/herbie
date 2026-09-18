@@ -15,6 +15,7 @@ var (
 	ErrOAuthUnlinked      = errors.New("oauth account not linked")
 	ErrOAuthConflict      = errors.New("oauth account linked to another user")
 	ErrInvalidOAuthCode   = errors.New("invalid oauth code")
+	ErrUserNotFound       = errors.New("user not found")
 )
 
 const oauthCodeTTL = 5 * time.Minute
@@ -139,7 +140,7 @@ func (s *Service) OAuthLogin(ctx context.Context, provider, subject, email strin
 			return AuthResult{}, err
 		}
 		return s.issue(ctx, existing)
-	} else if !errors.Is(err, ErrInvalidCredentials) {
+	} else if !errors.Is(err, ErrUserNotFound) && !errors.Is(err, ErrInvalidCredentials) {
 		return AuthResult{}, err
 	}
 	user, err := s.oauth.CreateOAuthUser(ctx, email)
@@ -199,6 +200,10 @@ func (s *Service) Refresh(ctx context.Context, refreshToken string) (AuthResult,
 	}
 	newExp := time.Now().Add(RefreshTTL)
 	if err := s.refresh.Rotate(ctx, hash, newHash, newExp); err != nil {
+		if errors.Is(err, ErrInvalidRefresh) {
+			_ = s.refresh.RevokeFamily(ctx, rec.UserID)
+			return AuthResult{}, ErrInvalidRefresh
+		}
 		return AuthResult{}, fmt.Errorf("rotate refresh token: %w", err)
 	}
 	access, exp, err := s.tokens.Issue(user.ID, time.Now())
