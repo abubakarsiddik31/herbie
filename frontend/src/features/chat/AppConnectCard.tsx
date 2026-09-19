@@ -149,16 +149,16 @@ export function AppConnectCard({ providerId, className, returnTo }: AppConnectCa
             className="gap-1 text-xs text-muted-foreground hover:text-foreground h-7 px-2"
           >
             <SlidersHorizontal className="size-3" />
-            <span>Options</span>
+            <span>Settings</span>
           </Button>
 
-          {isConfigured && (
+          {providerId === "google_calendar" ? (
             <Button
               size="xs"
-              variant="outline"
+              variant="default"
               disabled={connecting}
               onClick={handleConnect}
-              className="gap-1.5 text-xs font-medium h-7"
+              className="gap-1.5 text-xs font-medium shadow-xs h-7"
             >
               {connecting ? (
                 <>
@@ -168,26 +168,49 @@ export function AppConnectCard({ providerId, className, returnTo }: AppConnectCa
               ) : (
                 <>
                   <ExternalLink className="size-3" />
-                  <span>OAuth Connect</span>
+                  <span>Connect Google Calendar</span>
                 </>
               )}
             </Button>
+          ) : (
+            <>
+              {isConfigured && (
+                <Button
+                  size="xs"
+                  variant="outline"
+                  disabled={connecting}
+                  onClick={handleConnect}
+                  className="gap-1.5 text-xs font-medium h-7"
+                >
+                  {connecting ? (
+                    <>
+                      <Loader2 className="size-3 animate-spin" />
+                      <span>Connecting…</span>
+                    </>
+                  ) : (
+                    <>
+                      <ExternalLink className="size-3" />
+                      <span>OAuth Connect</span>
+                    </>
+                  )}
+                </Button>
+              )}
+              <Button
+                size="xs"
+                variant="default"
+                disabled={linkCatalogApp.isPending}
+                onClick={handleOneClickLink}
+                className="gap-1.5 text-xs font-medium bg-purple-600 hover:bg-purple-700 text-white shadow-xs h-7"
+              >
+                {linkCatalogApp.isPending ? (
+                  <Loader2 className="size-3 animate-spin" />
+                ) : (
+                  <Sparkles className="size-3" />
+                )}
+                <span>Connect {meta.name}</span>
+              </Button>
+            </>
           )}
-
-          <Button
-            size="xs"
-            variant="default"
-            disabled={linkCatalogApp.isPending}
-            onClick={handleOneClickLink}
-            className="gap-1.5 text-xs font-medium bg-purple-600 hover:bg-purple-700 text-white shadow-xs h-7"
-          >
-            {linkCatalogApp.isPending ? (
-              <Loader2 className="size-3 animate-spin" />
-            ) : (
-              <Sparkles className="size-3" />
-            )}
-            <span>1-Click Link</span>
-          </Button>
         </div>
       </div>
 

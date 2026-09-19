@@ -65,11 +65,10 @@ describe("AppConnectCard", () => {
     });
 
     expect(await screen.findByText("Google Calendar Connection Required")).toBeInTheDocument();
-    expect(screen.getByText("OAuth Connect")).toBeInTheDocument();
-    expect(screen.getByText("1-Click Link")).toBeInTheDocument();
+    expect(screen.getByText("Connect Google Calendar")).toBeInTheDocument();
 
     // Stub window.location.href assignment
-    const btn = screen.getByText("OAuth Connect");
+    const btn = screen.getByText("Connect Google Calendar");
     fireEvent.click(btn);
 
     await waitFor(() => {
@@ -78,13 +77,13 @@ describe("AppConnectCard", () => {
     });
   });
 
-  it("triggers 1-click link when clicking 1-Click Link button", async () => {
+  it("triggers link when clicking Connect button", async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(<AppConnectCard providerId="github" />, {
       wrapper: wrapper(client),
     });
 
-    const linkBtn = await screen.findByText("1-Click Link");
+    const linkBtn = await screen.findByText("Connect GitHub");
     fireEvent.click(linkBtn);
 
     await waitFor(() => {

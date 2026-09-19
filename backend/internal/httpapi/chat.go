@@ -401,7 +401,17 @@ func (s *Server) userTools(ctx context.Context, userID string, ragEnabled bool) 
 			tools = append(tools, mTools...)
 		}
 	}
-	return tools, nil
+
+	// Deduplicate tools by name to ensure no duplicate function declarations are sent to the model API
+	seen := make(map[string]bool, len(tools))
+	var uniqueTools []tool.Tool[chat.Deps]
+	for _, t := range tools {
+		if !seen[t.Name] {
+			seen[t.Name] = true
+			uniqueTools = append(uniqueTools, t)
+		}
+	}
+	return uniqueTools, nil
 }
 
 func (s *Server) mcpTools(ctx context.Context, userID string) ([]tool.Tool[chat.Deps], error) {

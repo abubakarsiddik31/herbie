@@ -78,23 +78,6 @@ var DefaultCatalog = []CatalogApp{
 		},
 	},
 	{
-		ID:           "google_calendar",
-		Name:         "Google Calendar",
-		Mention:      "calendar",
-		Category:     "Productivity",
-		Description:  "View schedule, check agenda, and create or cancel calendar meetings.",
-		Icon:         "calendar",
-		RequiresAuth: false,
-		AuthType:     "oauth",
-		Tools: []Tool{
-			{
-				Name:        "google_calendar",
-				Description: "View upcoming events, schedule meetings, or cancel meetings on Google Calendar.",
-				InputSchema: json.RawMessage(`{"type":"object","properties":{"action":{"type":"string","enum":["list_events","create_event","delete_event"]},"summary":{"type":"string"},"start_time":{"type":"string"},"end_time":{"type":"string"}},"required":["action"]}`),
-			},
-		},
-	},
-	{
 		ID:           "web_fetch",
 		Name:         "Web Reader & Fetch",
 		Mention:      "web_fetch",
