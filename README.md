@@ -1,6 +1,18 @@
-# golem-chatbot
+# Herbie
 
-A local-first chat application built on [golem](https://github.com/abubakarsiddik31/golem) — a Go agent framework by the same author. Register, chat with a streaming agent, and see every run metered: tokens, request counts, and USD cost per day and per model.
+> **The free, flexible open-source AI platform.**  
+> Built as an open alternative to ChatGPT Plus and Claude Pro for developers and power users who want complete flexibility, multi-model choice, visual automation workflows, custom tools, and self-hosted RAG without vendor lock-in.
+
+Powered under the hood by [golem](https://github.com/abubakarsiddik31/golem) (a high-performance Go agent framework) with a fast React 19 + TypeScript SPA frontend.
+
+### Why Herbie?
+- 🌐 **Multi-Model Freedom**: Chat with Gemini, OpenAI, Claude, or local proxies — switch models per-conversation without losing context.
+- 📁 **Project Workspaces**: Claude-style scoped projects with attached files, persistent guidelines, and isolated RAG knowledge.
+- ⚡ **Visual Workflows**: Node-based automation canvas (n8n-style via `@xyflow/react`) — execute triggers, HTTP requests, LLMs, and expose workflows directly as native agent tools!
+- 🛠️ **Custom API Tools & Web Search**: Register any HTTP API with JSON parameters and optional human-in-the-loop approval cards, plus built-in Brave/Tavily web search.
+- 📚 **Production RAG**: Document uploads (PDF, DOCX, MD, TXT), chunking, Weaviate vector embeddings, listwise LLM reranking, and exact inline citations `[n]`.
+- 📊 **Exact Cost & Token Metering**: Real-time per-run token counters, daily spend ledgers, and exact USD cost calculations down to $0.00001.
+- 🎙️ **Multimodal & Voice**: Image attachments (up to 4 images) and speech-to-text dictation via browser Web Speech API.
 
 ## Architecture
 

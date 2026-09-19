@@ -38,7 +38,7 @@ export function SharedPage() {
             This shared conversation does not exist or its link was revoked.
           </p>
           <Button asChild>
-            <Link to="/">Open Golem</Link>
+            <Link to="/">Open Herbie</Link>
           </Button>
         </div>
       </div>

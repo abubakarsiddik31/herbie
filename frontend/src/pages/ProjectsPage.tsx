@@ -138,7 +138,7 @@ export function ProjectsPage() {
         </div>
 
         <div className="flex items-center gap-2">
-          <Button size="sm" onClick={() => setCreateOpen(true)}>
+          <Button size="sm" variant="brand" onClick={() => setCreateOpen(true)}>
             <Plus className="size-3.5" /> New Project
           </Button>
         </div>
@@ -149,7 +149,7 @@ export function ProjectsPage() {
           <div className="flex flex-col gap-1">
             <h2 className="text-lg font-semibold tracking-tight">Project Workspaces</h2>
             <p className="text-xs text-muted-foreground">
-              Projects combine scoped file management with intelligent chat. When chatting inside a project, Golem searches your project files first before checking the web.
+              Projects combine scoped file management with intelligent chat. When chatting inside a project, Herbie searches your project files first before checking the web.
             </p>
           </div>
 
@@ -181,7 +181,7 @@ export function ProjectsPage() {
                   Create a project to give your conversations a dedicated knowledge base and custom instructions.
                 </p>
               </div>
-              <Button size="sm" onClick={() => setCreateOpen(true)}>
+              <Button size="sm" variant="brand" onClick={() => setCreateOpen(true)}>
                 <Plus className="size-3.5" /> Create your first project
               </Button>
             </div>
@@ -298,7 +298,7 @@ export function ProjectsPage() {
               <Button type="button" variant="outline" onClick={() => setCreateOpen(false)}>
                 Cancel
               </Button>
-              <Button type="submit" disabled={!name.trim() || createProject.isPending}>
+              <Button type="submit" variant="brand" disabled={!name.trim() || createProject.isPending}>
                 {createProject.isPending ? "Creating…" : "Create Project"}
               </Button>
             </DialogFooter>

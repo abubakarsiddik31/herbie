@@ -154,11 +154,11 @@ export function TemplatePreviewDialog({
             </Button>
             <Button
               size="sm"
+              variant="brand"
               onClick={() => {
                 onOpenChange(false);
                 onUseTemplate(template);
               }}
-              disabled={isAdding}
             >
               <Plus className="size-3.5 mr-1" />
               {isAdding ? "Adding…" : "Add to My Tools"}

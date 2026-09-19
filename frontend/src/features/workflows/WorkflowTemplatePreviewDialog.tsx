@@ -117,6 +117,7 @@ export function WorkflowTemplatePreviewDialog({
           </Button>
           <Button
             size="sm"
+            variant="brand"
             onClick={() => onUseTemplate(template)}
             disabled={isCloning}
             className="gap-2 shadow-xs"

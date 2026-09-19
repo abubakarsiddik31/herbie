@@ -288,6 +288,7 @@ export function ToolsPage() {
 
           <Button
             size="sm"
+            variant="brand"
             onClick={() => openEditor(emptyForm(), null, null)}
             className="text-xs gap-1"
           >
@@ -404,7 +405,7 @@ export function ToolsPage() {
               {/* Status explanation */}
               <p className="text-xs text-muted-foreground">
                 {activeView === "tools"
-                  ? "Tools let Golem query live APIs with structured JSON schema arguments."
+                  ? "Tools let Herbie query live APIs with structured JSON schema arguments."
                   : "Verified, zero-setup HTTP APIs ready to install in 1 click."}
               </p>
             </div>
@@ -563,9 +564,9 @@ export function ToolsPage() {
                     <Wrench className="size-7 text-primary" />
                   </div>
                   <div className="space-y-1.5 max-w-md mx-auto">
-                    <h3 className="text-base font-semibold">Equip Golem with Live Web APIs</h3>
+                    <h3 className="text-base font-semibold">Equip Herbie with Live Web APIs</h3>
                     <p className="text-xs text-muted-foreground leading-relaxed">
-                      Custom tools allow Golem to fetch live weather data, check GitHub repositories, search Hacker News, read webpages, and perform actions mid-conversation.
+                      Custom tools allow Herbie to fetch live weather data, check GitHub repositories, search Hacker News, read webpages, and perform actions mid-conversation.
                     </p>
                   </div>
 
@@ -620,6 +621,7 @@ export function ToolsPage() {
                     </Button>
                     <Button
                       size="sm"
+                      variant="brand"
                       onClick={() => openEditor(emptyForm(), null, null)}
                     >
                       <Plus className="size-3.5 mr-1" /> Create Custom Tool
@@ -971,7 +973,7 @@ export function ToolsPage() {
               <DialogTitle className="text-base">Delete Tool?</DialogTitle>
             </div>
             <DialogDescription className="text-xs text-muted-foreground mt-1.5 leading-relaxed">
-              Are you sure you want to delete <code className="font-mono font-semibold text-foreground">“{deleting?.name}”</code>? Golem will no longer be able to call this tool in future conversations. Previous chat messages that referenced it will remain intact.
+              Are you sure you want to delete <code className="font-mono font-semibold text-foreground">“{deleting?.name}”</code>? Herbie will no longer be able to call this tool in future conversations. Previous chat messages that referenced it will remain intact.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="mt-4 gap-2">

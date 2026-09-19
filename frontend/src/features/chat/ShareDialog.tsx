@@ -92,7 +92,7 @@ export function ShareDialog({ conversation, onOpenChange }: Props) {
             </Button>
           )}
           {!shared && (
-            <Button disabled={busy} onClick={createLink}>
+            <Button variant="brand" disabled={busy} onClick={createLink}>
               {share.isPending ? "Sharing…" : "Create link"}
             </Button>
           )}

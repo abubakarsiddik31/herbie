@@ -7,7 +7,7 @@ export function conversationFilename(title: string, now = new Date()): string {
       .replace(/[^a-z0-9]+/g, "-")
       .replace(/^-+|-+$/g, "")
       .slice(0, 40) || "untitled";
-  return `golem-${slug}-${now.toISOString().slice(0, 10)}.md`;
+  return `herbie-${slug}-${now.toISOString().slice(0, 10)}.md`;
 }
 
 // toMarkdown renders a thread as a Markdown document. Message content
@@ -38,7 +38,7 @@ export function toMarkdown(conv: Conversation, messages: ChatMessage[]): string 
   lines.push(
     "---",
     `*Model: ${conv.model || "default"} · ${messages.length} messages · ` +
-      `${inTokens} in / ${outTokens} out · $${cost.toFixed(5)} · Exported from Golem*`,
+      `${inTokens} in / ${outTokens} out · $${cost.toFixed(5)} · Exported from Herbie*`,
   );
   return lines.join("\n");
 }

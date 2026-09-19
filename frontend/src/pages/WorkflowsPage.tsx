@@ -214,7 +214,7 @@ export function WorkflowsPage() {
               Visual automation pipelines like n8n with AI nodes, webhooks, and external tool integrations.
             </p>
           </div>
-          <Button onClick={() => setCreateOpen(true)} className="gap-2 self-start sm:self-auto shadow-xs">
+          <Button variant="brand" onClick={() => setCreateOpen(true)} className="gap-2 self-start sm:self-auto shadow-xs">
             <Plus className="size-4" />
             <span>New Workflow</span>
           </Button>
@@ -611,8 +611,8 @@ export function WorkflowsPage() {
             <Button variant="outline" size="sm" onClick={() => setCreateOpen(false)}>
               Cancel
             </Button>
-            <Button size="sm" onClick={handleCreateCustom} disabled={createWorkflow.isPending || !name.trim()}>
-              {createWorkflow.isPending ? "Creating..." : "Create & Open Canvas"}
+            <Button variant="brand" size="sm" onClick={handleCreateCustom} disabled={createWorkflow.isPending || !name.trim()}>
+              {createWorkflow.isPending ? "Creating…" : "Create & Open Canvas"}
             </Button>
           </DialogFooter>
         </DialogContent>

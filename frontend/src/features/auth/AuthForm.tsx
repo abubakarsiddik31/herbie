@@ -20,7 +20,7 @@ import { Label } from "@/components/ui/label";
 const copy = {
   login: {
     title: "Welcome back",
-    subtitle: "Sign in to continue to Golem",
+    subtitle: "Sign in to continue to Herbie",
     cta: "Sign in",
     endpoint: "/api/auth/login",
     footer: "No account?",
@@ -29,7 +29,7 @@ const copy = {
   },
   register: {
     title: "Create your account",
-    subtitle: "Get started with Golem",
+    subtitle: "Get started with Herbie",
     cta: "Sign up",
     endpoint: "/api/auth/register",
     footer: "Already have an account?",
@@ -113,7 +113,7 @@ export function AuthForm({ mode }: { mode: keyof typeof copy }) {
                 onChange={(e) => setPassword(e.target.value)}
               />
             </div>
-            <Button type="submit" disabled={pending}>
+            <Button type="submit" variant="brand" disabled={pending} className="w-full">
               {pending ? "Please wait…" : t.cta}
             </Button>
           </form>

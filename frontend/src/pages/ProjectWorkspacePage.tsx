@@ -305,7 +305,7 @@ export function ProjectWorkspacePage() {
                   <div className="space-y-1">
                     <h2 className="text-xl font-semibold">{project.name} Workspace</h2>
                     <p className="max-w-md text-xs text-muted-foreground">
-                      {project.description || "Chat grounded in your project documents. Golem searches your project files first before checking the web."}
+                      {project.description || "Chat grounded in your project documents. Herbie searches your project files first before checking the web."}
                     </p>
                   </div>
                   {projectFiles.length > 0 ? (

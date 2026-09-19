@@ -379,6 +379,7 @@ export function WorkflowCanvasPage() {
 
           <Button
             size="sm"
+            variant={hasUnsavedChanges ? "brand" : "outline"}
             onClick={handleSave}
             disabled={updateWorkflow.isPending || !hasUnsavedChanges}
             className="h-8 gap-1.5 text-xs shadow-2xs"

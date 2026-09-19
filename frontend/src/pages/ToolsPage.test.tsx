@@ -78,7 +78,7 @@ describe("ToolsPage UI and UX", () => {
     renderToolsPage();
 
     await waitFor(() => {
-      expect(screen.getByText("Equip Golem with Live Web APIs")).toBeInTheDocument();
+      expect(screen.getByText("Equip Herbie with Live Web APIs")).toBeInTheDocument();
     });
 
     expect(screen.getByText("Quick Install Starters (Zero Configuration)")).toBeInTheDocument();

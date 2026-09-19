@@ -211,7 +211,7 @@ export function WorkflowSettingsDialog({
           <Button variant="outline" size="sm" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          <Button size="sm" onClick={handleSave}>
+          <Button variant="brand" size="sm" onClick={handleSave}>
             Save Changes
           </Button>
         </DialogFooter>

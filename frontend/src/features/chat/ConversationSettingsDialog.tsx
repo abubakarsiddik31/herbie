@@ -141,6 +141,7 @@ export function ConversationSettingsDialog({ open, onOpenChange, models, setting
             Cancel
           </Button>
           <Button
+            variant="brand"
             onClick={() =>
               onApply({
                 model: effectiveModel,

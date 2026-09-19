@@ -230,7 +230,7 @@ export function SettingsDialog({ open, onOpenChange, defaultTab = "general" }: P
                     <div>
                       <h3 className="text-sm font-semibold text-foreground">Custom instructions</h3>
                       <p className="text-xs text-muted-foreground mt-0.5">
-                        What would you like Golem to know about you to provide better responses?
+                        What would you like Herbie to know about you to provide better responses?
                       </p>
                     </div>
                   </div>
@@ -281,7 +281,7 @@ export function SettingsDialog({ open, onOpenChange, defaultTab = "general" }: P
                         <h3 className="text-sm font-semibold text-foreground">Saved memories</h3>
                       </div>
                       <p className="text-xs text-muted-foreground mt-0.5">
-                        Details Golem has remembered across your conversations.
+                        Details Herbie has remembered across your conversations.
                       </p>
                     </div>
                     {memories && memories.length > 0 && (
@@ -308,7 +308,7 @@ export function SettingsDialog({ open, onOpenChange, defaultTab = "general" }: P
                       aria-label="New memory"
                       value={newMemory}
                       onChange={(e) => setNewMemory(e.target.value)}
-                      placeholder="Add something for Golem to remember…"
+                      placeholder="Add something for Herbie to remember…"
                       className="flex-1 rounded-lg border border-input bg-transparent px-3 py-1.5 text-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/40"
                     />
                     <Button
@@ -324,7 +324,7 @@ export function SettingsDialog({ open, onOpenChange, defaultTab = "general" }: P
                     {memoriesLoading && <Skeleton className="h-10 w-full rounded-lg" />}
                     {!memoriesLoading && (!memories || memories.length === 0) && (
                       <p className="py-4 text-center text-xs text-muted-foreground">
-                        No memories yet. You can tell Golem to remember things, or add them here.
+                        No memories yet. You can tell Herbie to remember things, or add them here.
                       </p>
                     )}
                     {memories?.map((m) => (
@@ -355,7 +355,7 @@ export function SettingsDialog({ open, onOpenChange, defaultTab = "general" }: P
                   <div>
                     <h3 className="text-sm font-semibold text-foreground">HTTP Tools & APIs</h3>
                     <p className="text-xs text-muted-foreground mt-0.5">
-                      Enable external web APIs and services for Golem to call during chat.
+                      Enable external web APIs and services for Herbie to call during chat.
                     </p>
                   </div>
                   <Button variant="outline" size="sm" asChild onClick={() => onOpenChange(false)}>

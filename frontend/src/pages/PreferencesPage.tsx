@@ -146,7 +146,7 @@ export function PreferencesPage() {
               <p className={tooLong ? "text-destructive text-xs" : "text-muted-foreground text-xs"}>
                 {`${currentDraft.length} / ${MAX_INSTRUCTIONS_CHARS}`}
               </p>
-              <Button size="sm" disabled={!dirty || tooLong || update.isPending} onClick={saveInstructions}>
+              <Button size="sm" variant="brand" disabled={!dirty || tooLong || update.isPending} onClick={saveInstructions}>
                 {update.isPending ? "Saving…" : "Save"}
               </Button>
             </div>

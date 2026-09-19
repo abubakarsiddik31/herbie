@@ -280,10 +280,10 @@ export function NodeInspector({
               </div>
             )}
 
-            {node.type === "golem_tool" && (
+            {(node.type === "golem_tool" || node.type === "herbie_tool") && (
               <div className="space-y-3">
                 <div className="space-y-1.5">
-                  <Label className="text-xs">Select Golem Tool</Label>
+                  <Label className="text-xs">Select Herbie Tool</Label>
                   <select
                     value={(config.toolName as string) || ""}
                     onChange={(e) => updateConfig("toolName", e.target.value)}

@@ -18,7 +18,10 @@ const SidebarContext = createContext<SidebarContextType | undefined>(undefined);
 export function SidebarProvider({ children }: { children: React.ReactNode }) {
   const [collapsed, setCollapsedState] = useState<boolean>(() => {
     try {
-      return localStorage.getItem("golem:sidebar-collapsed") === "true";
+      return (
+        localStorage.getItem("herbie:sidebar-collapsed") === "true" ||
+        localStorage.getItem("golem:sidebar-collapsed") === "true"
+      );
     } catch {
       return false;
     }
@@ -30,7 +33,7 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
   const setCollapsed = (val: boolean) => {
     setCollapsedState(val);
     try {
-      localStorage.setItem("golem:sidebar-collapsed", String(val));
+      localStorage.setItem("herbie:sidebar-collapsed", String(val));
     } catch {
       // localStorage unavailable
     }
@@ -52,7 +55,7 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
         setCollapsedState((prev) => {
           const next = !prev;
           try {
-            localStorage.setItem("golem:sidebar-collapsed", String(next));
+            localStorage.setItem("herbie:sidebar-collapsed", String(next));
           } catch { /* ignore */ }
           return next;
         });

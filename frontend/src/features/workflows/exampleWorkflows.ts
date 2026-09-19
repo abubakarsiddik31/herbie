@@ -191,7 +191,7 @@ export const EXAMPLE_WORKFLOWS: WorkflowExample[] = [
     category: "Utilities & Tools",
     tagline: "Exposed as a native tool for the chatbot agent to call",
     description:
-      "Configured as a callable Golem Agent Tool. When a user asks about the weather in chat, the agent automatically executes this workflow.",
+      "Configured as a callable Herbie Agent Tool. When a user asks about the weather in chat, the agent automatically executes this workflow.",
     icon: Bot,
     badge: "Chatbot Tool",
     triggerType: "chat_agent",
@@ -417,7 +417,7 @@ export const EXAMPLE_WORKFLOWS: WorkflowExample[] = [
           statusCode: 201,
           headers: {
             "Content-Type": "application/json",
-            "X-Server": "GolemWorkflow",
+            "X-Server": "HerbieWorkflow",
           },
           body: {
             status: "accepted",
@@ -528,7 +528,7 @@ export const EXAMPLE_WORKFLOWS: WorkflowExample[] = [
         position: { x: 340, y: 150 },
         data: {
           fields: {
-            title: "🚀 Golem v{{ $json.body.release.tag_name }} is out!",
+            title: "🚀 Herbie v{{ $json.body.release.tag_name }} is out!",
             notes: "{{ $json.body.release.body }}",
             url: "{{ $json.body.release.html_url }}",
           },

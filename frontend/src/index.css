@@ -4,6 +4,16 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* ==========================================================================
+   HERBIE ATOMIC DESIGN SYSTEM
+   Color Brand: Nordic Sage & Mineral Slate
+   Inspiration: Architectural Mineral Stone, Eucalyptus & Nordic Forest Slate
+   Architecture:
+     Layer 1: Primitives (Raw OKLCH Scales)
+     Layer 2: Semantics (Meaning & Theme)
+     Layer 3: Tailwind Theme Tokens (@theme inline)
+   ========================================================================== */
+
 @theme inline {
     --radius-sm: calc(var(--radius) - 4px);
     --radius-md: calc(var(--radius) - 2px);
@@ -12,6 +22,8 @@
     --radius-2xl: calc(var(--radius) + 8px);
     --radius-3xl: calc(var(--radius) + 12px);
     --radius-4xl: calc(var(--radius) + 16px);
+
+    /* Core Semantic Colors */
     --color-background: var(--background);
     --color-foreground: var(--foreground);
     --color-card: var(--card);
@@ -30,11 +42,37 @@
     --color-border: var(--border);
     --color-input: var(--input);
     --color-ring: var(--ring);
+
+    /* Herbie Signature Brand Tokens (Nordic Sage & Slate) */
+    --color-brand: var(--brand);
+    --color-brand-foreground: var(--brand-foreground);
+    --color-brand-hover: var(--brand-hover);
+    --color-brand-muted: var(--brand-muted);
+    --color-brand-muted-foreground: var(--brand-muted-foreground);
+    --color-brand-border: var(--brand-border);
+    --color-brand-ring: var(--brand-ring);
+
+    /* Atomic Sage Primitives */
+    --color-sage-50: var(--sage-50);
+    --color-sage-100: var(--sage-100);
+    --color-sage-200: var(--sage-200);
+    --color-sage-300: var(--sage-300);
+    --color-sage-400: var(--sage-400);
+    --color-sage-500: var(--sage-500);
+    --color-sage-600: var(--sage-600);
+    --color-sage-700: var(--sage-700);
+    --color-sage-800: var(--sage-800);
+    --color-sage-900: var(--sage-900);
+    --color-sage-950: var(--sage-950);
+
+    /* Charts & Data Visualization */
     --color-chart-1: var(--chart-1);
     --color-chart-2: var(--chart-2);
     --color-chart-3: var(--chart-3);
     --color-chart-4: var(--chart-4);
     --color-chart-5: var(--chart-5);
+
+    /* Sidebar Semantics */
     --color-sidebar: var(--sidebar);
     --color-sidebar-foreground: var(--sidebar-foreground);
     --color-sidebar-primary: var(--sidebar-primary);
@@ -45,80 +83,137 @@
     --color-sidebar-ring: var(--sidebar-ring);
 }
 
+/* ==========================================================================
+   LAYER 1: PRIMITIVES
+   Calibrated OKLCH color palettes for perceptually uniform lightness & chroma
+   ========================================================================== */
 :root {
+    /* Nordic Mineral Sage Scale (Organic hue angle 155, low calm chroma) */
+    --sage-50: oklch(0.975 0.010 155);
+    --sage-100: oklch(0.935 0.020 155);
+    --sage-200: oklch(0.865 0.035 155);
+    --sage-300: oklch(0.770 0.055 155);
+    --sage-400: oklch(0.680 0.070 155);
+    --sage-500: oklch(0.580 0.075 155);
+    --sage-600: oklch(0.480 0.070 155);
+    --sage-700: oklch(0.390 0.058 155);
+    --sage-800: oklch(0.290 0.042 155);
+    --sage-900: oklch(0.200 0.025 155);
+    --sage-950: oklch(0.135 0.012 155);
+
+    /* System Geometry */
     --radius: 0.625rem;
-    --background: oklch(1 0 0);
-    --foreground: oklch(0.145 0 0);
+
+    /* ========================================================================
+       LAYER 2: LIGHT THEME SEMANTICS (Limestone Alabaster & Alpine Sage)
+       ======================================================================== */
+    --background: oklch(0.990 0.004 155);
+    --foreground: oklch(0.160 0.015 155);
     --card: oklch(1 0 0);
-    --card-foreground: oklch(0.145 0 0);
+    --card-foreground: oklch(0.160 0.015 155);
     --popover: oklch(1 0 0);
-    --popover-foreground: oklch(0.145 0 0);
-    --primary: oklch(0.205 0 0);
-    --primary-foreground: oklch(0.985 0 0);
-    --secondary: oklch(0.97 0 0);
-    --secondary-foreground: oklch(0.205 0 0);
-    --muted: oklch(0.97 0 0);
-    --muted-foreground: oklch(0.556 0 0);
-    --accent: oklch(0.97 0 0);
-    --accent-foreground: oklch(0.205 0 0);
+    --popover-foreground: oklch(0.160 0.015 155);
+
+    /* Semantic Primary - Unified Brand CTA (Nordic Sage) */
+    --primary: var(--brand);
+    --primary-foreground: var(--brand-foreground);
+
+    /* Semantic Brand - Deep Alpine Pine Sage (high contrast, WCAG AAA) */
+    --brand: var(--sage-600);
+    --brand-foreground: oklch(0.990 0.005 155);
+    --brand-hover: var(--sage-700);
+    --brand-muted: var(--sage-100);
+    --brand-muted-foreground: var(--sage-700);
+    --brand-border: var(--sage-200);
+    --brand-ring: var(--sage-500);
+
+    --secondary: oklch(0.965 0.008 155);
+    --secondary-foreground: oklch(0.210 0.015 155);
+    --muted: oklch(0.965 0.008 155);
+    --muted-foreground: oklch(0.530 0.025 155);
+    --accent: oklch(0.965 0.008 155);
+    --accent-foreground: oklch(0.210 0.015 155);
     --destructive: oklch(0.577 0.245 27.325);
-    --border: oklch(0.922 0 0);
-    --input: oklch(0.922 0 0);
-    --ring: oklch(0.708 0 0);
-    --chart-1: oklch(0.87 0 0);
-    --chart-2: oklch(0.556 0 0);
-    --chart-3: oklch(0.439 0 0);
-    --chart-4: oklch(0.371 0 0);
-    --chart-5: oklch(0.269 0 0);
-    --sidebar: oklch(0.985 0 0);
-    --sidebar-foreground: oklch(0.145 0 0);
-    --sidebar-primary: oklch(0.205 0 0);
-    --sidebar-primary-foreground: oklch(0.985 0 0);
-    --sidebar-accent: oklch(0.97 0 0);
-    --sidebar-accent-foreground: oklch(0.205 0 0);
-    --sidebar-border: oklch(0.922 0 0);
-    --sidebar-ring: oklch(0.708 0 0);
+    --border: oklch(0.915 0.010 155);
+    --input: oklch(0.915 0.010 155);
+    --ring: var(--brand-ring);
+
+    /* Charts */
+    --chart-1: var(--sage-500);
+    --chart-2: oklch(0.556 0.025 155);
+    --chart-3: oklch(0.439 0.025 155);
+    --chart-4: oklch(0.371 0.025 155);
+    --chart-5: oklch(0.269 0.025 155);
+
+    /* Sidebar */
+    --sidebar: oklch(0.978 0.006 155);
+    --sidebar-foreground: oklch(0.160 0.015 155);
+    --sidebar-primary: var(--brand);
+    --sidebar-primary-foreground: var(--brand-foreground);
+    --sidebar-accent: oklch(0.945 0.012 155);
+    --sidebar-accent-foreground: oklch(0.160 0.015 155);
+    --sidebar-border: oklch(0.915 0.010 155);
+    --sidebar-ring: var(--brand-ring);
 }
 
+/* ==========================================================================
+   LAYER 2: DARK THEME SEMANTICS (Granite Slate Noir & Luminous Mineral Sage)
+   ========================================================================== */
 .dark {
-    --background: oklch(0.145 0 0);
-    --foreground: oklch(0.985 0 0);
-    --card: oklch(0.205 0 0);
-    --card-foreground: oklch(0.985 0 0);
-    --popover: oklch(0.205 0 0);
-    --popover-foreground: oklch(0.985 0 0);
-    --primary: oklch(0.922 0 0);
-    --primary-foreground: oklch(0.205 0 0);
-    --secondary: oklch(0.269 0 0);
-    --secondary-foreground: oklch(0.985 0 0);
-    --muted: oklch(0.269 0 0);
-    --muted-foreground: oklch(0.708 0 0);
-    --accent: oklch(0.269 0 0);
-    --accent-foreground: oklch(0.985 0 0);
+    --background: oklch(0.130 0.008 155);
+    --foreground: oklch(0.950 0.010 155);
+    --card: oklch(0.175 0.010 155);
+    --card-foreground: oklch(0.950 0.010 155);
+    --popover: oklch(0.175 0.010 155);
+    --popover-foreground: oklch(0.950 0.010 155);
+
+    /* Semantic Primary - Unified Brand CTA (Luminous Mineral Sage) */
+    --primary: var(--brand);
+    --primary-foreground: var(--brand-foreground);
+
+    /* Semantic Brand - Luminous Mineral Sage (calm, desaturated radiance) */
+    --brand: var(--sage-400);
+    --brand-foreground: oklch(0.120 0.012 155);
+    --brand-hover: oklch(0.740 0.065 155);
+    --brand-muted: oklch(0.240 0.020 155 / 50%);
+    --brand-muted-foreground: var(--sage-300);
+    --brand-border: oklch(0.420 0.035 155 / 40%);
+    --brand-ring: var(--sage-400);
+
+    --secondary: oklch(0.240 0.012 155);
+    --secondary-foreground: oklch(0.950 0.010 155);
+    --muted: oklch(0.240 0.012 155);
+    --muted-foreground: oklch(0.680 0.025 155);
+    --accent: oklch(0.240 0.012 155);
+    --accent-foreground: oklch(0.950 0.010 155);
     --destructive: oklch(0.704 0.191 22.216);
     --border: oklch(1 0 0 / 10%);
-    --input: oklch(1 0 0 / 15%);
-    --ring: oklch(0.556 0 0);
-    --chart-1: oklch(0.87 0 0);
-    --chart-2: oklch(0.556 0 0);
-    --chart-3: oklch(0.439 0 0);
-    --chart-4: oklch(0.371 0 0);
-    --chart-5: oklch(0.269 0 0);
-    --sidebar: oklch(0.205 0 0);
-    --sidebar-foreground: oklch(0.985 0 0);
-    --sidebar-primary: oklch(0.488 0.243 264.376);
-    --sidebar-primary-foreground: oklch(0.985 0 0);
-    --sidebar-accent: oklch(0.269 0 0);
-    --sidebar-accent-foreground: oklch(0.985 0 0);
+    --input: oklch(1 0 0 / 14%);
+    --ring: var(--brand-ring);
+
+    /* Charts */
+    --chart-1: var(--sage-400);
+    --chart-2: oklch(0.556 0.025 155);
+    --chart-3: oklch(0.439 0.025 155);
+    --chart-4: oklch(0.371 0.025 155);
+    --chart-5: oklch(0.269 0.025 155);
+
+    /* Sidebar */
+    --sidebar: oklch(0.155 0.008 155);
+    --sidebar-foreground: oklch(0.950 0.010 155);
+    --sidebar-primary: var(--brand);
+    --sidebar-primary-foreground: var(--brand-foreground);
+    --sidebar-accent: oklch(0.215 0.014 155);
+    --sidebar-accent-foreground: oklch(0.950 0.010 155);
     --sidebar-border: oklch(1 0 0 / 10%);
-    --sidebar-ring: oklch(0.556 0 0);
+    --sidebar-ring: var(--brand-ring);
 }
 
 @layer base {
   * {
     @apply border-border outline-ring/50;
-    }
+  }
   body {
     @apply bg-background text-foreground;
-    }
+  }
 }

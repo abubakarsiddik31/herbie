@@ -83,7 +83,7 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
   {
     type: "golem_tool",
     category: "tool",
-    label: "Golem Tool",
+    label: "Herbie Tool",
     description: "Execute a tool saved in your custom tools directory",
     icon: Wrench,
     color: "text-sky-500",
@@ -120,7 +120,7 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     bgColor: "bg-amber-500/10 border-amber-500/30",
     defaultData: {
       webhookUrl: "",
-      text: "Hello from Golem Workflow! Result: {{ $json }}",
+      text: "Hello from Herbie Workflow! Result: {{ $json }}",
     },
   },
   {
@@ -133,8 +133,8 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     bgColor: "bg-violet-500/10 border-violet-500/30",
     defaultData: {
       webhookUrl: "",
-      content: "Golem notification: {{ $json }}",
-      username: "Golem Bot",
+      content: "Herbie notification: {{ $json }}",
+      username: "Herbie Bot",
     },
   },
 

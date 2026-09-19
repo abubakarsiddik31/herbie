@@ -169,7 +169,7 @@ export function CredentialsDialog({ open, onOpenChange }: CredentialsDialogProps
                 <Button variant="ghost" size="sm" onClick={() => setIsAdding(false)}>
                   Cancel
                 </Button>
-                <Button size="sm" onClick={handleAdd} disabled={createCred.isPending}>
+                <Button variant="brand" size="sm" onClick={handleAdd} disabled={createCred.isPending}>
                   {createCred.isPending ? "Saving..." : "Save Credential"}
                 </Button>
               </div>

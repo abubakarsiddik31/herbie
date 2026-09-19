@@ -40,6 +40,7 @@ var DefaultExecutors = map[string]NodeExecutor{
 	"trigger_chat":     executeChatTrigger,
 	"http_request":     executeHTTPRequest,
 	"golem_tool":       executeGolemTool,
+	"herbie_tool":      executeGolemTool,
 	"condition":        executeCondition,
 	"code_transform":   executeCodeTransform,
 	"transform":        executeCodeTransform,

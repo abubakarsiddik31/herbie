@@ -28,7 +28,7 @@ export function ShortcutsDialog({ open, onOpenChange }: Props) {
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Keyboard shortcuts</DialogTitle>
-          <DialogDescription>Quick actions available across Golem.</DialogDescription>
+          <DialogDescription>Quick actions available across Herbie.</DialogDescription>
         </DialogHeader>
         <div className="divide-y divide-border">
           {SHORTCUTS.map((s) => (

@@ -61,6 +61,6 @@ describe("SharedPage", () => {
   it("explains revoked or unknown links", async () => {
     renderShared("bogus");
     expect(await screen.findByText("Link unavailable")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Open Golem" })).toHaveAttribute("href", "/");
+    expect(screen.getByRole("link", { name: "Open Herbie" })).toHaveAttribute("href", "/");
   });
 });

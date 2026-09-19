@@ -114,9 +114,9 @@ function CopyMessageButton({ text }: { text: string }) {
 
 const SUGGESTIONS = [
   { icon: Globe, label: "What's the weather in Tokyo?" },
-  { icon: Flame, label: "Search Hacker News for agent frameworks" },
-  { icon: BookOpen, label: "Summarize the Wikipedia article on golems" },
-  { icon: PenLine, label: "Draft a short launch post for a CLI tool" },
+  { icon: Flame, label: "Search Hacker News for AI agent developments" },
+  { icon: BookOpen, label: "Explain quantum computing in simple terms" },
+  { icon: PenLine, label: "Draft a short launch post for an open source tool" },
 ];
 
 export function ChatPage() {
@@ -860,7 +860,7 @@ export function ChatPage() {
                   }
                 }}
                 rows={1}
-                placeholder={pending.length > 0 ? "Waiting for approval…" : "Message Golem…"}
+                placeholder={pending.length > 0 ? "Waiting for approval…" : "Message Herbie…"}
                 disabled={running || pending.length > 0}
                 className="max-h-48 min-h-9 w-full resize-none bg-transparent px-2 py-1 text-sm outline-none placeholder:text-muted-foreground/60 field-sizing-content disabled:cursor-not-allowed"
               />
@@ -934,6 +934,7 @@ export function ChatPage() {
                 ) : (
                   <Button
                     size="icon-xs"
+                    variant="brand"
                     className="rounded-lg size-7"
                     onClick={() => void submit()}
                     disabled={(!input.trim() && attachments.length === 0) || createConversation.isPending}
@@ -950,7 +951,7 @@ export function ChatPage() {
           <p className="px-1 pt-1.5 text-center text-[11px] text-muted-foreground/60">
             {pending.length > 0
               ? "Resolve the approval above to continue."
-              : "Golem can make mistakes. Consider checking important information."}
+              : "Herbie can make mistakes. Consider checking important information."}
           </p>
         </div>
       </div>

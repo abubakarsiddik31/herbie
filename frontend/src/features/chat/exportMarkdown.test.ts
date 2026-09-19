@@ -23,7 +23,7 @@ describe("toMarkdown", () => {
     expect(md).toContain("# Moon Facts");
     expect(md).toContain("**User** · 2026-01-01T00:00:00Z");
     expect(md).toContain("```ts\nconst x = 1;\n```");
-    expect(md).toContain("*Model: gemini-2.5-flash · 2 messages · 10 in / 20 out · $0.00007 · Exported from Golem*");
+    expect(md).toContain("*Model: gemini-2.5-flash · 2 messages · 10 in / 20 out · $0.00007 · Exported from Herbie*");
   });
 
   it("marks images and truncated answers without breaking the text", () => {
@@ -49,10 +49,10 @@ describe("toMarkdown", () => {
 describe("conversationFilename", () => {
   it("slugifies the title and stamps the date", () => {
     expect(conversationFilename("Moon Facts!", new Date("2026-03-04T00:00:00Z"))).toBe(
-      "golem-moon-facts-2026-03-04.md",
+      "herbie-moon-facts-2026-03-04.md",
     );
     expect(conversationFilename("!!!", new Date("2026-03-04T00:00:00Z"))).toBe(
-      "golem-untitled-2026-03-04.md",
+      "herbie-untitled-2026-03-04.md",
     );
   });
 });

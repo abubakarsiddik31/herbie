@@ -217,7 +217,7 @@ export function ToolEditorDialog({
                   ? "Changes take effect from your next chat interaction."
                   : basedOn
                     ? `Prefilled from ${basedOn.title} template. Adjust options as needed.`
-                    : "Define an HTTP API with parameters that Golem can call autonomously."}
+                    : "Define an HTTP API with parameters that Herbie can call autonomously."}
               </DialogDescription>
             </div>
           </div>
@@ -455,7 +455,7 @@ export function ToolEditorDialog({
                 <div>
                   <h3 className="text-sm font-semibold">Tool Parameters ({form.params.length})</h3>
                   <p className="text-xs text-muted-foreground">
-                    Define the arguments that Golem should extract and pass to this endpoint.
+                    Define the arguments that Herbie should extract and pass to this endpoint.
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
@@ -786,7 +786,7 @@ export function ToolEditorDialog({
               <div>
                 <h3 className="text-sm font-semibold">Agent Execution Policy</h3>
                 <p className="text-xs text-muted-foreground">
-                  Configure how Golem handles security and availability for this tool.
+                  Configure how Herbie handles security and availability for this tool.
                 </p>
               </div>
 
@@ -799,7 +799,7 @@ export function ToolEditorDialog({
                       <p className="text-sm font-medium">Require Approval Before Execution</p>
                     </div>
                     <p className="text-xs text-muted-foreground">
-                      Golem will pause and ask you to confirm before invoking this tool in chat. Recommended for actions that modify records, send messages, or cost money.
+                      Herbie will pause and ask you to confirm before invoking this tool in chat. Recommended for actions that modify records, send messages, or cost money.
                     </p>
                   </div>
                   <Switch
@@ -842,6 +842,7 @@ export function ToolEditorDialog({
             )}
             <Button
               size="sm"
+              variant="brand"
               onClick={() => void handleSave()}
               disabled={!form.name.trim() || !form.description.trim() || saving}
             >

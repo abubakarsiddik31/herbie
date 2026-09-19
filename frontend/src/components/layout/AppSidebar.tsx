@@ -186,7 +186,7 @@ export function AppSidebar() {
         <div className="flex items-center justify-between p-3 border-b border-sidebar-border/60">
           <div className="flex items-center gap-2.5">
             <BrandMark className="size-6" />
-            <span className="font-semibold text-sm tracking-tight">Golem</span>
+            <span className="font-semibold text-sm tracking-tight">Herbie</span>
           </div>
           <div className="flex items-center gap-1">
             <Button
@@ -215,6 +215,7 @@ export function AppSidebar() {
         <div className="p-3 pb-2">
           <Button
             size="sm"
+            variant="brand"
             onClick={startNewChat}
             className="w-full justify-between shadow-xs hover:shadow-sm"
           >
@@ -222,7 +223,7 @@ export function AppSidebar() {
               <Plus className="size-4" />
               <span>New chat</span>
             </span>
-            <kbd className="font-mono text-[10px] bg-primary-foreground/20 px-1 py-0.5 rounded text-primary-foreground">
+            <kbd className="font-mono text-[10px] bg-brand-foreground/20 px-1 py-0.5 rounded text-brand-foreground">
               ⌘O
             </kbd>
           </Button>
@@ -376,7 +377,7 @@ export function AppSidebar() {
                       className={cn(
                         "group relative flex items-center rounded-lg px-2 py-1 text-xs transition-colors",
                         isSelected
-                          ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
+                          ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium border-l-2 border-brand pl-1.5"
                           : "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
                       )}
                     >
