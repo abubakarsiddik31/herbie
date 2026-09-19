@@ -28,14 +28,9 @@ Build in order. One branch per item, merge to `main` before starting the next.
 - [x] **11. Artifacts & Code Preview** (`ca829ae`): Interactive code block previews for HTML (sandboxed iframe with reload), SVG (vector render), and Mermaid (flowcharts/diagrams with theme integration), with Code/Preview tabs, fullscreen modal expansion, and copy button.
 - [x] **12. Cross-Chat Memory** (`3a80e64`): Persistent long-term user memories table & migrations, automatic memory injection (`[User memory]`) into every conversation run, built-in `remember` tool, and memory management UI on `/preferences`.
 - [x] **13. Visual Workflows & Tool Automation**: n8n-style visual workflow builder with `@xyflow/react`, DAG execution engine in Go, universal HTTP/REST caller, external tool integration (GitHub, Slack, Discord, Golem tools), webhook triggers, condition branching, and agent tool bridge.
+- [x] **14. One-Click OAuth Tool Integrations & Safety Core**: Authenticated AES-256-GCM encrypted credentials vault, unified socket-level SSRF & DNS rebinding protection across all workflow and tool calls, automatic secret redaction filter for outputs and logs, human-in-the-loop (HITL) approval gating for chat-invoked workflows, 1-click OAuth 2.0 authorization code connect/disconnect for GitHub & Slack, and fine-grained audit logging.
 
 ## Future roadmap / Bigger bets (each its own project)
 
 - Voice output / Read Aloud (dictation input only today).
 - Image generation tool (input-only today).
-- **One-Click OAuth Tool Integrations (GitHub, Slack, Google Workspace, Jira)**:
-  - OAuth 2.0 Authorization Code Flow for third-party integrations with interactive user consent screens.
-  - 1-click "Connect Account" buttons in the Credentials Vault to eliminate manual Personal Access Token (PAT) generation.
-  - User-scoped secure storage with AES-GCM token encryption and automated refresh token lifecycle management.
-  - Granular permission scope selection (e.g. `read:repo`, `write:issues`, `chat:write`) and per-workflow access revocation.
-  - Fine-grained audit logging tracking which workflow executions and AI agent turns invoked external tools on behalf of the user.
