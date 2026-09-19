@@ -49,6 +49,34 @@ const mockUsageData = {
       costUsd: 0.001,
     },
   ],
+  searches: {
+    totalQueries: 15,
+    webQueries: 10,
+    docQueries: 5,
+    byProvider: [
+      { provider: "tavily", count: 8 },
+      { provider: "brave", count: 2 },
+      { provider: "rag", count: 5 },
+    ],
+    daily: [
+      { day: "2026-09-18", count: 7 },
+      { day: "2026-09-19", count: 8 },
+    ],
+    recent: [
+      {
+        id: "sq-1",
+        query: "latest AI news",
+        kind: "web_search",
+        provider: "tavily",
+        resultsCount: 5,
+        durationMs: 150,
+        createdAt: "2026-09-19T10:00:00Z",
+      },
+    ],
+    topQueries: [
+      { query: "latest AI news", count: 3 },
+    ],
+  },
 };
 
 let requestedDays = 30;
@@ -96,13 +124,16 @@ describe("UsagePage", () => {
     expect(await screen.findByText("Total Spend")).toBeInTheDocument();
     expect(screen.getByText("Tokens Processed")).toBeInTheDocument();
     expect(screen.getByText("API Invocations")).toBeInTheDocument();
+    expect(screen.getByText("AI Search Queries")).toBeInTheDocument();
     expect(screen.getByText("Avg. Cost / Request")).toBeInTheDocument();
 
     // Side panel sections
     expect(screen.getByText("Spend by Category")).toBeInTheDocument();
     expect(screen.getByText("Top Models")).toBeInTheDocument();
+    expect(screen.getByText("AI Search Analysis")).toBeInTheDocument();
     expect(screen.getByText("Document Indexing")).toBeInTheDocument();
     expect(screen.getByText("quarterly-report.pdf")).toBeInTheDocument();
+    expect(screen.getByText('"latest AI news"')).toBeInTheDocument();
   });
 
   it("switches time range filter pills (7d, 30d, 90d)", async () => {
@@ -163,5 +194,20 @@ describe("UsagePage", () => {
 
     expect(await screen.findByText("No usage recorded yet")).toBeInTheDocument();
     expect(screen.getByText("Start a chat")).toBeInTheDocument();
+  });
+
+  it("renders AI Search Analysis with provider and query breakdown", async () => {
+    renderUsagePage();
+
+    expect(await screen.findByText("AI Search Analysis")).toBeInTheDocument();
+    expect(screen.getAllByText("15 queries").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("10 web / 5 doc").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText("Search Engines & Adapters")).toBeInTheDocument();
+    expect(screen.getAllByText("tavily").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText("brave")).toBeInTheDocument();
+    expect(screen.getByText("Recent AI Search Queries")).toBeInTheDocument();
+    expect(screen.getByText('"latest AI news"')).toBeInTheDocument();
+    expect(screen.getByText("5 results found")).toBeInTheDocument();
+    expect(screen.getByText("Frequent Queries")).toBeInTheDocument();
   });
 });

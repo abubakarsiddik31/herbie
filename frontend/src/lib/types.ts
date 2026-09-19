@@ -28,7 +28,34 @@ export interface Source {
 }
 export interface UsageTotalsRow { kind: string; model: string; inputTokens: number; outputTokens: number; requests: number; costUsd: number }
 export interface UsageDailyRow { day: string; inputTokens: number; outputTokens: number; costUsd: number }
-export interface UsageSummary { totals: UsageTotalsRow[]; daily: UsageDailyRow[]; documents?: UsageDocumentRow[] }
+export interface SearchProviderCount { provider: string; count: number }
+export interface SearchDailyCount { day: string; count: number }
+export interface SearchQueryItem {
+  id: string;
+  query: string;
+  kind: string;
+  provider: string;
+  resultsCount: number;
+  durationMs?: number;
+  createdAt: string;
+  conversationId?: string;
+}
+export interface SearchQueryCount { query: string; count: number }
+export interface SearchAnalysis {
+  totalQueries: number;
+  webQueries: number;
+  docQueries: number;
+  byProvider: SearchProviderCount[];
+  daily: SearchDailyCount[];
+  recent: SearchQueryItem[];
+  topQueries: SearchQueryCount[];
+}
+export interface UsageSummary {
+  totals: UsageTotalsRow[];
+  daily: UsageDailyRow[];
+  documents?: UsageDocumentRow[];
+  searches?: SearchAnalysis;
+}
 
 export interface ToolParam {
   name: string;

@@ -21,6 +21,54 @@ type UsageEvent struct {
 	CostMicros     int64
 }
 
+type SearchQuery struct {
+	ID             string
+	UserID         string
+	ConversationID *string
+	Query          string
+	Kind           string
+	Provider       string
+	ResultsCount   int
+	DurationMs     int64
+	CreatedAt      time.Time
+}
+
+type SearchProviderCount struct {
+	Provider string `json:"provider"`
+	Count    int    `json:"count"`
+}
+
+type SearchDailyCount struct {
+	Day   string `json:"day"`
+	Count int    `json:"count"`
+}
+
+type SearchQueryItem struct {
+	ID             string    `json:"id"`
+	Query          string    `json:"query"`
+	Kind           string    `json:"kind"`
+	Provider       string    `json:"provider"`
+	ResultsCount   int       `json:"resultsCount"`
+	DurationMs     int64     `json:"durationMs"`
+	CreatedAt      time.Time `json:"createdAt"`
+	ConversationID string    `json:"conversationId,omitempty"`
+}
+
+type SearchQueryCount struct {
+	Query string `json:"query"`
+	Count int    `json:"count"`
+}
+
+type SearchAnalysis struct {
+	TotalQueries int                   `json:"totalQueries"`
+	WebQueries   int                   `json:"webQueries"`
+	DocQueries   int                   `json:"docQueries"`
+	ByProvider   []SearchProviderCount `json:"byProvider"`
+	Daily        []SearchDailyCount    `json:"daily"`
+	Recent       []SearchQueryItem     `json:"recent"`
+	TopQueries   []SearchQueryCount    `json:"topQueries"`
+}
+
 type Usage struct{ pool *pgxpool.Pool }
 
 func NewUsage(pool *pgxpool.Pool) *Usage { return &Usage{pool: pool} }
@@ -34,6 +82,18 @@ func (u *Usage) Add(ctx context.Context, e UsageEvent) error {
 		e.InputTokens, e.OutputTokens, e.Requests, e.Estimated, e.CostMicros)
 	if err != nil {
 		return fmt.Errorf("add usage event: %w", err)
+	}
+	return nil
+}
+
+func (u *Usage) RecordSearch(ctx context.Context, s SearchQuery) error {
+	_, err := u.pool.Exec(ctx,
+		`INSERT INTO search_queries
+		 (user_id, conversation_id, query, kind, provider, results_count, duration_ms, created_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE(NULLIF($8, '0001-01-01 00:00:00+00'::timestamptz), now()))`,
+		s.UserID, s.ConversationID, s.Query, s.Kind, s.Provider, s.ResultsCount, s.DurationMs, s.CreatedAt)
+	if err != nil {
+		return fmt.Errorf("record search query: %w", err)
 	}
 	return nil
 }
@@ -59,6 +119,8 @@ type Summary struct {
 	Daily  []DailyRow
 	// Documents carries per-document embedding spend (empty without RAG).
 	Documents []DocumentSpend
+	// Searches carries analysis of search queries performed by the user's AI.
+	Searches SearchAnalysis
 }
 
 // DocumentSpend is one document's embedding ledger rollup.
@@ -71,6 +133,11 @@ type DocumentSpend struct {
 
 func (u *Usage) Summary(ctx context.Context, userID string, days int) (Summary, error) {
 	var sum Summary
+	sum.Searches.ByProvider = []SearchProviderCount{}
+	sum.Searches.Daily = []SearchDailyCount{}
+	sum.Searches.Recent = []SearchQueryItem{}
+	sum.Searches.TopQueries = []SearchQueryCount{}
+
 	rows, err := u.pool.Query(ctx,
 		`SELECT kind, model, SUM(input_tokens)::int, SUM(output_tokens)::int,
 		        COALESCE(SUM(requests),0)::int, SUM(cost_micro_usd)
@@ -129,5 +196,95 @@ func (u *Usage) Summary(ctx context.Context, userID string, days int) (Summary, 
 		}
 		sum.Documents = append(sum.Documents, r)
 	}
-	return sum, rows3.Err()
+	if err := rows3.Err(); err != nil {
+		return sum, err
+	}
+
+	// Search queries breakdown and analysis
+	rowsSearchTotals, err := u.pool.Query(ctx,
+		`SELECT kind, COUNT(*)::int
+		 FROM search_queries
+		 WHERE user_id = $1 AND created_at > now() - make_interval(days => $2)
+		 GROUP BY kind`, userID, days)
+	if err == nil {
+		defer rowsSearchTotals.Close()
+		for rowsSearchTotals.Next() {
+			var k string
+			var count int
+			if err := rowsSearchTotals.Scan(&k, &count); err == nil {
+				sum.Searches.TotalQueries += count
+				if k == "web_search" {
+					sum.Searches.WebQueries += count
+				} else if k == "document_search" {
+					sum.Searches.DocQueries += count
+				}
+			}
+		}
+	}
+
+	rowsProviders, err := u.pool.Query(ctx,
+		`SELECT provider, COUNT(*)::int
+		 FROM search_queries
+		 WHERE user_id = $1 AND created_at > now() - make_interval(days => $2)
+		 GROUP BY provider ORDER BY 2 DESC`, userID, days)
+	if err == nil {
+		defer rowsProviders.Close()
+		for rowsProviders.Next() {
+			var pc SearchProviderCount
+			if err := rowsProviders.Scan(&pc.Provider, &pc.Count); err == nil {
+				sum.Searches.ByProvider = append(sum.Searches.ByProvider, pc)
+			}
+		}
+	}
+
+	rowsSearchDaily, err := u.pool.Query(ctx,
+		`SELECT date_trunc('day', created_at)::date, COUNT(*)::int
+		 FROM search_queries
+		 WHERE user_id = $1 AND created_at > now() - make_interval(days => $2)
+		 GROUP BY 1 ORDER BY 1`, userID, days)
+	if err == nil {
+		defer rowsSearchDaily.Close()
+		for rowsSearchDaily.Next() {
+			var t time.Time
+			var count int
+			if err := rowsSearchDaily.Scan(&t, &count); err == nil {
+				sum.Searches.Daily = append(sum.Searches.Daily, SearchDailyCount{
+					Day:   t.Format("2006-01-02"),
+					Count: count,
+				})
+			}
+		}
+	}
+
+	rowsRecent, err := u.pool.Query(ctx,
+		`SELECT id, query, kind, provider, results_count, duration_ms, created_at, COALESCE(conversation_id::text, '')
+		 FROM search_queries
+		 WHERE user_id = $1 AND created_at > now() - make_interval(days => $2)
+		 ORDER BY created_at DESC LIMIT 20`, userID, days)
+	if err == nil {
+		defer rowsRecent.Close()
+		for rowsRecent.Next() {
+			var qi SearchQueryItem
+			if err := rowsRecent.Scan(&qi.ID, &qi.Query, &qi.Kind, &qi.Provider, &qi.ResultsCount, &qi.DurationMs, &qi.CreatedAt, &qi.ConversationID); err == nil {
+				sum.Searches.Recent = append(sum.Searches.Recent, qi)
+			}
+		}
+	}
+
+	rowsTop, err := u.pool.Query(ctx,
+		`SELECT query, COUNT(*)::int
+		 FROM search_queries
+		 WHERE user_id = $1 AND created_at > now() - make_interval(days => $2)
+		 GROUP BY query ORDER BY 2 DESC LIMIT 10`, userID, days)
+	if err == nil {
+		defer rowsTop.Close()
+		for rowsTop.Next() {
+			var qc SearchQueryCount
+			if err := rowsTop.Scan(&qc.Query, &qc.Count); err == nil {
+				sum.Searches.TopQueries = append(sum.Searches.TopQueries, qc)
+			}
+		}
+	}
+
+	return sum, nil
 }

@@ -1021,4 +1021,70 @@ table "tool_audit_logs" {
   }
 }
 
+table "search_queries" {
+  schema = schema.public
+  column "id" {
+    type    = uuid
+    null    = false
+    default = sql("gen_random_uuid()")
+  }
+  column "user_id" {
+    type = uuid
+    null = false
+  }
+  column "conversation_id" {
+    type = uuid
+    null = true
+  }
+  column "query" {
+    type = text
+    null = false
+  }
+  column "kind" {
+    type    = text
+    null    = false
+    default = "web_search"
+  }
+  column "provider" {
+    type    = text
+    null    = false
+    default = ""
+  }
+  column "results_count" {
+    type    = integer
+    null    = false
+    default = 0
+  }
+  column "duration_ms" {
+    type    = bigint
+    null    = false
+    default = 0
+  }
+  column "created_at" {
+    type    = timestamptz
+    null    = false
+    default = sql("now()")
+  }
+  primary_key {
+    columns = [column.id]
+  }
+  foreign_key "search_queries_user_id_fkey" {
+    columns     = [column.user_id]
+    ref_columns = [table.users.column.id]
+    on_delete   = CASCADE
+  }
+  foreign_key "search_queries_conversation_id_fkey" {
+    columns     = [column.conversation_id]
+    ref_columns = [table.conversations.column.id]
+    on_delete   = SET_NULL
+  }
+  index "idx_search_queries_user_time" {
+    columns = [column.user_id, column.created_at]
+  }
+  index "idx_search_queries_user_kind" {
+    columns = [column.user_id, column.kind, column.created_at]
+  }
+}
+
+
 

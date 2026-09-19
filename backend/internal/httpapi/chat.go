@@ -56,6 +56,7 @@ type MsgStore interface {
 type UsageStore interface {
 	Add(ctx context.Context, e storage.UsageEvent) error
 	Summary(ctx context.Context, userID string, days int) (storage.Summary, error)
+	RecordSearch(ctx context.Context, sq storage.SearchQuery) error
 }
 
 // PendingStore bridges paused runs (approval-gated tools) to the later
@@ -221,6 +222,7 @@ func (s *Server) runTurn(ctx context.Context, userID, convID string, spec chat.R
 		Search:         s.searchDeps(userID, convID, &sources),
 		ListDocs:       s.listDocsDeps(userID, convID),
 		SaveMemory:     s.saveMemoryFunc(userID),
+		RecordSearch:   s.recordSearchFunc(userID, convID),
 	}, history, prompt, parts, sink, tools, spec)
 	if err != nil {
 		s.persistFailure(ctx, userID, convID, spec, err, sink)
@@ -645,10 +647,13 @@ func (s *Server) searchDeps(userID, convID string, sources *[]rag.Scored) chat.S
 				}
 			}
 		}
+		start := time.Now()
 		scored, rep, err := s.deps.RagSearch(ctx, userID, query, k, effectiveDocIDs)
+		dur := time.Since(start).Milliseconds()
 		if err != nil {
 			return nil, 0, err
 		}
+		s.recordSearch(ctx, userID, convID, query, "document_search", "rag", len(scored), dur)
 		offset := len(*sources)
 		*sources = append(*sources, scored...)
 		if rep.Embed.InputTokens > 0 {
@@ -669,6 +674,62 @@ func (s *Server) searchDeps(userID, convID string, sources *[]rag.Scored) chat.S
 			})
 		}
 		return scored, offset, nil
+	}
+}
+
+func (s *Server) recordSearchFunc(userID, convID string) func(ctx context.Context, query, kind, provider string, resultsCount int, durationMs int64) {
+	if s.deps.Usage == nil {
+		return nil
+	}
+	return func(ctx context.Context, query, kind, provider string, resultsCount int, durationMs int64) {
+		s.recordSearch(ctx, userID, convID, query, kind, provider, resultsCount, durationMs)
+	}
+}
+
+func (s *Server) recordSearch(ctx context.Context, userID, convID, query, kind, provider string, resultsCount int, durationMs int64) {
+	if provider == "" {
+		provider = s.deps.Cfg.WebSearch.Provider
+		if provider == "" {
+			provider = "web_search"
+		}
+	}
+	var cidPtr *string
+	if convID != "" {
+		cidPtr = &convID
+	}
+	if s.deps.Usage != nil {
+		_ = s.deps.Usage.RecordSearch(ctx, storage.SearchQuery{
+			UserID:         userID,
+			ConversationID: cidPtr,
+			Query:          query,
+			Kind:           kind,
+			Provider:       provider,
+			ResultsCount:   resultsCount,
+			DurationMs:     durationMs,
+			CreatedAt:      time.Now(),
+		})
+		_ = s.deps.Usage.Add(ctx, storage.UsageEvent{
+			UserID:         userID,
+			Kind:           kind,
+			Model:          provider,
+			ConversationID: cidPtr,
+			Requests:       1,
+			CostMicros:     0,
+		})
+	}
+	if s.deps.Audits != nil {
+		_ = s.deps.Audits.RecordToolAudit(ctx, storage.ToolAuditLog{
+			UserID:        userID,
+			CallerType:    "chat_agent",
+			CallerID:      convID,
+			ToolName:      kind,
+			Action:        "search",
+			InputSummary:  query,
+			OutputSummary: fmt.Sprintf("%d results", resultsCount),
+			Status:        "success",
+			DurationMs:    durationMs,
+			CreatedAt:     time.Now(),
+		})
 	}
 }
 

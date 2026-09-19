@@ -59,3 +59,44 @@ func TestRefreshRotationPersistence(t *testing.T) {
 		t.Fatalf("new token should be active: %+v %v", rec2, err)
 	}
 }
+
+func TestSearchQueryTrackingIntegration(t *testing.T) {
+	pool := newTestPool(t)
+	ctx := context.Background()
+	users := NewUsers(pool)
+	user, err := users.Create(ctx, "searchtrack@test.dev", "hash")
+	if errors.Is(err, auth.ErrEmailTaken) {
+		user, err = users.ByEmail(ctx, "searchtrack@test.dev")
+	}
+	if err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+
+	usage := NewUsage(pool)
+	sq := SearchQuery{
+		UserID:       user.ID,
+		Query:        "latest news about AI",
+		Kind:         "web_search",
+		Provider:     "tavily",
+		ResultsCount: 5,
+		DurationMs:   250,
+	}
+	if err := usage.RecordSearch(ctx, sq); err != nil {
+		t.Fatalf("record search query: %v", err)
+	}
+
+	sum, err := usage.Summary(ctx, user.ID, 7)
+	if err != nil {
+		t.Fatalf("usage summary: %v", err)
+	}
+	if sum.Searches.TotalQueries == 0 {
+		t.Fatalf("expected at least 1 search query in summary, got 0")
+	}
+	if sum.Searches.WebQueries == 0 {
+		t.Fatalf("expected at least 1 web query in summary, got 0")
+	}
+	if len(sum.Searches.Recent) == 0 || sum.Searches.Recent[0].Query != "latest news about AI" {
+		t.Fatalf("expected recent query 'latest news about AI', got %+v", sum.Searches.Recent)
+	}
+}
+

@@ -21,6 +21,7 @@ type Deps struct {
 	Search         SearchFunc
 	ListDocs       ListDocsFunc
 	SaveMemory     func(ctx context.Context, fact string) error
+	RecordSearch   func(ctx context.Context, query, kind, provider string, resultsCount int, durationMs int64)
 }
 
 // PendingApproval is one deferred tool call waiting on the user's decision.

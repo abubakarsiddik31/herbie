@@ -5,6 +5,8 @@ const KINDS: Record<string, { label: string; description: string }> = {
   embedding: { label: "Embedding", description: "Query and document embeddings" },
   rerank: { label: "Rerank", description: "LLM re-ordering of retrieved chunks" },
   compaction: { label: "Compaction", description: "History summarization" },
+  web_search: { label: "Web Search", description: "Live web retrieval queries" },
+  document_search: { label: "Doc Search", description: "Knowledge base retrieval queries" },
 };
 
 export function kindLabel(kind: string): string {

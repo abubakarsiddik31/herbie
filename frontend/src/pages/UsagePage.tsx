@@ -20,6 +20,7 @@ import {
   Cpu,
   FileText,
   Gauge,
+  Globe,
   Layers,
   MessageSquare,
   RotateCw,

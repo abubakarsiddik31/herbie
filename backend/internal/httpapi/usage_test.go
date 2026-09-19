@@ -18,6 +18,8 @@ type fakeSummaryStore struct {
 
 func (f *fakeSummaryStore) Add(_ context.Context, _ storage.UsageEvent) error { return nil }
 
+func (f *fakeSummaryStore) RecordSearch(_ context.Context, _ storage.SearchQuery) error { return nil }
+
 func (f *fakeSummaryStore) Summary(_ context.Context, _ string, days int) (storage.Summary, error) {
 	f.gotDays = days
 	return f.summary, nil
@@ -132,7 +134,10 @@ func TestUsageSummaryEmptyIsJSONNotNull(t *testing.T) {
 			t.Fatalf("key %q must be an empty JSON array, got %q (present=%v)", key, raw, ok)
 		}
 	}
-	if len(got) != 3 {
+	if _, ok := got["searches"]; !ok {
+		t.Fatalf("key 'searches' must be present in usage summary")
+	}
+	if len(got) != 4 {
 		t.Fatalf("unexpected keys: %v", got)
 	}
 }
@@ -168,5 +173,84 @@ func TestUsageSummaryIncludesDocumentSpend(t *testing.T) {
 	}
 	if body.Documents[0].CostUsd != microsToUSD(105) {
 		t.Fatalf("costUsd: %v", body.Documents[0].CostUsd)
+	}
+}
+
+func TestUsageSummaryIncludesSearchAnalysis(t *testing.T) {
+	now := time.Now()
+	store := &fakeSummaryStore{summary: storage.Summary{
+		Searches: storage.SearchAnalysis{
+			TotalQueries: 3,
+			WebQueries:   2,
+			DocQueries:   1,
+			ByProvider: []storage.SearchProviderCount{
+				{Provider: "tavily", Count: 2},
+				{Provider: "rag", Count: 1},
+			},
+			Daily: []storage.SearchDailyCount{
+				{Day: "2026-09-19", Count: 3},
+			},
+			Recent: []storage.SearchQueryItem{
+				{
+					ID:           "sq-1",
+					Query:        "latest news",
+					Kind:         "web_search",
+					Provider:     "tavily",
+					ResultsCount: 5,
+					DurationMs:   120,
+					CreatedAt:    now,
+				},
+			},
+			TopQueries: []storage.SearchQueryCount{
+				{Query: "latest news", Count: 2},
+			},
+		},
+	}}
+	h, token := newHandlerServer(t, nil, newFakeConvos(newFakeMsgs()), newFakeMsgs(), store)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/usage/summary?days=7", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Searches struct {
+			TotalQueries int `json:"totalQueries"`
+			WebQueries   int `json:"webQueries"`
+			DocQueries   int `json:"docQueries"`
+			ByProvider   []struct {
+				Provider string `json:"provider"`
+				Count    int    `json:"count"`
+			} `json:"byProvider"`
+			Daily []struct {
+				Day   string `json:"day"`
+				Count int    `json:"count"`
+			} `json:"daily"`
+			Recent []struct {
+				ID           string `json:"id"`
+				Query        string `json:"query"`
+				Kind         string `json:"kind"`
+				Provider     string `json:"provider"`
+				ResultsCount int    `json:"resultsCount"`
+			} `json:"recent"`
+			TopQueries []struct {
+				Query string `json:"query"`
+				Count int    `json:"count"`
+			} `json:"topQueries"`
+		} `json:"searches"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Searches.TotalQueries != 3 || body.Searches.WebQueries != 2 || body.Searches.DocQueries != 1 {
+		t.Fatalf("unexpected query counts: %+v", body.Searches)
+	}
+	if len(body.Searches.ByProvider) != 2 || body.Searches.ByProvider[0].Provider != "tavily" {
+		t.Fatalf("unexpected byProvider: %+v", body.Searches.ByProvider)
+	}
+	if len(body.Searches.Recent) != 1 || body.Searches.Recent[0].Query != "latest news" {
+		t.Fatalf("unexpected recent: %+v", body.Searches.Recent)
 	}
 }

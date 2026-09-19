@@ -119,6 +119,9 @@ func TestSendMessageSearchesDocumentsAndMetersEmbedding(t *testing.T) {
 	if e.UserID != "u-1" {
 		t.Fatalf("user not attached: %+v", e)
 	}
+	if len(usage.searches) == 0 || usage.searches[0].Kind != "document_search" || usage.searches[0].Query != "capital of France" {
+		t.Fatalf("document search query not recorded: %+v", usage.searches)
+	}
 }
 
 func TestSendMessageRecordsRerankUsage(t *testing.T) {

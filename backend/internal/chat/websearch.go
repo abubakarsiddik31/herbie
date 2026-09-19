@@ -53,9 +53,14 @@ func WebSearchTool(searcher websearch.Searcher, requireApproval bool) tool.Tool[
 			if searcher == nil {
 				return tool.Text("Web search is currently unavailable."), nil
 			}
+			start := time.Now()
 			results, err := searcher.Search(ctx, query)
+			dur := time.Since(start).Milliseconds()
 			if err != nil {
 				return tool.Result{}, fmt.Errorf("web search: %w", err)
+			}
+			if deps.RecordSearch != nil {
+				deps.RecordSearch(ctx, query, WebSearchToolName, "", len(results), dur)
 			}
 			if len(results) == 0 {
 				return tool.Text(fmt.Sprintf("No web results found for %q.", query)), nil

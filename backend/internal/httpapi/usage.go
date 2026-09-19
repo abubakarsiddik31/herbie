@@ -4,6 +4,8 @@ import (
 	"math"
 	"net/http"
 	"strconv"
+
+	"github.com/abubakarsiddik31/golem-chatbot/internal/storage"
 )
 
 func microsToUSD(m int64) float64 { return math.Round(float64(m)/10) / 1e5 }
@@ -51,5 +53,56 @@ func (s *Server) handleUsageSummary(w http.ResponseWriter, r *http.Request) {
 	for _, d := range sum.Documents {
 		docs = append(docs, docRow{d.DocumentID, d.Filename, d.InputTokens, microsToUSD(d.CostMicros)})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"totals": totals, "daily": dailies, "documents": docs})
+
+	type searchItem struct {
+		ID             string `json:"id"`
+		Query          string `json:"query"`
+		Kind           string `json:"kind"`
+		Provider       string `json:"provider"`
+		ResultsCount   int    `json:"resultsCount"`
+		DurationMs     int64  `json:"durationMs"`
+		CreatedAt      string `json:"createdAt"`
+		ConversationID string `json:"conversationId,omitempty"`
+	}
+	recent := make([]searchItem, 0, len(sum.Searches.Recent))
+	for _, qi := range sum.Searches.Recent {
+		recent = append(recent, searchItem{
+			ID:             qi.ID,
+			Query:          qi.Query,
+			Kind:           qi.Kind,
+			Provider:       qi.Provider,
+			ResultsCount:   qi.ResultsCount,
+			DurationMs:     qi.DurationMs,
+			CreatedAt:      qi.CreatedAt.UTC().Format("2006-01-02T15:04:05.000Z07:00"),
+			ConversationID: qi.ConversationID,
+		})
+	}
+	byProvider := sum.Searches.ByProvider
+	if byProvider == nil {
+		byProvider = []storage.SearchProviderCount{}
+	}
+	dailySearches := sum.Searches.Daily
+	if dailySearches == nil {
+		dailySearches = []storage.SearchDailyCount{}
+	}
+	topQueries := sum.Searches.TopQueries
+	if topQueries == nil {
+		topQueries = []storage.SearchQueryCount{}
+	}
+	searches := map[string]any{
+		"totalQueries": sum.Searches.TotalQueries,
+		"webQueries":   sum.Searches.WebQueries,
+		"docQueries":   sum.Searches.DocQueries,
+		"byProvider":   byProvider,
+		"daily":        dailySearches,
+		"recent":       recent,
+		"topQueries":   topQueries,
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"totals":    totals,
+		"daily":     dailies,
+		"documents": docs,
+		"searches":  searches,
+	})
 }

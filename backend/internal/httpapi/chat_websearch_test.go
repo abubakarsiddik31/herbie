@@ -93,6 +93,7 @@ func TestWebSearchApprovalAndResume(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	usageStore := newFakeUsage()
 	cfg := config.Config{WebSearchRequireApproval: true}
 	h := NewServer(ServerDeps{
 		Cfg:       cfg,
@@ -102,7 +103,7 @@ func TestWebSearchApprovalAndResume(t *testing.T) {
 		Profiles:  newFakeProfiles(),
 		Convos:    convs,
 		Msgs:      msgs,
-		Usage:     newFakeUsage(),
+		Usage:     usageStore,
 		Pending:   pending,
 		Agent:     agent,
 		Rates:     cost.Table{Default: cost.Rates{ChatInputPerM: 0.3, ChatOutputPerM: 2.5}},
@@ -138,5 +139,18 @@ func TestWebSearchApprovalAndResume(t *testing.T) {
 	}
 	if !strings.Contains(appRec.Body.String(), "Go 1.25 is out") {
 		t.Fatalf("expected resumed answer in stream:\n%s", appRec.Body.String())
+	}
+	if len(usageStore.searches) == 0 || usageStore.searches[0].Query != "golang 1.25" {
+		t.Fatalf("expected recorded search query 'golang 1.25', got %+v", usageStore.searches)
+	}
+	foundWebSearchEvent := false
+	for _, ev := range usageStore.events {
+		if ev.Kind == "web_search" {
+			foundWebSearchEvent = true
+			break
+		}
+	}
+	if !foundWebSearchEvent {
+		t.Fatalf("expected usage event with kind 'web_search', got events: %+v", usageStore.events)
 	}
 }

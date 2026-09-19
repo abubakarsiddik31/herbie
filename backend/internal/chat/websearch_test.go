@@ -92,6 +92,28 @@ func TestWebSearchToolEmptyQuery(t *testing.T) {
 	}
 }
 
+func TestWebSearchToolRecordsSearch(t *testing.T) {
+	mock := &mockSearcher{results: []websearch.Result{{Title: "Test", URL: "http://example.com", Snippet: "Test snippet"}}}
+	tl := WebSearchTool(mock, false)
+
+	var recordedQuery, recordedKind string
+	var recordedCount int
+	deps := Deps{
+		RecordSearch: func(_ context.Context, query, kind, _ string, resultsCount int, _ int64) {
+			recordedQuery = query
+			recordedKind = kind
+			recordedCount = resultsCount
+		},
+	}
+	_, err := tl.Exec(context.Background(), deps, json.RawMessage(`{"query":"golang 1.25"}`))
+	if err != nil {
+		t.Fatalf("exec: %v", err)
+	}
+	if recordedQuery != "golang 1.25" || recordedKind != WebSearchToolName || recordedCount != 1 {
+		t.Fatalf("unexpected search recorded: query=%q kind=%q count=%d", recordedQuery, recordedKind, recordedCount)
+	}
+}
+
 func TestWebSearchGuidanceAppended(t *testing.T) {
 	spec := RunSpec{SystemPrompt: "base"}
 	got := promptFor(spec, []tool.Tool[Deps]{WebSearchTool(nil, false)})

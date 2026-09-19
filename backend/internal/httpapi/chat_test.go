@@ -288,7 +288,10 @@ func (f *fakeMsgs) DeleteMessage(_ context.Context, convID, msgID, userID string
 	return nil
 }
 
-type fakeUsage struct{ events []storage.UsageEvent }
+type fakeUsage struct {
+	events   []storage.UsageEvent
+	searches []storage.SearchQuery
+}
 
 type fakeProfiles struct{ texts map[string]string }
 
@@ -351,6 +354,11 @@ func newFakeUsage() *fakeUsage { return &fakeUsage{} }
 
 func (f *fakeUsage) Add(_ context.Context, e storage.UsageEvent) error {
 	f.events = append(f.events, e)
+	return nil
+}
+
+func (f *fakeUsage) RecordSearch(_ context.Context, sq storage.SearchQuery) error {
+	f.searches = append(f.searches, sq)
 	return nil
 }
 
