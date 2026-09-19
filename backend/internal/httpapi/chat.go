@@ -380,6 +380,9 @@ func (s *Server) userTools(ctx context.Context, userID string, ragEnabled bool) 
 	if s.deps.Memories != nil {
 		tools = append(tools, chat.RememberTool())
 	}
+	if s.deps.Cfg.ToolOAuth.GoogleCalendar.Enabled() || s.hasCalendarCredential(ctx, userID) {
+		tools = append(tools, chat.GoogleCalendarTool(s.calendarClient(ctx, userID)))
+	}
 	if s.deps.Workflows != nil {
 		wfTools, err := s.workflowTools(ctx, userID)
 		if err != nil {
@@ -389,6 +392,41 @@ func (s *Server) userTools(ctx context.Context, userID string, ragEnabled bool) 
 		}
 	}
 	return tools, nil
+}
+
+func (s *Server) hasCalendarCredential(ctx context.Context, userID string) bool {
+	if s.deps.Workflows == nil || userID == "" {
+		return false
+	}
+	cred, err := s.deps.Workflows.GetCredentialByProvider(ctx, userID, "google_calendar")
+	return err == nil && cred.ID != ""
+}
+
+func (s *Server) calendarClient(ctx context.Context, userID string) chat.CalendarClient {
+	baseURL := s.deps.Cfg.ToolOAuth.CalendarBaseURL
+	if baseURL == "" {
+		baseURL = "https://www.googleapis.com"
+	}
+	return chat.CalendarClient{
+		BaseURL: baseURL,
+		TokenFunc: func(c context.Context) (string, error) {
+			return s.getValidGoogleCalendarToken(c, userID)
+		},
+		AuditRecord: func(c context.Context, action, summary, status string) {
+			if s.deps.Audits != nil {
+				_ = s.deps.Audits.RecordToolAudit(c, storage.ToolAuditLog{
+					UserID:       userID,
+					CallerType:   "chat_agent",
+					ToolName:     "google_calendar",
+					Action:       action,
+					InputSummary: summary,
+					Status:       status,
+					DurationMs:   0,
+					CreatedAt:    time.Now(),
+				})
+			}
+		},
+	}
 }
 
 // searchDeps wraps the raw RagSearch with embedding metering (every query

@@ -169,16 +169,7 @@ func (s *Server) resolveWorkflowCredentials(ctx context.Context, userID string) 
 	}
 	res := make(map[string]map[string]any, len(credList))
 	for _, c := range credList {
-		raw := c.Data
-		if s.deps.Vault != nil {
-			if dec, err := s.deps.Vault.Decrypt(c.Data); err == nil {
-				raw = dec
-			}
-		}
-		var d map[string]any
-		if err := json.Unmarshal(raw, &d); err == nil {
-			res[c.Name] = d
-		}
+		res[c.Name] = s.decryptCredentialData(c.Data)
 	}
 	return res
 }

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import {
+  Calendar,
   CheckCircle2,
   ExternalLink,
   GitBranch,
@@ -175,7 +176,62 @@ export function CredentialsDialog({ open, onOpenChange }: CredentialsDialogProps
                 <span className="text-[10px] text-muted-foreground">Zero manual PATs</span>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                {/* Google Calendar Integration Card */}
+                {(() => {
+                  const cal = oauthProviders?.find((p) => p.id === "google_calendar");
+                  const isConnected = cal?.connected;
+                  return (
+                    <div className="flex flex-col justify-between rounded-lg border border-border bg-card p-3 text-xs shadow-2xs">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <div className="p-1 rounded bg-muted">
+                            <Calendar className="size-4 text-sky-600 dark:text-sky-400" />
+                          </div>
+                          <div>
+                            <p className="font-semibold text-foreground">Google Calendar</p>
+                            <p className="text-[10px] text-muted-foreground">events, readonly</p>
+                          </div>
+                        </div>
+                        {isConnected ? (
+                          <Badge variant="outline" className="border-emerald-600/30 bg-emerald-600/10 text-emerald-700 dark:text-emerald-400 gap-1 text-[10px]">
+                            <CheckCircle2 className="size-3" />
+                            <span>Connected</span>
+                          </Badge>
+                        ) : (
+                          <Badge variant="outline" className="text-muted-foreground text-[10px]">
+                            {cal?.configured ? "Ready" : "Not Configured"}
+                          </Badge>
+                        )}
+                      </div>
+
+                      <div className="mt-3 pt-2 border-t border-border/60 flex justify-end">
+                        {isConnected ? (
+                          <Button
+                            variant="ghost"
+                            size="xs"
+                            onClick={() => handleDisconnectOAuth("google_calendar")}
+                            className="text-muted-foreground hover:text-destructive text-[11px]"
+                          >
+                            Disconnect
+                          </Button>
+                        ) : (
+                          <Button
+                            variant="outline"
+                            size="xs"
+                            disabled={!cal?.configured || connectingProvider === "google_calendar" || isOAuthLoading}
+                            onClick={() => handleConnectOAuth("google_calendar")}
+                            className="gap-1 text-[11px]"
+                          >
+                            <ExternalLink className="size-3" />
+                            <span>{connectingProvider === "google_calendar" ? "Connecting..." : "Connect Account"}</span>
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
+
                 {/* GitHub Integration Card */}
                 {(() => {
                   const gh = oauthProviders?.find((p) => p.id === "github");

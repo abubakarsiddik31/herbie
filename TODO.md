@@ -29,6 +29,7 @@ Build in order. One branch per item, merge to `main` before starting the next.
 - [x] **12. Cross-Chat Memory** (`3a80e64`): Persistent long-term user memories table & migrations, automatic memory injection (`[User memory]`) into every conversation run, built-in `remember` tool, and memory management UI on `/preferences`.
 - [x] **13. Visual Workflows & Tool Automation**: n8n-style visual workflow builder with `@xyflow/react`, DAG execution engine in Go, universal HTTP/REST caller, external tool integration (GitHub, Slack, Discord, Golem tools), webhook triggers, condition branching, and agent tool bridge.
 - [x] **14. One-Click OAuth Tool Integrations & Safety Core**: Authenticated AES-256-GCM encrypted credentials vault, unified socket-level SSRF & DNS rebinding protection across all workflow and tool calls, automatic secret redaction filter for outputs and logs, human-in-the-loop (HITL) approval gating for chat-invoked workflows, 1-click OAuth 2.0 authorization code connect/disconnect for GitHub & Slack, and fine-grained audit logging.
+- [x] **15. Chat Apps & @ Mentions with 1-Click Google Calendar OAuth**: Full @ mention autocomplete popup in chat composer with keyboard navigation, 1-click Google Calendar OAuth integration with offline refresh tokens and auto background renewal, built-in Google Calendar agent tool with HITL approval gating for event creation, inline interactive AppConnectCard for unlinked integrations, and seamless return_to redirects.
 
 ## Future roadmap / Bigger bets (each its own project)
 
