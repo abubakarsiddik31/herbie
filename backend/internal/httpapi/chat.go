@@ -955,7 +955,22 @@ func mustJSON(v any) []byte {
 func userMessage(err error) string {
 	var runErr *golem.RunError
 	if errors.As(err, &runErr) {
-		return "the model run failed at the " + string(runErr.Stage) + " stage"
+		switch runErr.Stage {
+		case golem.StageLoop:
+			return "The model reached the maximum tool loop limit without completing its response. Please try asking a more focused question or rephrasing your request."
+		case golem.StageUsage:
+			return "The model run exceeded the configured token or request limit."
+		case golem.StageTool:
+			return "A tool execution failed while processing your request."
+		case golem.StageModel:
+			return "The AI model encountered an error generating a response."
+		case golem.StageDecode:
+			return "The model produced a response format that could not be parsed."
+		case golem.StageCanceled:
+			return "The request was canceled."
+		default:
+			return "the model run failed at the " + string(runErr.Stage) + " stage"
+		}
 	}
 	return "the model run failed"
 }

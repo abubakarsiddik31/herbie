@@ -28,7 +28,7 @@ var webSearchSchema = json.RawMessage(`{
 func WebSearchTool(searcher websearch.Searcher, requireApproval bool) tool.Tool[Deps] {
 	return tool.Tool[Deps]{
 		Name:        WebSearchToolName,
-		Description: "Search the public web for current events, live information, recent developments, or facts not present in your training data.",
+		Description: "Search the public web for current events, live information, recent developments, or facts not present in your training data (1-3 targeted queries recommended).",
 		Schema:      webSearchSchema,
 		Timeout:     20 * time.Second,
 		MaxRetries:  tool.RetryLimit(1),

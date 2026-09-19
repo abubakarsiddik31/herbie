@@ -423,3 +423,46 @@ func TestFailedRunEmitsErrorEvent(t *testing.T) {
 		t.Fatalf("usage recorded on failed run: %+v", usage.events)
 	}
 }
+
+func TestUserMessage(t *testing.T) {
+	tests := []struct {
+		err  error
+		want string
+	}{
+		{
+			err:  &golem.RunError{Stage: golem.StageLoop},
+			want: "The model reached the maximum tool loop limit without completing its response. Please try asking a more focused question or rephrasing your request.",
+		},
+		{
+			err:  &golem.RunError{Stage: golem.StageUsage},
+			want: "The model run exceeded the configured token or request limit.",
+		},
+		{
+			err:  &golem.RunError{Stage: golem.StageTool},
+			want: "A tool execution failed while processing your request.",
+		},
+		{
+			err:  &golem.RunError{Stage: golem.StageModel},
+			want: "The AI model encountered an error generating a response.",
+		},
+		{
+			err:  &golem.RunError{Stage: golem.StageDecode},
+			want: "The model produced a response format that could not be parsed.",
+		},
+		{
+			err:  &golem.RunError{Stage: golem.StageCanceled},
+			want: "The request was canceled.",
+		},
+		{
+			err:  errors.New("other"),
+			want: "the model run failed",
+		},
+	}
+
+	for _, tt := range tests {
+		got := userMessage(tt.err)
+		if got != tt.want {
+			t.Errorf("userMessage(%v) = %q, want %q", tt.err, got, tt.want)
+		}
+	}
+}

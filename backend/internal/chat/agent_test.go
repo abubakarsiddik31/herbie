@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/abubakarsiddik31/golem"
@@ -114,6 +115,47 @@ func TestUsageLimitSurfacesStage(t *testing.T) {
 	var runErr *golem.RunError
 	if !errors.As(err, &runErr) || runErr.Stage != golem.StageUsage {
 		t.Fatalf("expected usage-stage RunError, got %v", err)
+	}
+}
+
+func TestAgentAllowsIterationsUpToRequestLimit(t *testing.T) {
+	m := testmodel.New()
+	for i := 0; i < 12; i++ {
+		m.Respond(toolCallResponse(fmt.Sprintf("call-%d", i), "step", json.RawMessage(`{}`)))
+	}
+	m.Respond(respond("finished 12 steps"))
+
+	reg := NewModelRegistryWithFactory(ProviderKeys{Gemini: "test"}, func(string, string, *float64) (model.StreamingModel, error) {
+		return m, nil
+	})
+	a, _ := New(reg, golem.UsageLimit{Requests: 25}, DefaultToolEnv())
+	sink := &recordingSink{}
+	out, err := a.Run(context.Background(), Deps{}, nil, "do steps", nil, sink,
+		[]tool.Tool[Deps]{stubTool("step", "ok")}, testSpec)
+	if err != nil {
+		t.Fatalf("Run unexpectedly failed: %v", err)
+	}
+	if out.Output != "finished 12 steps" {
+		t.Fatalf("got %q, want %q", out.Output, "finished 12 steps")
+	}
+}
+
+func TestMaxIterationsSurfacesLoopStage(t *testing.T) {
+	m := testmodel.New()
+	for i := 0; i < 5; i++ {
+		m.Respond(toolCallResponse(fmt.Sprintf("call-%d", i), "step", json.RawMessage(`{}`)))
+	}
+
+	reg := NewModelRegistryWithFactory(ProviderKeys{Gemini: "test"}, func(string, string, *float64) (model.StreamingModel, error) {
+		return m, nil
+	})
+	a, _ := New(reg, golem.UsageLimit{Requests: 3}, DefaultToolEnv())
+	sink := &recordingSink{}
+	_, err := a.Run(context.Background(), Deps{}, nil, "do steps", nil, sink,
+		[]tool.Tool[Deps]{stubTool("step", "ok")}, testSpec)
+	var runErr *golem.RunError
+	if !errors.As(err, &runErr) || runErr.Stage != golem.StageLoop {
+		t.Fatalf("expected loop-stage RunError, got %v", err)
 	}
 }
 

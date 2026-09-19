@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"strconv"
 	"time"
 
 	"github.com/abubakarsiddik31/golem"
@@ -71,11 +73,21 @@ func (a *Agent) build(spec RunSpec, tools []tool.Tool[Deps]) (*golem.Agent[Deps,
 	passthrough := golem.DecodeFunc[string](func(_ context.Context, r model.Response) (string, error) {
 		return r.Message.Content, nil
 	})
+	maxIter := 25
+	if a.limit.Requests > 0 {
+		maxIter = a.limit.Requests
+	}
+	if envIter := os.Getenv("CHAT_MAX_ITERATIONS"); envIter != "" {
+		if v, err := strconv.Atoi(envIter); err == nil && v >= 1 {
+			maxIter = v
+		}
+	}
 	opts := []golem.Option[Deps, string]{
 		golem.WithInstructions[Deps, string](promptFor(spec, tools)),
 		golem.WithHistoryProcessor[Deps, string](golem.TrimHistory(40)),
 		golem.WithMaxAttempts[Deps, string](2),
 		golem.WithUsageLimit[Deps, string](a.limit),
+		golem.WithMaxIterations[Deps, string](maxIter),
 		golem.WithToolRetries[Deps, string](2),
 		golem.WithToolTimeout[Deps, string](a.env.HTTPTimeout + 10*time.Second),
 	}
@@ -91,16 +103,21 @@ func (a *Agent) build(spec RunSpec, tools []tool.Tool[Deps]) (*golem.Agent[Deps,
 
 const retrievalGuidance = `
 
-You have a search_documents tool over the user's uploaded files. Use it when queries may relate to the user's uploaded documents. Drive retrieval yourself: start with a focused query; if results look thin or off-topic, call again with refined queries or narrow documentIds to the promising files. Never attribute claims to uploaded documents if they were not in the search results.
+You have a search_documents tool over the user's uploaded files. Use it when queries may relate to the user's uploaded documents. Drive retrieval yourself: start with a focused query; if results look thin or off-topic, call again with a refined query or narrow documentIds (limit to 1-3 searches total). Once relevant evidence is found, immediately synthesize your answer. Never attribute claims to uploaded documents if they were not in the search results.
 Citation discipline (hard rules): cite EVERY claim that comes from documents with its bracket number, e.g. [1]; cite ONLY bracket numbers shown in tool results — numbers are cumulative across calls ([1], [2], [3]...); never invent numbers not present in results. If the question specifically asks about the user's uploaded documents and the evidence does not support an answer, say what is missing instead of guessing; for general knowledge questions or external tools, answer normally using that information.`
 
 const webSearchGuidance = `
 
 You have a web_search tool to search the live web. Call it whenever the user asks about current events, breaking news, live data, or facts not present in your knowledge. Formulate clean, concise search keywords (do not include mention tags like "@web" in your query).
 
+Search budget & loop discipline:
+- Be concise and selective with searches: 1 to 3 targeted queries are usually plenty to answer even broad topics.
+- Do NOT run recursive or open-ended search loops. Once you have gathered sufficient key information or initial relevant results, STOP searching immediately and synthesize your final answer.
+- Prioritize delivering a clear, well-structured answer with what you found rather than continuously searching for further sub-details.
+
 When answering based on web search results:
 - Provide comprehensive, explanatory, and detailed answers in markdown (use clear topic headings, structured bullet points, and explanatory paragraphs).
-- Dive into specific details, key developments, framework updates, real-world examples, and context found in the results rather than giving a brief 2-3 sentence summary.
+- Incorporate specific details, key developments, framework updates, real-world examples, and context found in the results rather than giving a brief 2-3 sentence summary.
 - Cite web sources with their titles and URLs e.g. [Title](URL) or citation numbers [N] directly in your answer.`
 
 // promptFor resolves the run's system prompt: the conversation's prompt,
