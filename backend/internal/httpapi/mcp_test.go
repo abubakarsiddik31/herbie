@@ -70,6 +70,31 @@ func (f *fakeMCPServerStore) ByID(_ context.Context, id, userID string) (storage
 	return s, nil
 }
 
+func (f *fakeMCPServerStore) ByApp(_ context.Context, appID, userID string) (storage.MCPServer, error) {
+	for _, s := range f.servers {
+		if s.UserID == userID && s.AppID != nil && *s.AppID == appID && s.Enabled {
+			return s, nil
+		}
+	}
+	return storage.MCPServer{}, storage.ErrNotFound
+}
+
+func (f *fakeMCPServerStore) UnlinkApp(_ context.Context, appID, userID string) error {
+	found := false
+	for id, s := range f.servers {
+		if s.UserID == userID && s.AppID != nil && *s.AppID == appID {
+			s.AppID = nil
+			s.UpdatedAt = time.Now()
+			f.servers[id] = s
+			found = true
+		}
+	}
+	if !found {
+		return storage.ErrNotFound
+	}
+	return nil
+}
+
 func (f *fakeMCPServerStore) Update(_ context.Context, s storage.MCPServer) (storage.MCPServer, error) {
 	existing, ok := f.servers[s.ID]
 	if !ok || existing.UserID != s.UserID {
@@ -276,5 +301,66 @@ func TestMCPEndpointJSONRPC(t *testing.T) {
 	_ = json.Unmarshal(rec.Body.Bytes(), &listResp)
 	if listResp.Error != nil {
 		t.Fatalf("unexpected rpc error: %+v", listResp.Error)
+	}
+}
+
+func TestMCPServerAppLinking(t *testing.T) {
+	store := newFakeMCPServerStore()
+	handler, token := newMCPTestServer(t, store)
+
+	// 1. Create an MCP server linked to "github" app
+	body := `{"name":"github_mcp","url":"http://localhost:3000/mcp","appId":"github"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/mcp/servers", bytes.NewReader([]byte(body)))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var createResp struct {
+		Server storage.MCPServer `json:"server"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &createResp)
+	if createResp.Server.AppID == nil || *createResp.Server.AppID != "github" {
+		t.Fatalf("expected appId 'github', got %+v", createResp.Server.AppID)
+	}
+	serverID := createResp.Server.ID
+
+	// 2. Unlink app
+	req = httptest.NewRequest(http.MethodPost, "/api/mcp/servers/"+serverID+"/unlink-app", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var unlinkResp struct {
+		Server storage.MCPServer `json:"server"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &unlinkResp)
+	if unlinkResp.Server.AppID != nil {
+		t.Fatalf("expected appId to be nil, got %v", unlinkResp.Server.AppID)
+	}
+
+	// 3. Update server to link to "slack"
+	updateBody := `{"name":"slack_mcp","appId":"slack"}`
+	req = httptest.NewRequest(http.MethodPut, "/api/mcp/servers/"+serverID, bytes.NewReader([]byte(updateBody)))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var updateResp struct {
+		Server storage.MCPServer `json:"server"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &updateResp)
+	if updateResp.Server.AppID == nil || *updateResp.Server.AppID != "slack" {
+		t.Fatalf("expected appId 'slack', got %v", updateResp.Server.AppID)
 	}
 }

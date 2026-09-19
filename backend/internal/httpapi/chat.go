@@ -428,9 +428,16 @@ func (s *Server) mcpTools(ctx context.Context, userID string) ([]tool.Tool[chat.
 		}
 
 		for _, dt := range discTools {
-			toolName := sanitizeToolName(fmt.Sprintf("mcp_%s_%s", serverRecord.Name, dt.Name))
-			toolDesc := dt.Description
-			if toolDesc == "" {
+			var toolName string
+			var toolDesc string
+			if serverRecord.AppID != nil && *serverRecord.AppID != "" {
+				toolName = sanitizeToolName(fmt.Sprintf("%s_%s", *serverRecord.AppID, dt.Name))
+				toolDesc = fmt.Sprintf("[%s App via MCP] %s", strings.ToUpper(*serverRecord.AppID), dt.Description)
+			} else {
+				toolName = sanitizeToolName(fmt.Sprintf("mcp_%s_%s", serverRecord.Name, dt.Name))
+				toolDesc = fmt.Sprintf("[MCP %s] %s", serverRecord.Name, dt.Description)
+			}
+			if dt.Description == "" {
 				toolDesc = fmt.Sprintf("Tool from %s MCP server", serverRecord.Name)
 			}
 			tName := dt.Name

@@ -74,14 +74,17 @@ func newToolOAuthTestServer(t *testing.T, wfStore *fakeWorkflowStore, auditStore
 		},
 	}
 
+	mcpStore := newFakeMCPServerStore()
+
 	s, h := newServer(ServerDeps{
-		Cfg:       cfg,
-		Log:       slog.New(slog.NewTextHandler(io.Discard, nil)),
-		Auth:      svc,
-		Tokens:    tm,
-		Workflows: wfStore,
-		Audits:    auditStore,
-		Vault:     vault.New(secret),
+		Cfg:        cfg,
+		Log:        slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Auth:       svc,
+		Tokens:     tm,
+		Workflows:  wfStore,
+		MCPServers: mcpStore,
+		Audits:     auditStore,
+		Vault:      vault.New(secret),
 	})
 	return s, h, tok
 }
@@ -118,6 +121,79 @@ func TestToolOAuthProvidersEndpoint(t *testing.T) {
 	}
 	if resp.Providers[2].ID != "slack" || !resp.Providers[2].Configured {
 		t.Errorf("expected configured slack provider, got %+v", resp.Providers[2])
+	}
+}
+
+func TestToolOAuthProvidersWithMCP(t *testing.T) {
+	wfStore := newFakeWorkflowStore()
+	auditStore := &fakeAuditStore{}
+	server, handler, token := newToolOAuthTestServer(t, wfStore, auditStore)
+
+	// 1. Link an MCP server to GitHub app
+	ghApp := "github"
+	_, err := server.deps.MCPServers.Create(context.Background(), storage.MCPServer{
+		UserID:    "test-user-id",
+		Name:      "GitHub Copilot MCP",
+		URL:       "http://localhost:3000/mcp",
+		Transport: "http",
+		AppID:     &ghApp,
+		Enabled:   true,
+	})
+	if err != nil {
+		t.Fatalf("create mcp server: %v", err)
+	}
+
+	// 2. Query /api/tool-oauth/providers
+	req := httptest.NewRequest(http.MethodGet, "/api/tool-oauth/providers", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	var resp struct {
+		Providers []toolProviderDTO `json:"providers"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	var ghProvider *toolProviderDTO
+	for _, p := range resp.Providers {
+		if p.ID == "github" {
+			ghProvider = &p
+			break
+		}
+	}
+	if ghProvider == nil || !ghProvider.Connected || ghProvider.ConnectedVia != "mcp" {
+		t.Fatalf("expected github connected via mcp, got %+v", ghProvider)
+	}
+	if ghProvider.MCPServerName != "GitHub Copilot MCP" {
+		t.Errorf("expected MCPServerName 'GitHub Copilot MCP', got %q", ghProvider.MCPServerName)
+	}
+
+	// 3. Disconnect provider
+	req = httptest.NewRequest(http.MethodPost, "/api/tool-oauth/github/disconnect", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// 4. Query again, should be disconnected
+	req = httptest.NewRequest(http.MethodGet, "/api/tool-oauth/providers", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	_ = json.Unmarshal(rec.Body.Bytes(), &resp)
+	for _, p := range resp.Providers {
+		if p.ID == "github" && p.Connected {
+			t.Fatalf("expected github to be disconnected after unlink, got %+v", p)
+		}
 	}
 }
 

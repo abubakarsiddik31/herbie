@@ -20,6 +20,7 @@ type createMCPServerRequest struct {
 	Name      string            `json:"name"`
 	URL       string            `json:"url"`
 	Transport string            `json:"transport"`
+	AppID     *string           `json:"appId,omitempty"`
 	Headers   map[string]string `json:"headers"`
 }
 
@@ -74,12 +75,22 @@ func (s *Server) handleCreateMCPServer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var appIDPtr *string
+	if req.AppID != nil {
+		cleanAppID := strings.ToLower(strings.TrimSpace(*req.AppID))
+		if cleanAppID != "" && cleanAppID != "none" && cleanAppID != "custom" {
+			appIDPtr = &cleanAppID
+			_ = s.deps.MCPServers.UnlinkApp(r.Context(), cleanAppID, userID)
+		}
+	}
+
 	headersBytes, _ := json.Marshal(req.Headers)
 	server, err := s.deps.MCPServers.Create(r.Context(), storage.MCPServer{
 		UserID:    userID,
 		Name:      name,
 		URL:       rawURL,
 		Transport: "http",
+		AppID:     appIDPtr,
 		Enabled:   true,
 		Headers:   headersBytes,
 	})
@@ -93,6 +104,100 @@ func (s *Server) handleCreateMCPServer(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusCreated, map[string]any{"server": server})
+}
+
+func (s *Server) handleUpdateMCPServer(w http.ResponseWriter, r *http.Request) {
+	if s.deps.MCPServers == nil {
+		writeError(w, http.StatusNotImplemented, "not_implemented", "mcp servers not configured")
+		return
+	}
+	userID, _ := userIDFrom(r.Context())
+	if userID == "" {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "login required")
+		return
+	}
+	id := r.PathValue("id")
+	existing, err := s.deps.MCPServers.ByID(r.Context(), id, userID)
+	if err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "not_found", "mcp server not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "internal", "lookup error")
+		return
+	}
+
+	var req createMCPServerRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "invalid json body")
+		return
+	}
+
+	if name := strings.TrimSpace(req.Name); name != "" {
+		existing.Name = name
+	}
+	if rawURL := strings.TrimSpace(req.URL); rawURL != "" {
+		if _, err := workflow.ValidatePublicURL(r.Context(), rawURL, s.deps.Cfg.ToolAllowPrivateHosts); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_url", err.Error())
+			return
+		}
+		existing.URL = rawURL
+	}
+	if req.Transport != "" {
+		existing.Transport = req.Transport
+	}
+	if req.Headers != nil {
+		headersBytes, _ := json.Marshal(req.Headers)
+		existing.Headers = headersBytes
+	}
+	if req.AppID != nil {
+		cleanAppID := strings.ToLower(strings.TrimSpace(*req.AppID))
+		if cleanAppID == "" || cleanAppID == "none" || cleanAppID == "custom" {
+			existing.AppID = nil
+		} else {
+			existing.AppID = &cleanAppID
+			_ = s.deps.MCPServers.UnlinkApp(r.Context(), cleanAppID, userID)
+		}
+	}
+
+	updated, err := s.deps.MCPServers.Update(r.Context(), existing)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "could not update mcp server")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"server": updated})
+}
+
+func (s *Server) handleUnlinkAppMCPServer(w http.ResponseWriter, r *http.Request) {
+	if s.deps.MCPServers == nil {
+		writeError(w, http.StatusNotImplemented, "not_implemented", "mcp servers not configured")
+		return
+	}
+	userID, _ := userIDFrom(r.Context())
+	if userID == "" {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "login required")
+		return
+	}
+	id := r.PathValue("id")
+	srv, err := s.deps.MCPServers.ByID(r.Context(), id, userID)
+	if err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "not_found", "mcp server not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "internal", "lookup error")
+		return
+	}
+
+	srv.AppID = nil
+	updated, err := s.deps.MCPServers.Update(r.Context(), srv)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "could not unlink app")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"server": updated})
 }
 
 func (s *Server) handleToggleMCPServer(w http.ResponseWriter, r *http.Request) {

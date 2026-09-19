@@ -18,6 +18,7 @@ type MCPServer struct {
 	Name      string          `json:"name"`
 	URL       string          `json:"url"`
 	Transport string          `json:"transport"` // "http" or "sse"
+	AppID     *string         `json:"appId,omitempty"`
 	Enabled   bool            `json:"enabled"`
 	Headers   json.RawMessage `json:"headers"`
 	CreatedAt time.Time       `json:"createdAt"`
@@ -32,11 +33,11 @@ func NewMCPServers(pool *pgxpool.Pool) *MCPServers {
 	return &MCPServers{pool: pool}
 }
 
-const mcpServerColumns = `id, user_id::text, name, url, transport, enabled, headers, created_at, updated_at`
+const mcpServerColumns = `id, user_id::text, name, url, transport, app_id, enabled, headers, created_at, updated_at`
 
 func scanMCPServer(row pgx.Row) (MCPServer, error) {
 	var s MCPServer
-	err := row.Scan(&s.ID, &s.UserID, &s.Name, &s.URL, &s.Transport, &s.Enabled, &s.Headers, &s.CreatedAt, &s.UpdatedAt)
+	err := row.Scan(&s.ID, &s.UserID, &s.Name, &s.URL, &s.Transport, &s.AppID, &s.Enabled, &s.Headers, &s.CreatedAt, &s.UpdatedAt)
 	return s, err
 }
 
@@ -48,10 +49,10 @@ func (s *MCPServers) Create(ctx context.Context, item MCPServer) (MCPServer, err
 		item.Transport = "http"
 	}
 	row := s.pool.QueryRow(ctx,
-		`INSERT INTO mcp_servers (user_id, name, url, transport, enabled, headers)
-		 VALUES ($1, $2, $3, $4, $5, $6)
+		`INSERT INTO mcp_servers (user_id, name, url, transport, app_id, enabled, headers)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7)
 		 RETURNING `+mcpServerColumns,
-		item.UserID, item.Name, item.URL, item.Transport, item.Enabled, item.Headers,
+		item.UserID, item.Name, item.URL, item.Transport, item.AppID, item.Enabled, item.Headers,
 	)
 	out, err := scanMCPServer(row)
 	if err != nil {
@@ -122,16 +123,47 @@ func (s *MCPServers) ByID(ctx context.Context, id, userID string) (MCPServer, er
 	return out, err
 }
 
+func (s *MCPServers) ByApp(ctx context.Context, appID, userID string) (MCPServer, error) {
+	row := s.pool.QueryRow(ctx,
+		`SELECT `+mcpServerColumns+` FROM mcp_servers
+		 WHERE user_id = $1 AND app_id = $2 AND enabled = true
+		 ORDER BY updated_at DESC
+		 LIMIT 1`,
+		userID, appID,
+	)
+	out, err := scanMCPServer(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return MCPServer{}, ErrNotFound
+	}
+	return out, err
+}
+
+func (s *MCPServers) UnlinkApp(ctx context.Context, appID, userID string) error {
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE mcp_servers
+		 SET app_id = NULL, updated_at = now()
+		 WHERE user_id = $1 AND app_id = $2`,
+		userID, appID,
+	)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (s *MCPServers) Update(ctx context.Context, item MCPServer) (MCPServer, error) {
 	if item.Headers == nil {
 		item.Headers = json.RawMessage(`{}`)
 	}
 	row := s.pool.QueryRow(ctx,
 		`UPDATE mcp_servers
-		 SET name = $3, url = $4, transport = $5, enabled = $6, headers = $7, updated_at = now()
+		 SET name = $3, url = $4, transport = $5, app_id = $6, enabled = $7, headers = $8, updated_at = now()
 		 WHERE id = $1 AND user_id = $2
 		 RETURNING `+mcpServerColumns,
-		item.ID, item.UserID, item.Name, item.URL, item.Transport, item.Enabled, item.Headers,
+		item.ID, item.UserID, item.Name, item.URL, item.Transport, item.AppID, item.Enabled, item.Headers,
 	)
 	out, err := scanMCPServer(row)
 	if errors.Is(err, pgx.ErrNoRows) {

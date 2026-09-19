@@ -67,6 +67,8 @@ type MCPServerStore interface {
 	List(ctx context.Context, userID string) ([]storage.MCPServer, error)
 	ListEnabled(ctx context.Context, userID string) ([]storage.MCPServer, error)
 	ByID(ctx context.Context, id, userID string) (storage.MCPServer, error)
+	ByApp(ctx context.Context, appID, userID string) (storage.MCPServer, error)
+	UnlinkApp(ctx context.Context, appID, userID string) error
 	Update(ctx context.Context, item storage.MCPServer) (storage.MCPServer, error)
 	Delete(ctx context.Context, id, userID string) error
 }
@@ -170,7 +172,9 @@ func newServer(deps ServerDeps) (*Server, http.Handler) {
 	authed.HandleFunc("GET /api/tool-audit-logs", s.handleListToolAuditLogs)
 	authed.HandleFunc("GET /api/mcp/servers", s.handleListMCPServers)
 	authed.HandleFunc("POST /api/mcp/servers", s.handleCreateMCPServer)
+	authed.HandleFunc("PUT /api/mcp/servers/{id}", s.handleUpdateMCPServer)
 	authed.HandleFunc("POST /api/mcp/servers/{id}/toggle", s.handleToggleMCPServer)
+	authed.HandleFunc("POST /api/mcp/servers/{id}/unlink-app", s.handleUnlinkAppMCPServer)
 	authed.HandleFunc("DELETE /api/mcp/servers/{id}", s.handleDeleteMCPServer)
 	authed.HandleFunc("POST /api/mcp/servers/test", s.handleTestMCPServer)
 	authed.HandleFunc("POST /api/mcp", s.handleMCPEndpoint)
