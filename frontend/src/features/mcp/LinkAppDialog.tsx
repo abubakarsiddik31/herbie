@@ -35,7 +35,7 @@ import {
   type CatalogApp,
 } from "./useMCPCatalog";
 import { useCreateMCPServer, useTestMCPServer, type MCPTestResult } from "./useMCPServers";
-import { useDisconnectToolOAuth, useToolOAuthProviders } from "@/features/workflows/useWorkflows";
+import { useToolOAuthProviders } from "@/features/workflows/useWorkflows";
 import { apiFetch } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -61,7 +61,6 @@ export function LinkAppDialog({ open, onOpenChange }: LinkAppDialogProps) {
   const { data: oauthProviders } = useToolOAuthProviders();
   const linkApp = useLinkCatalogApp();
   const unlinkApp = useUnlinkCatalogApp();
-  const disconnectOAuth = useDisconnectToolOAuth();
 
   const createServer = useCreateMCPServer();
   const testServer = useTestMCPServer();
@@ -81,11 +80,6 @@ export function LinkAppDialog({ open, onOpenChange }: LinkAppDialogProps) {
 
   async function handleOneClickUnlink(app: CatalogApp) {
     await unlinkApp.mutateAsync(app.id);
-    // Also disconnect OAuth if connected
-    const provider = oauthProviders?.find((p) => p.id === app.id);
-    if (provider?.connected) {
-      await disconnectOAuth.mutateAsync(app.id);
-    }
   }
 
   async function handleOAuthStart(appId: string) {

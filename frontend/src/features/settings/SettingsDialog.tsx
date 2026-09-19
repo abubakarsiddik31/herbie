@@ -20,6 +20,7 @@ import {
   ShieldCheck,
   Sparkles,
   Sun,
+  Terminal,
   Trash2,
   User,
   Wrench,
@@ -587,6 +588,78 @@ export function SettingsDialog({ open, onOpenChange, defaultTab = "general" }: P
                         Built-in
                       </Badge>
                     </div>
+
+                    {/* Web Reader & Fetch */}
+                    {(() => {
+                      const isConnected = mcpServers?.some((s) => s.appId === "web_fetch" && s.enabled);
+                      return (
+                        <div className="flex items-center justify-between rounded-xl border border-border bg-card p-2.5 text-xs shadow-2xs">
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <div className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-blue-500/10 text-blue-600 dark:text-blue-400">
+                              <Globe className="size-3.5" />
+                            </div>
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-1.5">
+                                <span className="font-semibold text-foreground truncate">Web Reader</span>
+                                <span className="font-mono text-[10px] text-muted-foreground">@web_fetch</span>
+                              </div>
+                              <p className="text-[10px] text-muted-foreground truncate">Article text extraction</p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <Badge variant="outline" className={cn("text-[10px] gap-1 px-1.5 py-0 font-normal shrink-0", isConnected ? "border-emerald-600/30 bg-emerald-600/10 text-emerald-700 dark:text-emerald-400" : "text-muted-foreground")}>
+                              {isConnected && <CheckCircle2 className="size-2.5" />}
+                              <span>{isConnected ? "MCP" : "Not Linked"}</span>
+                            </Badge>
+                            <Button
+                              size="xs"
+                              variant={isConnected ? "ghost" : "default"}
+                              type="button"
+                              onClick={() => isConnected ? unlinkCatalogApp.mutate("web_fetch") : linkCatalogApp.mutate({ appId: "web_fetch" })}
+                              className={cn("h-6 px-2 text-[10px]", isConnected ? "text-destructive hover:bg-destructive/10" : "bg-purple-600 hover:bg-purple-700 text-white")}
+                            >
+                              {isConnected ? "Unlink" : "1-Click Link"}
+                            </Button>
+                          </div>
+                        </div>
+                      );
+                    })()}
+
+                    {/* Code Sandbox */}
+                    {(() => {
+                      const isConnected = mcpServers?.some((s) => s.appId === "code_runner" && s.enabled);
+                      return (
+                        <div className="flex items-center justify-between rounded-xl border border-border bg-card p-2.5 text-xs shadow-2xs">
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <div className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-amber-500/10 text-amber-600 dark:text-amber-400">
+                              <Terminal className="size-3.5" />
+                            </div>
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-1.5">
+                                <span className="font-semibold text-foreground truncate">Code Sandbox</span>
+                                <span className="font-mono text-[10px] text-muted-foreground">@code_runner</span>
+                              </div>
+                              <p className="text-[10px] text-muted-foreground truncate">Sandbox calculations</p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <Badge variant="outline" className={cn("text-[10px] gap-1 px-1.5 py-0 font-normal shrink-0", isConnected ? "border-emerald-600/30 bg-emerald-600/10 text-emerald-700 dark:text-emerald-400" : "text-muted-foreground")}>
+                              {isConnected && <CheckCircle2 className="size-2.5" />}
+                              <span>{isConnected ? "MCP" : "Not Linked"}</span>
+                            </Badge>
+                            <Button
+                              size="xs"
+                              variant={isConnected ? "ghost" : "default"}
+                              type="button"
+                              onClick={() => isConnected ? unlinkCatalogApp.mutate("code_runner") : linkCatalogApp.mutate({ appId: "code_runner" })}
+                              className={cn("h-6 px-2 text-[10px]", isConnected ? "text-destructive hover:bg-destructive/10" : "bg-purple-600 hover:bg-purple-700 text-white")}
+                            >
+                              {isConnected ? "Unlink" : "1-Click Link"}
+                            </Button>
+                          </div>
+                        </div>
+                      );
+                    })()}
                   </div>
                 </div>
 
