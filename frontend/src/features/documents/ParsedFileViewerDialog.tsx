@@ -1,6 +1,8 @@
 import { useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
 import { useQuery } from "@tanstack/react-query";
 import {
   Check,
@@ -283,7 +285,8 @@ export function ParsedFileViewerDialog({
               {viewMode === "rendered" ? (
                 <div className="prose prose-sm dark:prose-invert max-w-none break-words leading-relaxed text-foreground">
                   <ReactMarkdown
-                    remarkPlugins={[remarkGfm]}
+                    remarkPlugins={[remarkGfm, remarkMath]}
+                    rehypePlugins={[[rehypeKatex, { throwOnError: false }]]}
                     components={{
                       pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
                       h1: ({ children }) => (

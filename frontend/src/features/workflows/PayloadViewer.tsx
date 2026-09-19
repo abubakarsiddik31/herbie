@@ -1,6 +1,8 @@
 import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
 import {
   Check,
   Code2,
@@ -194,7 +196,7 @@ function RichPayloadRenderer({ data, expanded }: { data: unknown; expanded?: boo
   if (typeof data === "string") {
     return (
       <div className={cn("prose prose-xs dark:prose-invert max-w-none text-xs leading-relaxed break-words min-w-0 overflow-hidden", expanded && "prose-sm")}>
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>{data}</ReactMarkdown>
+        <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[[rehypeKatex, { throwOnError: false }]]}>{data}</ReactMarkdown>
       </div>
     );
   }
@@ -227,7 +229,7 @@ function RichPayloadRenderer({ data, expanded }: { data: unknown; expanded?: boo
               </Badge>
             </div>
             <div className="text-xs leading-relaxed break-words space-y-2 text-foreground font-normal min-w-0 overflow-hidden [&_h1]:text-sm [&_h1]:font-bold [&_h2]:text-xs [&_h2]:font-bold [&_h3]:text-xs [&_h3]:font-semibold [&_p]:my-1.5 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_li]:my-1 [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[11px] [&_pre]:rounded [&_pre]:bg-muted/80 [&_pre]:p-2.5 [&_pre]:font-mono [&_pre]:text-[11px] [&_pre]:overflow-x-auto [&_blockquote]:border-l-2 [&_blockquote]:border-primary/40 [&_blockquote]:pl-2.5 [&_blockquote]:italic">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{value}</ReactMarkdown>
+              <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[[rehypeKatex, { throwOnError: false }]]}>{value}</ReactMarkdown>
             </div>
           </div>
         ))}

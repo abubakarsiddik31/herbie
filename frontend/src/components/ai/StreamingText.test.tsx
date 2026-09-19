@@ -68,4 +68,11 @@ describe("StreamingText citations", () => {
     expect(screen.getByRole("link", { name: "docs" })).toHaveAttribute("href", "https://example.com");
     expect(screen.getByRole("button", { name: /Source 1:/ })).toBeInTheDocument();
   });
+
+  it("renders inline and block math with KaTeX", () => {
+    const { container } = render(
+      <StreamingText content={"To calculate compound interest on **$10,000**:\n\n$$A = P \\left(1 + \\frac{r}{n}\\right)^{nt}$$\n\nWhere:\n- $P$ = Principal amount ($10,000)\n- $r$ = Annual interest rate (0.07)"} />
+    );
+    expect(container.querySelector(".katex")).toBeInTheDocument();
+  });
 });
