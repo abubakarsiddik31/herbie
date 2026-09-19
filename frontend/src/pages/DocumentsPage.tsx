@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import {
   CircleAlert,
+  Eye,
   FileText,
   FileUp,
   Loader2,
@@ -22,6 +23,7 @@ import {
 } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useDocumentActions, useDocuments } from "@/features/documents/useDocuments";
+import { ParsedFileViewerDialog } from "@/features/documents/ParsedFileViewerDialog";
 import { ApiError } from "@/lib/api";
 
 function formatBytes(n: number): string {
@@ -42,6 +44,7 @@ export function DocumentsPage() {
   const { upload, remove, progress, accepting } = useDocumentActions();
   const [dragging, setDragging] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<DocumentRec | null>(null);
+  const [viewingDoc, setViewingDoc] = useState<DocumentRec | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const ragDisabled = error instanceof ApiError && error.code === "rag_disabled";
 
@@ -188,6 +191,16 @@ export function DocumentsPage() {
                 <Button
                   variant="ghost"
                   size="icon-sm"
+                  aria-label={`View ${d.filename}`}
+                  title={`View parsed ${d.filename}`}
+                  className="text-muted-foreground hover:text-foreground"
+                  onClick={() => setViewingDoc(d)}
+                >
+                  <Eye className="size-4" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
                   aria-label={`Delete ${d.filename}`}
                   className="text-destructive hover:text-destructive"
                   onClick={() => setPendingDelete(d)}
@@ -225,6 +238,19 @@ export function DocumentsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Parsed File Viewer Dialog */}
+      <ParsedFileViewerDialog
+        open={Boolean(viewingDoc)}
+        onOpenChange={(open) => {
+          if (!open) setViewingDoc(null);
+        }}
+        title={viewingDoc?.filename || ""}
+        documentId={viewingDoc?.id}
+        sizeBytes={viewingDoc?.sizeBytes}
+        status={viewingDoc?.status}
+        chunkCount={viewingDoc?.chunkCount}
+      />
     </div>
   );
 }

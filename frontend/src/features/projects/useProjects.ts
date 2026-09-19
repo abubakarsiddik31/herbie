@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { apiFetch, BASE } from "@/lib/api";
+import { apiFetch } from "@/lib/api";
 import type { Conversation, DocumentRec } from "@/lib/types";
 
 export interface Project {
@@ -88,15 +88,10 @@ export function useUploadProjectFile(projectId: string | null) {
       if (!projectId) throw new Error("no project selected");
       const form = new FormData();
       form.append("file", file);
-      const res = await fetch(`${BASE}/api/projects/${projectId}/files`, {
+      return apiFetch<DocumentRec>(`/api/projects/${projectId}/files`, {
         method: "POST",
         body: form,
-        credentials: "include",
       });
-      if (!res.ok) {
-        throw new Error(`Upload failed (${res.status})`);
-      }
-      return res.json();
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["project", projectId] });

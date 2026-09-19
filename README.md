@@ -1,5 +1,12 @@
 <div align="center">
 
+<p>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/logo-mark-dark.svg" />
+    <img src="docs/assets/logo-mark.svg" alt="Herbie — the bubble-bot" width="150" />
+  </picture>
+</p>
+
 # Herbie
 
 **The free, self-hosted open alternative to ChatGPT Plus and Claude Pro.**  

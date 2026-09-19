@@ -80,20 +80,33 @@ export function formatPromptWithFiles(prompt: string, files: AttachedFile[]): st
   return parts.join("\n\n");
 }
 
+export interface ExtractedFile {
+  name: string;
+  ext: string;
+  content: string;
+}
+
 export function extractFilesAndPrompt(content: string): {
   filenames: string[];
+  files: ExtractedFile[];
   userPrompt: string;
 } {
-  const fileRegex = /--- File: (.*?) ---\n```[\s\S]*?```\n*/g;
+  const fileRegex = /--- File: (.*?) ---\n```(\w*)\n([\s\S]*?)```\n*/g;
   const filenames: string[] = [];
+  const files: ExtractedFile[] = [];
   let match: RegExpExecArray | null;
   while ((match = fileRegex.exec(content)) !== null) {
     filenames.push(match[1]);
+    files.push({
+      name: match[1],
+      ext: match[2] || "",
+      content: match[3],
+    });
   }
 
   let userPrompt = content.replace(fileRegex, "").trim();
   if (userPrompt === "Please analyze the attached file(s) above.") {
     userPrompt = "";
   }
-  return { filenames, userPrompt };
+  return { filenames, files, userPrompt };
 }

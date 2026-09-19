@@ -11,6 +11,7 @@ import {
   ChevronDown,
   Copy,
   Download,
+  Eye,
   FileCode,
   Globe,
   HelpCircle,
@@ -43,6 +44,7 @@ import { cn, fmtTokens } from "@/lib/utils";
 import type { ChatMessage, Conversation, ConversationSettings } from "@/lib/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ParsedFileViewerDialog } from "@/features/documents/ParsedFileViewerDialog";
 import { useChatApps, extractAppConnectProviders, type ChatApp } from "@/features/chat/useChatApps";
 import { MentionMenu, MentionAppIcon } from "@/features/chat/MentionMenu";
 import { AppConnectCard } from "@/features/chat/AppConnectCard";
@@ -146,6 +148,14 @@ export function ChatPage() {
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
   const [extractingFiles, setExtractingFiles] = useState(false);
   const [citeJump, setCiteJump] = useState<(CiteJump & { msgId: string }) | null>(null);
+  const [viewingFile, setViewingFile] = useState<{
+    title: string;
+    documentId?: string | null;
+    content?: string | null;
+    sizeBytes?: number;
+    status?: string;
+    chunkCount?: number;
+  } | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   // Tool Apps & Mention Autocomplete
@@ -752,10 +762,31 @@ export function ChatPage() {
                           )}
                           {/* Attached files badge and clean prompt in user message */}
                           {(() => {
-                            const { filenames, userPrompt } = extractFilesAndPrompt(m.content);
+                            const { filenames, files, userPrompt } = extractFilesAndPrompt(m.content);
                             return (
                               <>
-                                {filenames.length > 0 && (
+                                {files.length > 0 ? (
+                                  <div className="flex flex-wrap justify-end gap-1.5 mb-1">
+                                    {files.map((file, idx) => (
+                                      <button
+                                        key={idx}
+                                        type="button"
+                                        onClick={() =>
+                                          setViewingFile({
+                                            title: file.name,
+                                            content: file.content,
+                                          })
+                                        }
+                                        className="group/file flex items-center gap-1.5 rounded-xl border border-border/80 bg-muted/50 hover:bg-muted px-2.5 py-1 text-xs transition-colors cursor-pointer"
+                                        title="Click to view parsed file"
+                                      >
+                                        <FileCode className="size-3.5 text-primary" />
+                                        <span className="font-medium font-mono text-[11px]">{file.name}</span>
+                                        <Eye className="size-3 text-muted-foreground opacity-60 group-hover/file:opacity-100 group-hover/file:text-primary transition-opacity" />
+                                      </button>
+                                    ))}
+                                  </div>
+                                ) : filenames.length > 0 ? (
                                   <div className="flex flex-wrap justify-end gap-1.5 mb-1">
                                     {filenames.map((fname, idx) => (
                                       <div key={idx} className="flex items-center gap-1.5 rounded-xl border border-border/80 bg-muted/50 px-2.5 py-1 text-xs">
@@ -764,7 +795,7 @@ export function ChatPage() {
                                       </div>
                                     ))}
                                   </div>
-                                )}
+                                ) : null}
                                 {(userPrompt || filenames.length > 0) && (
                                   <div className="rounded-2xl rounded-br-md bg-primary px-4 py-2.5 whitespace-pre-wrap text-primary-foreground text-sm shadow-sm">
                                     {userPrompt || (filenames.length === 1 ? `Attached ${filenames[0]}` : `Attached ${filenames.length} files`)}
@@ -958,9 +989,24 @@ export function ChatPage() {
                   </span>
                   <button
                     type="button"
+                    aria-label={`View parsed content of ${doc.name}`}
+                    title="View parsed content"
+                    onClick={() =>
+                      setViewingFile({
+                        title: doc.name,
+                        content: doc.content,
+                        sizeBytes: doc.size,
+                      })
+                    }
+                    className="ml-1 rounded-full p-0.5 text-muted-foreground hover:text-foreground hover:bg-muted"
+                  >
+                    <Eye className="size-3" />
+                  </button>
+                  <button
+                    type="button"
                     aria-label={`Remove ${doc.name}`}
                     onClick={() => removeAttachedFile(doc.id)}
-                    className="ml-1 rounded-full p-0.5 text-muted-foreground hover:text-destructive hover:bg-muted"
+                    className="rounded-full p-0.5 text-muted-foreground hover:text-destructive hover:bg-muted"
                   >
                     <X className="size-3" />
                   </button>
@@ -1146,6 +1192,20 @@ export function ChatPage() {
       />
 
       <ShortcutsDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
+
+      {/* Parsed File Viewer Dialog */}
+      <ParsedFileViewerDialog
+        open={Boolean(viewingFile)}
+        onOpenChange={(open) => {
+          if (!open) setViewingFile(null);
+        }}
+        title={viewingFile?.title || ""}
+        documentId={viewingFile?.documentId}
+        content={viewingFile?.content}
+        sizeBytes={viewingFile?.sizeBytes}
+        status={viewingFile?.status}
+        chunkCount={viewingFile?.chunkCount}
+      />
     </div>
   );
 }

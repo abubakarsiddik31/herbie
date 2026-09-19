@@ -6,6 +6,7 @@ import {
   ArrowLeft,
   ArrowUp,
   CheckCircle2,
+  Eye,
   FileCode,
   FileText,
   FolderGit2,
@@ -42,6 +43,7 @@ import { useSidebar } from "@/components/layout/SidebarContext";
 import { SourceCards, type CiteJump } from "@/features/chat/SourceCards";
 import { useChat } from "@/features/chat/useChat";
 import { useVoiceInput } from "@/features/chat/useVoiceInput";
+import { ParsedFileViewerDialog } from "@/features/documents/ParsedFileViewerDialog";
 import {
   useProject,
   useUploadProjectFile,
@@ -97,6 +99,14 @@ export function ProjectWorkspacePage() {
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
   const [extractingFiles, setExtractingFiles] = useState(false);
   const [citeJump, setCiteJump] = useState<(CiteJump & { msgId: string }) | null>(null);
+  const [viewingFile, setViewingFile] = useState<{
+    title: string;
+    documentId?: string | null;
+    content?: string | null;
+    sizeBytes?: number;
+    status?: string;
+    chunkCount?: number;
+  } | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const projectFileInputRef = useRef<HTMLInputElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -345,10 +355,31 @@ export function ProjectWorkspacePage() {
                         <div className="group flex max-w-[80%] flex-col items-end gap-1">
                           {/* Attached files badge and clean prompt in user message */}
                           {(() => {
-                            const { filenames, userPrompt } = extractFilesAndPrompt(m.content);
+                            const { filenames, files, userPrompt } = extractFilesAndPrompt(m.content);
                             return (
                               <>
-                                {filenames.length > 0 && (
+                                {files.length > 0 ? (
+                                  <div className="flex flex-wrap justify-end gap-1.5 mb-1">
+                                    {files.map((file, idx) => (
+                                      <button
+                                        key={idx}
+                                        type="button"
+                                        onClick={() =>
+                                          setViewingFile({
+                                            title: file.name,
+                                            content: file.content,
+                                          })
+                                        }
+                                        className="group/file flex items-center gap-1.5 rounded-xl border border-border/80 bg-muted/50 hover:bg-muted px-2.5 py-1 text-xs transition-colors cursor-pointer"
+                                        title="Click to view parsed file"
+                                      >
+                                        <FileCode className="size-3.5 text-primary" />
+                                        <span className="font-mono text-[11px] font-medium">{file.name}</span>
+                                        <Eye className="size-3 text-muted-foreground opacity-60 group-hover/file:opacity-100 group-hover/file:text-primary transition-opacity" />
+                                      </button>
+                                    ))}
+                                  </div>
+                                ) : filenames.length > 0 ? (
                                   <div className="flex flex-wrap justify-end gap-1.5 mb-1">
                                     {filenames.map((fname, idx) => (
                                       <div key={idx} className="flex items-center gap-1.5 rounded-xl border border-border/80 bg-muted/50 px-2.5 py-1 text-xs">
@@ -357,7 +388,7 @@ export function ProjectWorkspacePage() {
                                       </div>
                                     ))}
                                   </div>
-                                )}
+                                ) : null}
                                 {(userPrompt || filenames.length > 0) && (
                                   <div className="rounded-2xl rounded-br-md bg-primary px-4 py-2.5 whitespace-pre-wrap text-primary-foreground text-sm shadow-sm">
                                     {userPrompt || (filenames.length === 1 ? `Attached ${filenames[0]}` : `Attached ${filenames.length} files`)}
@@ -423,9 +454,24 @@ export function ProjectWorkspacePage() {
                       </span>
                       <button
                         type="button"
+                        aria-label={`View parsed content of ${doc.name}`}
+                        title="View parsed content"
+                        onClick={() =>
+                          setViewingFile({
+                            title: doc.name,
+                            content: doc.content,
+                            sizeBytes: doc.size,
+                          })
+                        }
+                        className="ml-1 rounded-full p-0.5 text-muted-foreground hover:text-foreground hover:bg-muted"
+                      >
+                        <Eye className="size-3" />
+                      </button>
+                      <button
+                        type="button"
                         aria-label={`Remove ${doc.name}`}
                         onClick={() => setAttachedFiles((p) => p.filter((f) => f.id !== doc.id))}
-                        className="ml-1 rounded-full p-0.5 text-muted-foreground hover:text-destructive hover:bg-muted"
+                        className="rounded-full p-0.5 text-muted-foreground hover:text-destructive hover:bg-muted"
                       >
                         <X className="size-3" />
                       </button>
@@ -581,10 +627,19 @@ export function ProjectWorkspacePage() {
                   projectFiles.map((f) => (
                     <div
                       key={f.id}
-                      className="group flex items-center justify-between gap-2 rounded-xl border border-border/50 bg-card p-2.5 text-xs shadow-2xs"
+                      onClick={() =>
+                        setViewingFile({
+                          title: f.filename,
+                          documentId: f.id,
+                          sizeBytes: f.sizeBytes,
+                          status: f.status,
+                          chunkCount: f.chunkCount,
+                        })
+                      }
+                      className="group flex items-center justify-between gap-2 rounded-xl border border-border/50 bg-card p-2.5 text-xs shadow-2xs hover:border-border transition-colors cursor-pointer"
                     >
                       <div className="min-w-0 flex-1">
-                        <p className="font-medium truncate text-foreground" title={f.filename}>
+                        <p className="font-medium truncate text-foreground group-hover:text-primary transition-colors" title={f.filename}>
                           {f.filename}
                         </p>
                         <div className="flex items-center gap-2 mt-0.5 text-[10px] text-muted-foreground">
@@ -602,21 +657,41 @@ export function ProjectWorkspacePage() {
                           </span>
                         </div>
                       </div>
-                      <Button
-                        variant="ghost"
-                        size="icon-xs"
-                        onClick={async () => {
-                          if (confirm(`Delete ${f.filename}?`)) {
-                            await apiFetch(`/api/documents/${f.id}`, { method: "DELETE" });
-                            void queryClient.invalidateQueries({ queryKey: ["project", projectId] });
-                            toast.success("File deleted");
+                      <div className="flex items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
+                        <Button
+                          variant="ghost"
+                          size="icon-xs"
+                          onClick={() =>
+                            setViewingFile({
+                              title: f.filename,
+                              documentId: f.id,
+                              sizeBytes: f.sizeBytes,
+                              status: f.status,
+                              chunkCount: f.chunkCount,
+                            })
                           }
-                        }}
-                        className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-opacity"
-                        aria-label={`Delete ${f.filename}`}
-                      >
-                        <Trash2 className="size-3" />
-                      </Button>
+                          className="text-muted-foreground hover:text-foreground"
+                          aria-label={`View parsed ${f.filename}`}
+                          title={`View parsed content of ${f.filename}`}
+                        >
+                          <Eye className="size-3" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon-xs"
+                          onClick={async () => {
+                            if (confirm(`Delete ${f.filename}?`)) {
+                              await apiFetch(`/api/documents/${f.id}`, { method: "DELETE" });
+                              void queryClient.invalidateQueries({ queryKey: ["project", projectId] });
+                              toast.success("File deleted");
+                            }
+                          }}
+                          className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-opacity"
+                          aria-label={`Delete ${f.filename}`}
+                        >
+                          <Trash2 className="size-3" />
+                        </Button>
+                      </div>
                     </div>
                   ))
                 )}
@@ -647,6 +722,19 @@ export function ProjectWorkspacePage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ParsedFileViewerDialog
+        open={Boolean(viewingFile)}
+        onOpenChange={(open) => {
+          if (!open) setViewingFile(null);
+        }}
+        title={viewingFile?.title || ""}
+        documentId={viewingFile?.documentId}
+        content={viewingFile?.content}
+        sizeBytes={viewingFile?.sizeBytes}
+        status={viewingFile?.status}
+        chunkCount={viewingFile?.chunkCount}
+      />
     </div>
   );
 }

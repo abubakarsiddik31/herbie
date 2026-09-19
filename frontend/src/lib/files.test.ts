@@ -67,8 +67,12 @@ More lines of extracted document text...
 
 Can you give me a summary of this paper?`;
 
-    const { filenames, userPrompt } = extractFilesAndPrompt(content);
+    const { filenames, files, userPrompt } = extractFilesAndPrompt(content);
     expect(filenames).toEqual(["sample.pdf"]);
+    expect(files).toHaveLength(1);
+    expect(files[0].name).toBe("sample.pdf");
+    expect(files[0].ext).toBe("pdf");
+    expect(files[0].content).toContain("Detailed extracted text");
     expect(userPrompt).toBe("Can you give me a summary of this paper?");
     expect(userPrompt).not.toContain("Detailed extracted text");
   });
