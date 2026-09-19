@@ -5,6 +5,7 @@ import (
 	"errors"
 	"math"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/abubakarsiddik31/golem"
@@ -132,6 +133,7 @@ func (s *Server) handleApprovals(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var sources []rag.Scored
+	var sourcesMu sync.Mutex
 	history := pausedRunHistory(msgs)
 	spec, history, compacted := s.maybeCompact(ctx, userID, convID, spec, history)
 	if compacted {
@@ -141,9 +143,9 @@ func (s *Server) handleApprovals(w http.ResponseWriter, r *http.Request) {
 		chat.Deps{
 			UserID:         userID,
 			ConversationID: convID,
-			Search:         s.searchDeps(userID, convID, &sources),
+			Search:         s.searchDeps(userID, convID, &sources, &sourcesMu),
 			ListDocs:       s.listDocsDeps(userID, convID),
-			ReadDoc:        s.readDocDeps(userID, convID, &sources),
+			ReadDoc:        s.readDocDeps(userID, convID, &sources, &sourcesMu),
 			SaveMemory:     s.saveMemoryFunc(userID),
 			RecordSearch:   s.recordSearchFunc(userID, convID),
 		},

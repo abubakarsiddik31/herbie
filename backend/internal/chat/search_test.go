@@ -174,3 +174,24 @@ func TestSearchToolCumulativeOffset(t *testing.T) {
 		t.Fatalf("expected cumulative bracket number [4], got:\n%s", out.Text)
 	}
 }
+
+func TestSearchToolParallelQueries(t *testing.T) {
+	var calledQueries []string
+	deps := Deps{Search: func(_ context.Context, query string, _ int, _ []string) ([]rag.Scored, int, error) {
+		calledQueries = append(calledQueries, query)
+		return []rag.Scored{
+			{Chunk: rag.Chunk{DocTitle: "paper.pdf", Content: "content for " + query}, Score: 0.8},
+		}, len(calledQueries), nil
+	}}
+	out, err := SearchTool().Exec(context.Background(), deps, json.RawMessage(`{"queries":["alpha concept","beta benchmark"]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(calledQueries) != 2 {
+		t.Fatalf("expected 2 queries executed, got %d", len(calledQueries))
+	}
+	if !strings.Contains(out.Text, "Document search results for \"alpha concept\"") ||
+		!strings.Contains(out.Text, "Document search results for \"beta benchmark\"") {
+		t.Fatalf("missing topic headers: %s", out.Text)
+	}
+}

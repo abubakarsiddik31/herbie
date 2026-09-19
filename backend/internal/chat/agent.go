@@ -120,11 +120,15 @@ Workflows for document requests:
    - Step 4: Synthesize a well-structured markdown summary with citations [1], [2] referencing the read chunks.
    - NEVER call web_search when asked to summarize or query an uploaded document.
 
-2. Multi-hop & comparative queries:
-   - When asked a complex or multi-part question across documents or sections:
-   - Break the query into logical sub-hops. Retrieve premise facts or section pointers first using search_documents or read_document on the first document.
-   - Use the discovered entities/keywords to execute the second targeted retrieval on the related document or section.
-   - Synthesize the connected findings with proper bracket citations. Limit retrieval to 2-3 focused calls total.
+2. Multi-hop, comparative, and facet queries:
+   - DECISION RULE: Determine whether your sub-queries are independent or dependent before retrieving:
+     a) Independent Facets (Parallel Search): If you need to compare two known concepts, sections, or documents simultaneously (e.g. "compare methodology in Doc A vs benchmarks in Doc B"):
+        -> Use parallel retrieval by passing "queries": ["query 1", "query 2"] to search_documents in a single call.
+     b) Dependent Multi-Hop (Sequential Hops): If Step 2 strictly depends on an unknown entity, citation, or finding from Step 1 (e.g. "find who authored Theorem 1 in Doc A, then find what other papers they published"):
+        -> Execute Step 1 first with a single query to retrieve the premise.
+        -> Inspect the retrieved passages to identify the specific entity.
+        -> Execute Step 2 as a targeted follow-up query using the discovered entity.
+        -> Do NOT run open-ended chains; cap at 2-3 hops total, then synthesize your final answer with bracket citations.
 
 Retrieval budget & stop discipline:
 - Limit retrieval to 1 or at most 2-3 focused tool calls total (call again with a refined query or narrow documentIds only if initial results are completely off-topic).
@@ -137,10 +141,15 @@ const webSearchGuidance = `
 
 You have a web_search tool to search the live web. Call it whenever the user asks about current events, breaking news, live data, or general external facts not present in your knowledge. Formulate clean, concise search keywords (do not include mention tags like "@web" in your query).
 
-PARALLEL MULTI-QUERY SEARCH (PREFERRED):
-- You can research multiple topics concurrently in a SINGLE call by passing the "queries" array:
-  e.g. {"query": "AI agents news 2025", "queries": ["OpenAI Operator agent", "Google Jarvis agent", "Anthropic Claude computer use"]}
-- All queries execute in parallel at the same time, giving you all the facts in one fast round. Always prefer a single parallel search call over multiple sequential calls!
+PARALLEL VS. SEQUENTIAL MULTI-HOP DECISION RULE:
+- Independent Facets (Parallel Search):
+  When researching multiple known sub-topics or entities simultaneously (e.g. "latest news on OpenAI, Google, Anthropic"):
+  Pass the "queries" array: {"query": "AI agents news", "queries": ["OpenAI Operator agent", "Google Jarvis agent", "Anthropic Claude computer use"]}.
+  All queries execute concurrently in parallel in a single fast round. Always prefer parallel search for independent sub-topics!
+- Dependent Multi-Hop (Sequential Hops):
+  When Step 2 depends on an unknown fact from Step 1 (e.g. "find who won the 2025 AI prize, then search what institution they work at"):
+  Execute Step 1 first with a single query, inspect the winner's identity from the results, then execute Step 2 with that specific name.
+  Limit sequential chains to at most 2-3 hops total.
 
 STRICT EXCLUSION FOR UPLOADED DOCUMENTS:
 - Do NOT use web_search if the user's request is asking to summarize, explain, or query an uploaded document, file, or workspace attachment. Use read_document and search_documents exclusively for files.

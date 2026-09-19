@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/abubakarsiddik31/golem"
@@ -238,12 +239,13 @@ func (s *Server) runTurn(ctx context.Context, userID, convID string, spec chat.R
 		})
 	}
 	var sources []rag.Scored
+	var sourcesMu sync.Mutex
 	outcome, err := s.deps.Agent.Run(ctx, chat.Deps{
 		UserID:         userID,
 		ConversationID: convID,
-		Search:         s.searchDeps(userID, convID, &sources),
+		Search:         s.searchDeps(userID, convID, &sources, &sourcesMu),
 		ListDocs:       s.listDocsDeps(userID, convID),
-		ReadDoc:        s.readDocDeps(userID, convID, &sources),
+		ReadDoc:        s.readDocDeps(userID, convID, &sources, &sourcesMu),
 		SaveMemory:     s.saveMemoryFunc(userID),
 		RecordSearch:   s.recordSearchFunc(userID, convID),
 	}, history, prompt, parts, sink, tools, spec)
@@ -455,128 +457,151 @@ func (s *Server) mcpTools(ctx context.Context, userID string) ([]tool.Tool[chat.
 	if err != nil {
 		return nil, err
 	}
-	var tools []tool.Tool[chat.Deps]
-	for _, srv := range servers {
-		serverRecord := srv
-		var headers map[string]string
-		_ = json.Unmarshal(serverRecord.Headers, &headers)
+	if len(servers) == 0 {
+		return nil, nil
+	}
 
-		safeClient := workflow.NewSafeHTTPClient(s.deps.Cfg.ToolAllowPrivateHosts, 20*time.Second)
+	type srvResult struct {
+		tools []tool.Tool[chat.Deps]
+	}
+	serverResults := make([]srvResult, len(servers))
+	var wg sync.WaitGroup
 
-		// Check if this is a built-in curated 1-click MCP app
-		if strings.HasPrefix(serverRecord.URL, "internal://mcp/") && serverRecord.AppID != nil {
-			catalogApp, ok := mcp.GetCatalogApp(*serverRecord.AppID)
-			if ok {
-				for _, dt := range catalogApp.Tools {
-					toolName := sanitizeToolName(dt.Name)
-					toolDesc := fmt.Sprintf("[%s MCP App] %s", catalogApp.Name, dt.Description)
-					tName := dt.Name
-					t, terr := tool.New(tool.Tool[chat.Deps]{
-						Name:        toolName,
-						Description: toolDesc,
-						Schema:      dt.InputSchema,
-						Timeout:     30 * time.Second,
-						Exec: func(c context.Context, _ chat.Deps, args json.RawMessage) (tool.Result, error) {
-							start := time.Now()
-							out, err := mcp.ExecuteBuiltinTool(c, safeClient, tName, args, headers)
-							dur := time.Since(start).Milliseconds()
-							status := "success"
-							var errStr *string
-							if err != nil {
-								status = "failed"
-								msg := err.Error()
-								errStr = &msg
-							}
-							if s.deps.Audits != nil {
-								_ = s.deps.Audits.RecordToolAudit(c, storage.ToolAuditLog{
-									UserID:       userID,
-									CallerType:   "chat_agent",
-									CallerID:     serverRecord.ID,
-									ToolName:     toolName,
-									Action:       "execute",
-									InputSummary: string(args),
-									Status:       status,
-									Error:        errStr,
-									DurationMs:   dur,
-									CreatedAt:    time.Now(),
-								})
-							}
-							if err != nil {
-								return tool.Text(fmt.Sprintf("MCP Error: %v", err)), nil
-							}
-							return tool.Text(out), nil
-						},
-					})
-					if terr == nil {
-						tools = append(tools, t)
-					}
-				}
-				continue
-			}
-		}
+	for i, srv := range servers {
+		wg.Add(1)
+		go func(idx int, serverRecord storage.MCPServer) {
+			defer wg.Done()
+			var headers map[string]string
+			_ = json.Unmarshal(serverRecord.Headers, &headers)
 
-		client := mcp.NewClient(serverRecord.URL, safeClient, headers)
+			safeClient := workflow.NewSafeHTTPClient(s.deps.Cfg.ToolAllowPrivateHosts, 20*time.Second)
 
-		discTools, err := client.ListTools(ctx)
-		if err != nil {
-			s.deps.Log.Warn("failed to list tools from mcp server", "server", serverRecord.Name, "err", err)
-			continue
-		}
-
-		for _, dt := range discTools {
-			var toolName string
-			var toolDesc string
-			if serverRecord.AppID != nil && *serverRecord.AppID != "" {
-				toolName = sanitizeToolName(fmt.Sprintf("%s_%s", *serverRecord.AppID, dt.Name))
-				toolDesc = fmt.Sprintf("[%s App via MCP] %s", strings.ToUpper(*serverRecord.AppID), dt.Description)
-			} else {
-				toolName = sanitizeToolName(fmt.Sprintf("mcp_%s_%s", serverRecord.Name, dt.Name))
-				toolDesc = fmt.Sprintf("[MCP %s] %s", serverRecord.Name, dt.Description)
-			}
-			if dt.Description == "" {
-				toolDesc = fmt.Sprintf("Tool from %s MCP server", serverRecord.Name)
-			}
-			tName := dt.Name
-			t, terr := tool.New(tool.Tool[chat.Deps]{
-				Name:        toolName,
-				Description: toolDesc,
-				Schema:      dt.InputSchema,
-				Timeout:     30 * time.Second,
-				Exec: func(c context.Context, _ chat.Deps, args json.RawMessage) (tool.Result, error) {
-					start := time.Now()
-					out, err := client.CallTool(c, tName, args)
-					dur := time.Since(start).Milliseconds()
-					status := "success"
-					var errStr *string
-					if err != nil {
-						status = "failed"
-						msg := err.Error()
-						errStr = &msg
-					}
-					if s.deps.Audits != nil {
-						_ = s.deps.Audits.RecordToolAudit(c, storage.ToolAuditLog{
-							UserID:       userID,
-							CallerType:   "chat_agent",
-							CallerID:     serverRecord.ID,
-							ToolName:     toolName,
-							Action:       "execute",
-							InputSummary: string(args),
-							Status:       status,
-							Error:        errStr,
-							DurationMs:   dur,
-							CreatedAt:    time.Now(),
+			// Check if this is a built-in curated 1-click MCP app
+			if strings.HasPrefix(serverRecord.URL, "internal://mcp/") && serverRecord.AppID != nil {
+				catalogApp, ok := mcp.GetCatalogApp(*serverRecord.AppID)
+				if ok {
+					var srvTools []tool.Tool[chat.Deps]
+					for _, dt := range catalogApp.Tools {
+						toolName := sanitizeToolName(dt.Name)
+						toolDesc := fmt.Sprintf("[%s MCP App] %s", catalogApp.Name, dt.Description)
+						tName := dt.Name
+						t, terr := tool.New(tool.Tool[chat.Deps]{
+							Name:        toolName,
+							Description: toolDesc,
+							Schema:      dt.InputSchema,
+							Timeout:     30 * time.Second,
+							Exec: func(c context.Context, _ chat.Deps, args json.RawMessage) (tool.Result, error) {
+								start := time.Now()
+								out, err := mcp.ExecuteBuiltinTool(c, safeClient, tName, args, headers)
+								dur := time.Since(start).Milliseconds()
+								status := "success"
+								var errStr *string
+								if err != nil {
+									status = "failed"
+									msg := err.Error()
+									errStr = &msg
+								}
+								if s.deps.Audits != nil {
+									_ = s.deps.Audits.RecordToolAudit(c, storage.ToolAuditLog{
+										UserID:       userID,
+										CallerType:   "chat_agent",
+										CallerID:     serverRecord.ID,
+										ToolName:     toolName,
+										Action:       "execute",
+										InputSummary: string(args),
+										Status:       status,
+										Error:        errStr,
+										DurationMs:   dur,
+										CreatedAt:    time.Now(),
+									})
+								}
+								if err != nil {
+									return tool.Text(fmt.Sprintf("MCP Error: %v", err)), nil
+								}
+								return tool.Text(out), nil
+							},
 						})
+						if terr == nil {
+							srvTools = append(srvTools, t)
+						}
 					}
-					if err != nil {
-						return tool.Text(fmt.Sprintf("MCP Error: %v", err)), nil
-					}
-					return tool.Text(out), nil
-				},
-			})
-			if terr == nil {
-				tools = append(tools, t)
+					serverResults[idx].tools = srvTools
+					return
+				}
 			}
-		}
+
+			client := mcp.NewClient(serverRecord.URL, safeClient, headers)
+			listCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
+			defer cancel()
+			discTools, err := client.ListTools(listCtx)
+			if err != nil {
+				s.deps.Log.Warn("failed to list tools from mcp server", "server", serverRecord.Name, "err", err)
+				return
+			}
+
+			var srvTools []tool.Tool[chat.Deps]
+			for _, dt := range discTools {
+				var toolName string
+				var toolDesc string
+				if serverRecord.AppID != nil && *serverRecord.AppID != "" {
+					toolName = sanitizeToolName(fmt.Sprintf("%s_%s", *serverRecord.AppID, dt.Name))
+					toolDesc = fmt.Sprintf("[%s App via MCP] %s", strings.ToUpper(*serverRecord.AppID), dt.Description)
+				} else {
+					toolName = sanitizeToolName(fmt.Sprintf("mcp_%s_%s", serverRecord.Name, dt.Name))
+					toolDesc = fmt.Sprintf("[MCP %s] %s", serverRecord.Name, dt.Description)
+				}
+				if dt.Description == "" {
+					toolDesc = fmt.Sprintf("Tool from %s MCP server", serverRecord.Name)
+				}
+				tName := dt.Name
+				t, terr := tool.New(tool.Tool[chat.Deps]{
+					Name:        toolName,
+					Description: toolDesc,
+					Schema:      dt.InputSchema,
+					Timeout:     30 * time.Second,
+					Exec: func(c context.Context, _ chat.Deps, args json.RawMessage) (tool.Result, error) {
+						start := time.Now()
+						out, err := client.CallTool(c, tName, args)
+						dur := time.Since(start).Milliseconds()
+						status := "success"
+						var errStr *string
+						if err != nil {
+							status = "failed"
+							msg := err.Error()
+							errStr = &msg
+						}
+						if s.deps.Audits != nil {
+							_ = s.deps.Audits.RecordToolAudit(c, storage.ToolAuditLog{
+								UserID:       userID,
+								CallerType:   "chat_agent",
+								CallerID:     serverRecord.ID,
+								ToolName:     toolName,
+								Action:       "execute",
+								InputSummary: string(args),
+								Status:       status,
+								Error:        errStr,
+								DurationMs:   dur,
+								CreatedAt:    time.Now(),
+							})
+						}
+						if err != nil {
+							return tool.Text(fmt.Sprintf("MCP Error: %v", err)), nil
+						}
+						return tool.Text(out), nil
+					},
+				})
+				if terr == nil {
+					srvTools = append(srvTools, t)
+				}
+			}
+			serverResults[idx].tools = srvTools
+		}(i, srv)
+	}
+	wg.Wait()
+
+	var tools []tool.Tool[chat.Deps]
+	for _, res := range serverResults {
+		tools = append(tools, res.tools...)
 	}
 	return tools, nil
 }
@@ -649,9 +674,13 @@ func (s *Server) listDocsDeps(userID, convID string) chat.ListDocsFunc {
 	}
 }
 
-func (s *Server) readDocDeps(userID, convID string, sources *[]rag.Scored) chat.ReadDocFunc {
+func (s *Server) readDocDeps(userID, convID string, sources *[]rag.Scored, mu ...*sync.Mutex) chat.ReadDocFunc {
 	if s.deps.Vectors == nil || s.deps.Docs == nil {
 		return nil
+	}
+	var lock *sync.Mutex
+	if len(mu) > 0 && mu[0] != nil {
+		lock = mu[0]
 	}
 	return func(ctx context.Context, documentID string, offset, limit int) (chat.ReadDocResult, error) {
 		doc, err := s.deps.Docs.Get(ctx, documentID, userID)
@@ -702,12 +731,25 @@ func (s *Server) readDocDeps(userID, convID string, sources *[]rag.Scored) chat.
 			return chunks[i].Index < chunks[j].Index
 		})
 
-		sourceOffset := len(*sources)
-		for _, ch := range chunks {
-			*sources = append(*sources, rag.Scored{
-				Chunk: ch,
-				Score: 1.0,
-			})
+		var sourceOffset int
+		if lock != nil {
+			lock.Lock()
+			sourceOffset = len(*sources)
+			for _, ch := range chunks {
+				*sources = append(*sources, rag.Scored{
+					Chunk: ch,
+					Score: 1.0,
+				})
+			}
+			lock.Unlock()
+		} else {
+			sourceOffset = len(*sources)
+			for _, ch := range chunks {
+				*sources = append(*sources, rag.Scored{
+					Chunk: ch,
+					Score: 1.0,
+				})
+			}
 		}
 
 		return chat.ReadDocResult{
@@ -726,9 +768,13 @@ func (s *Server) readDocDeps(userID, convID string, sources *[]rag.Scored) chat.
 // embed is an exact-token `embedding` usage event priced from the rate
 // table), optional rerank generation metering, and per-run source collection
 // for the sources SSE event. Nil when RAG is disabled.
-func (s *Server) searchDeps(userID, convID string, sources *[]rag.Scored) chat.SearchFunc {
+func (s *Server) searchDeps(userID, convID string, sources *[]rag.Scored, mu ...*sync.Mutex) chat.SearchFunc {
 	if s.deps.RagSearch == nil {
 		return nil
+	}
+	var lock *sync.Mutex
+	if len(mu) > 0 && mu[0] != nil {
+		lock = mu[0]
 	}
 	return func(ctx context.Context, query string, k int, docIDs []string) ([]rag.Scored, int, error) {
 		effectiveDocIDs := docIDs
@@ -750,8 +796,17 @@ func (s *Server) searchDeps(userID, convID string, sources *[]rag.Scored) chat.S
 			return nil, 0, err
 		}
 		s.recordSearch(ctx, userID, convID, query, "document_search", "rag", len(scored), dur)
-		offset := len(*sources)
-		*sources = append(*sources, scored...)
+
+		var offset int
+		if lock != nil {
+			lock.Lock()
+			offset = len(*sources)
+			*sources = append(*sources, scored...)
+			lock.Unlock()
+		} else {
+			offset = len(*sources)
+			*sources = append(*sources, scored...)
+		}
 		if rep.Embed.InputTokens > 0 {
 			model := s.deps.Cfg.RAG.EmbeddingModel
 			_ = s.deps.Usage.Add(ctx, storage.UsageEvent{
