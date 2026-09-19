@@ -13,6 +13,7 @@ import (
 	"github.com/abubakarsiddik31/golem-chatbot/internal/cost"
 	"github.com/abubakarsiddik31/golem-chatbot/internal/rag"
 	"github.com/abubakarsiddik31/golem-chatbot/internal/storage"
+	"github.com/abubakarsiddik31/golem-chatbot/internal/vault"
 	"github.com/abubakarsiddik31/golem-chatbot/internal/websearch"
 )
 
@@ -27,6 +28,8 @@ type ServerDeps struct {
 	// order. Empty = password auth only; the login UI hides the
 	// provider buttons.
 	OAuth     []*oauth.Provider
+	Vault     *vault.Vault
+	Audits    storage.AuditStore
 	Shares    ShareStore
 	Profiles  ProfileStore
 	Memories  MemoryStore
@@ -90,6 +93,7 @@ func NewServer(deps ServerDeps) http.Handler {
 	s.mux.HandleFunc("GET /api/shared/{token}", s.handleGetShared)
 	s.mux.HandleFunc("POST /api/webhooks/{slug}", s.handlePublicWebhook)
 	s.mux.HandleFunc("GET /api/webhooks/{slug}", s.handlePublicWebhook)
+	s.mux.HandleFunc("GET /api/tool-oauth/{provider}/callback", s.handleToolOAuthCallback)
 
 	// Authenticated API: more specific patterns above win over this
 	// catch-all, so /api/auth/* stays public while the rest of /api/
@@ -145,6 +149,10 @@ func NewServer(deps ServerDeps) http.Handler {
 	authed.HandleFunc("GET /api/workflow-credentials", s.handleListWorkflowCredentials)
 	authed.HandleFunc("POST /api/workflow-credentials", s.handleCreateWorkflowCredential)
 	authed.HandleFunc("DELETE /api/workflow-credentials/{id}", s.handleDeleteWorkflowCredential)
+	authed.HandleFunc("GET /api/tool-oauth/providers", s.handleToolOAuthProviders)
+	authed.HandleFunc("GET /api/tool-oauth/{provider}/start", s.handleToolOAuthStart)
+	authed.HandleFunc("POST /api/tool-oauth/{provider}/disconnect", s.handleToolOAuthDisconnect)
+	authed.HandleFunc("GET /api/tool-audit-logs", s.handleListToolAuditLogs)
 	s.mux.Handle("/api/", requireAuth(deps.Tokens, authed))
 
 	return withCORS(deps.Cfg.FrontendOrigin, logRequests(deps.Log, s.mux))

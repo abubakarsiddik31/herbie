@@ -106,6 +106,7 @@ export interface Workflow {
   exposeAsTool: boolean;
   toolName: string;
   toolDescription: string;
+  toolRequireApproval?: boolean;
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
@@ -142,7 +143,36 @@ export interface WorkflowCredential {
   id: string;
   name: string;
   type: string;
+  provider?: string;
+  scopes?: string[];
+  expiresAt?: string | null;
   data: Record<string, string>;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface ToolOAuthProvider {
+  id: string;
+  name: string;
+  configured: boolean;
+  connected: boolean;
+  credentialName?: string;
+  scopes?: string[];
+  connectedAt?: string;
+  expiresAt?: string | null;
+}
+
+export interface ToolAuditLog {
+  id: string;
+  userId: string;
+  callerType: string;
+  callerId: string;
+  toolName: string;
+  action: string;
+  inputSummary: string;
+  outputSummary: string;
+  status: "success" | "failed" | "approval_pending" | "rejected" | "approved";
+  error?: string | null;
+  durationMs: number;
+  createdAt: string;
 }

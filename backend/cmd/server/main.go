@@ -19,6 +19,7 @@ import (
 	"github.com/abubakarsiddik31/golem-chatbot/internal/httpapi"
 	"github.com/abubakarsiddik31/golem-chatbot/internal/rag"
 	"github.com/abubakarsiddik31/golem-chatbot/internal/storage"
+	"github.com/abubakarsiddik31/golem-chatbot/internal/vault"
 	"github.com/abubakarsiddik31/golem-chatbot/internal/weaviate"
 	"github.com/abubakarsiddik31/golem-chatbot/internal/websearch"
 )
@@ -175,6 +176,8 @@ func main() {
 		Docs:      storage.NewDocuments(pool),
 		Projects:  storage.NewProjects(pool),
 		Workflows: storage.NewWorkflows(pool),
+		Audits:    storage.NewAudits(pool),
+		Vault:     vault.New(cfg.CredentialEncryptionKey),
 		Vectors:   vectors,
 		Objects:   objects,
 	})

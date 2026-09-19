@@ -14,8 +14,10 @@ import (
 
 	"github.com/abubakarsiddik31/golem-chatbot/internal/auth"
 	"github.com/abubakarsiddik31/golem-chatbot/internal/auth/authtest"
+	"github.com/abubakarsiddik31/golem-chatbot/internal/chat"
 	"github.com/abubakarsiddik31/golem-chatbot/internal/config"
 	"github.com/abubakarsiddik31/golem-chatbot/internal/storage"
+	"github.com/abubakarsiddik31/golem/tool"
 	"github.com/google/uuid"
 )
 
@@ -172,6 +174,15 @@ func (f *fakeWorkflowStore) GetCredential(_ context.Context, id, userID string) 
 		return storage.WorkflowCredential{}, storage.ErrNotFound
 	}
 	return c, nil
+}
+
+func (f *fakeWorkflowStore) GetCredentialByProvider(_ context.Context, userID, provider string) (storage.WorkflowCredential, error) {
+	for _, c := range f.credentials {
+		if c.UserID == userID && c.Provider == provider {
+			return c, nil
+		}
+	}
+	return storage.WorkflowCredential{}, storage.ErrNotFound
 }
 
 func (f *fakeWorkflowStore) ListCredentials(_ context.Context, userID string) ([]storage.WorkflowCredential, error) {
@@ -384,5 +395,63 @@ func TestPublicWebhookTrigger(t *testing.T) {
 	_ = json.Unmarshal(rec.Body.Bytes(), &res)
 	if res["received"] != "alert!" {
 		t.Errorf("expected received alert!, got %v", res["received"])
+	}
+}
+
+func TestWorkflowToolApprovalGating(t *testing.T) {
+	store := newFakeWorkflowStore()
+	userID := "user-approvals"
+	wf := storage.Workflow{
+		ID:                  "wf-tool-approval",
+		UserID:              userID,
+		Name:                "Deploy App",
+		TriggerType:         "manual",
+		IsActive:            true,
+		ExposeAsTool:        true,
+		ToolName:            "deploy_prod",
+		ToolDescription:     "Deploys to production",
+		ToolRequireApproval: true,
+		Nodes: json.RawMessage(`[
+			{"id":"n1","type":"manual"},
+			{"id":"n2","type":"code_transform","data":{"fields":{"status":"deployed"}}}
+		]`),
+		Edges: json.RawMessage(`[{"id":"e1","source":"n1","target":"n2"}]`),
+	}
+	_, _ = store.Create(context.Background(), wf)
+
+	server := &Server{
+		deps: ServerDeps{
+			Workflows: store,
+			Audits:    &fakeAuditStore{},
+		},
+	}
+
+	tools, err := server.workflowTools(context.Background(), userID)
+	if err != nil {
+		t.Fatalf("workflowTools error: %v", err)
+	}
+	if len(tools) != 1 {
+		t.Fatalf("expected 1 tool, got %d", len(tools))
+	}
+
+	// 1. Calling without approval must return Deferred approval
+	ctx := context.Background()
+	_, execErr := tools[0].Exec(ctx, chat.Deps{}, json.RawMessage(`{"input":"v1.0"}`))
+	if execErr == nil {
+		t.Fatal("expected Deferred approval error, got nil")
+	}
+	def, ok := execErr.(*tool.Deferred)
+	if !ok || def.Kind != tool.DeferApproval {
+		t.Fatalf("expected DeferApproval, got %T: %v", execErr, execErr)
+	}
+
+	// 2. Calling with approval set must succeed
+	approvedCtx := tool.WithApprovedCall(ctx)
+	res, approvedErr := tools[0].Exec(approvedCtx, chat.Deps{}, json.RawMessage(`{"input":"v1.0"}`))
+	if approvedErr != nil {
+		t.Fatalf("expected success with approval, got: %v", approvedErr)
+	}
+	if !strings.Contains(res.Text, "deployed") {
+		t.Fatalf("expected deployed in output after approved run, got: %s", res.Text)
 	}
 }

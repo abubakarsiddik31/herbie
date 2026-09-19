@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/api";
-import type { Workflow, WorkflowCredential, WorkflowRun } from "@/lib/types";
+import type { ToolAuditLog, ToolOAuthProvider, Workflow, WorkflowCredential, WorkflowRun } from "@/lib/types";
 
 export function useWorkflows() {
   return useQuery({
@@ -110,6 +110,42 @@ export function useDeleteWorkflowCredential() {
       }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["workflow-credentials"] });
+      void queryClient.invalidateQueries({ queryKey: ["tool-oauth-providers"] });
+    },
+  });
+}
+
+export function useToolOAuthProviders() {
+  return useQuery({
+    queryKey: ["tool-oauth-providers"],
+    queryFn: async () => {
+      const data = await apiFetch<{ providers: ToolOAuthProvider[] }>("/api/tool-oauth/providers");
+      return data.providers ?? [];
+    },
+  });
+}
+
+export function useDisconnectToolOAuth() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (provider: string) =>
+      apiFetch<{ ok: boolean }>(`/api/tool-oauth/${provider}/disconnect`, {
+        method: "POST",
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["tool-oauth-providers"] });
+      void queryClient.invalidateQueries({ queryKey: ["workflow-credentials"] });
+      void queryClient.invalidateQueries({ queryKey: ["tool-audit-logs"] });
+    },
+  });
+}
+
+export function useToolAuditLogs(limit = 50) {
+  return useQuery({
+    queryKey: ["tool-audit-logs", limit],
+    queryFn: async () => {
+      const data = await apiFetch<{ audits: ToolAuditLog[] }>(`/api/tool-audit-logs?limit=${limit}`);
+      return data.audits ?? [];
     },
   });
 }
