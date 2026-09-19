@@ -100,6 +100,20 @@ export function SettingsDialog({ open, onOpenChange, defaultTab = "general" }: P
     setLinkAppDialogOpen(true);
   }
 
+  async function handleOAuthConnect(providerId: string) {
+    try {
+      const dest = window.location.pathname + window.location.search;
+      const data = await apiFetch<{ url: string }>(
+        `/api/tool-oauth/${providerId}/start?return_to=${encodeURIComponent(dest)}`,
+      );
+      if (data.url) {
+        window.location.href = data.url;
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : `Failed to start ${providerId} OAuth`);
+    }
+  }
+
   useEffect(() => {
     if (open) {
       setActiveTab(defaultTab);
@@ -427,23 +441,13 @@ export function SettingsDialog({ open, onOpenChange, defaultTab = "general" }: P
                   </div>
                 </div>
 
-                {/* 1-Click Apps & OAuth Section */}
+                {/* Integrated Apps Section */}
                 <div className="space-y-2.5">
                   <div className="flex items-center justify-between">
                     <div>
-                      <span className="text-xs font-semibold text-foreground">Integrated Apps & MCP Tools (@ mentions)</span>
-                      <p className="text-[11px] text-muted-foreground">1-Click connect curated integrations to your AI assistant.</p>
+                      <span className="text-xs font-semibold text-foreground">Integrated Apps & Tools</span>
+                      <p className="text-[11px] text-muted-foreground">Manage your connected calendar, developer, and communication apps.</p>
                     </div>
-                    <Button
-                      size="xs"
-                      variant="outline"
-                      type="button"
-                      onClick={() => openLinkApp("github")}
-                      className="text-xs gap-1 border-purple-500/30 text-purple-600 dark:text-purple-400 hover:bg-purple-500/10"
-                    >
-                      <Sparkles className="size-3" />
-                      <span>MCP Directory</span>
-                    </Button>
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -463,25 +467,23 @@ export function SettingsDialog({ open, onOpenChange, defaultTab = "general" }: P
                                 <span className="font-mono text-[10px] text-muted-foreground">@calendar</span>
                               </div>
                               <p className="text-[10px] text-muted-foreground truncate">
-                                {isConnected
-                                  ? (cal?.connectedVia === "mcp" ? "Linked via MCP Server" : "Connected via OAuth")
-                                  : "Agenda & event creation"}
+                                {isConnected ? "Connected via OAuth" : "Agenda & event creation"}
                               </p>
                             </div>
                           </div>
                           <div className="flex items-center gap-1.5 shrink-0">
                             <Badge variant="outline" className={cn("text-[10px] gap-1 px-1.5 py-0 font-normal shrink-0", isConnected ? "border-emerald-600/30 bg-emerald-600/10 text-emerald-700 dark:text-emerald-400" : "text-muted-foreground")}>
                               {isConnected && <CheckCircle2 className="size-2.5" />}
-                              <span>{isConnected ? (cal?.connectedVia === "mcp" ? "MCP" : "OAuth") : "Not Linked"}</span>
+                              <span>{isConnected ? "Connected" : "Not Connected"}</span>
                             </Badge>
                             <Button
                               size="xs"
-                              variant={isConnected ? "ghost" : "default"}
+                              variant={isConnected ? "outline" : "default"}
                               type="button"
-                              onClick={() => isConnected ? unlinkCatalogApp.mutate("google_calendar") : linkCatalogApp.mutate({ appId: "google_calendar" })}
-                              className={cn("h-6 px-2 text-[10px]", isConnected ? "text-destructive hover:bg-destructive/10" : "bg-purple-600 hover:bg-purple-700 text-white")}
+                              onClick={() => isConnected ? unlinkCatalogApp.mutate("google_calendar") : handleOAuthConnect("google_calendar")}
+                              className={cn("h-6 px-2 text-[10px]", isConnected ? "text-destructive hover:bg-destructive/10 border-destructive/30" : "")}
                             >
-                              {isConnected ? "Unlink" : "1-Click Link"}
+                              {isConnected ? "Disconnect" : "Connect"}
                             </Button>
                           </div>
                         </div>
@@ -504,25 +506,23 @@ export function SettingsDialog({ open, onOpenChange, defaultTab = "general" }: P
                                 <span className="font-mono text-[10px] text-muted-foreground">@github</span>
                               </div>
                               <p className="text-[10px] text-muted-foreground truncate">
-                                {isConnected
-                                  ? (gh?.connectedVia === "mcp" ? "Linked via MCP Server" : "Connected via OAuth")
-                                  : "Repos, PRs & issues"}
+                                {isConnected ? "Connected" : "Repos, PRs & issues"}
                               </p>
                             </div>
                           </div>
                           <div className="flex items-center gap-1.5 shrink-0">
                             <Badge variant="outline" className={cn("text-[10px] gap-1 px-1.5 py-0 font-normal shrink-0", isConnected ? "border-emerald-600/30 bg-emerald-600/10 text-emerald-700 dark:text-emerald-400" : "text-muted-foreground")}>
                               {isConnected && <CheckCircle2 className="size-2.5" />}
-                              <span>{isConnected ? (gh?.connectedVia === "mcp" ? "MCP" : "OAuth") : "Not Linked"}</span>
+                              <span>{isConnected ? "Connected" : "Not Connected"}</span>
                             </Badge>
                             <Button
                               size="xs"
-                              variant={isConnected ? "ghost" : "default"}
+                              variant={isConnected ? "outline" : "default"}
                               type="button"
                               onClick={() => isConnected ? unlinkCatalogApp.mutate("github") : linkCatalogApp.mutate({ appId: "github" })}
-                              className={cn("h-6 px-2 text-[10px]", isConnected ? "text-destructive hover:bg-destructive/10" : "bg-purple-600 hover:bg-purple-700 text-white")}
+                              className={cn("h-6 px-2 text-[10px]", isConnected ? "text-destructive hover:bg-destructive/10 border-destructive/30" : "")}
                             >
-                              {isConnected ? "Unlink" : "1-Click Link"}
+                              {isConnected ? "Disconnect" : "Connect"}
                             </Button>
                           </div>
                         </div>
@@ -545,30 +545,121 @@ export function SettingsDialog({ open, onOpenChange, defaultTab = "general" }: P
                                 <span className="font-mono text-[10px] text-muted-foreground">@slack</span>
                               </div>
                               <p className="text-[10px] text-muted-foreground truncate">
-                                {isConnected
-                                  ? (slk?.connectedVia === "mcp" ? "Linked via MCP Server" : "Connected via OAuth")
-                                  : "Channel notifications"}
+                                {isConnected ? "Connected" : "Channel notifications"}
                               </p>
                             </div>
                           </div>
                           <div className="flex items-center gap-1.5 shrink-0">
                             <Badge variant="outline" className={cn("text-[10px] gap-1 px-1.5 py-0 font-normal shrink-0", isConnected ? "border-emerald-600/30 bg-emerald-600/10 text-emerald-700 dark:text-emerald-400" : "text-muted-foreground")}>
                               {isConnected && <CheckCircle2 className="size-2.5" />}
-                              <span>{isConnected ? (slk?.connectedVia === "mcp" ? "MCP" : "OAuth") : "Not Linked"}</span>
+                              <span>{isConnected ? "Connected" : "Not Connected"}</span>
                             </Badge>
                             <Button
                               size="xs"
-                              variant={isConnected ? "ghost" : "default"}
+                              variant={isConnected ? "outline" : "default"}
                               type="button"
                               onClick={() => isConnected ? unlinkCatalogApp.mutate("slack") : linkCatalogApp.mutate({ appId: "slack" })}
-                              className={cn("h-6 px-2 text-[10px]", isConnected ? "text-destructive hover:bg-destructive/10" : "bg-purple-600 hover:bg-purple-700 text-white")}
+                              className={cn("h-6 px-2 text-[10px]", isConnected ? "text-destructive hover:bg-destructive/10 border-destructive/30" : "")}
                             >
-                              {isConnected ? "Unlink" : "1-Click Link"}
+                              {isConnected ? "Disconnect" : "Connect"}
                             </Button>
                           </div>
                         </div>
                       );
                     })()}
+
+                    {/* Web Search */}
+                    <div className="flex items-center justify-between rounded-xl border border-border bg-card p-2.5 text-xs shadow-2xs">
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <div className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-cyan-500/10 text-cyan-600 dark:text-cyan-400">
+                          <Globe className="size-3.5" />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-semibold text-foreground truncate">Web Search</span>
+                            <span className="font-mono text-[10px] text-muted-foreground">@web</span>
+                          </div>
+                          <p className="text-[10px] text-muted-foreground truncate">Live public web retrieval</p>
+                        </div>
+                      </div>
+                      <Badge variant="outline" className="border-cyan-600/30 bg-cyan-600/10 text-cyan-700 dark:text-cyan-400 text-[10px] px-1.5 py-0 font-normal shrink-0">
+                        Built-in
+                      </Badge>
+                    </div>
+
+                    {/* Web Reader & Fetch */}
+                    {(() => {
+                      const isConnected = mcpServers?.some((s) => s.appId === "web_fetch" && s.enabled);
+                      return (
+                        <div className="flex items-center justify-between rounded-xl border border-border bg-card p-2.5 text-xs shadow-2xs">
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <div className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-blue-500/10 text-blue-600 dark:text-blue-400">
+                              <Globe className="size-3.5" />
+                            </div>
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-1.5">
+                                <span className="font-semibold text-foreground truncate">Web Reader</span>
+                                <span className="font-mono text-[10px] text-muted-foreground">@web_fetch</span>
+                              </div>
+                              <p className="text-[10px] text-muted-foreground truncate">Article text extraction</p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <Badge variant="outline" className={cn("text-[10px] gap-1 px-1.5 py-0 font-normal shrink-0", isConnected ? "border-emerald-600/30 bg-emerald-600/10 text-emerald-700 dark:text-emerald-400" : "text-muted-foreground")}>
+                              {isConnected && <CheckCircle2 className="size-2.5" />}
+                              <span>{isConnected ? "Connected" : "Not Connected"}</span>
+                            </Badge>
+                            <Button
+                              size="xs"
+                              variant={isConnected ? "outline" : "default"}
+                              type="button"
+                              onClick={() => isConnected ? unlinkCatalogApp.mutate("web_fetch") : linkCatalogApp.mutate({ appId: "web_fetch" })}
+                              className={cn("h-6 px-2 text-[10px]", isConnected ? "text-destructive hover:bg-destructive/10 border-destructive/30" : "")}
+                            >
+                              {isConnected ? "Disconnect" : "Connect"}
+                            </Button>
+                          </div>
+                        </div>
+                      );
+                    })()}
+
+                    {/* Code Sandbox */}
+                    {(() => {
+                      const isConnected = mcpServers?.some((s) => s.appId === "code_runner" && s.enabled);
+                      return (
+                        <div className="flex items-center justify-between rounded-xl border border-border bg-card p-2.5 text-xs shadow-2xs">
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <div className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-amber-500/10 text-amber-600 dark:text-amber-400">
+                              <Terminal className="size-3.5" />
+                            </div>
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-1.5">
+                                <span className="font-semibold text-foreground truncate">Code Sandbox</span>
+                                <span className="font-mono text-[10px] text-muted-foreground">@code_runner</span>
+                              </div>
+                              <p className="text-[10px] text-muted-foreground truncate">Sandbox calculations</p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <Badge variant="outline" className={cn("text-[10px] gap-1 px-1.5 py-0 font-normal shrink-0", isConnected ? "border-emerald-600/30 bg-emerald-600/10 text-emerald-700 dark:text-emerald-400" : "text-muted-foreground")}>
+                              {isConnected && <CheckCircle2 className="size-2.5" />}
+                              <span>{isConnected ? "Connected" : "Not Connected"}</span>
+                            </Badge>
+                            <Button
+                              size="xs"
+                              variant={isConnected ? "outline" : "default"}
+                              type="button"
+                              onClick={() => isConnected ? unlinkCatalogApp.mutate("code_runner") : linkCatalogApp.mutate({ appId: "code_runner" })}
+                              className={cn("h-6 px-2 text-[10px]", isConnected ? "text-destructive hover:bg-destructive/10 border-destructive/30" : "")}
+                            >
+                              {isConnected ? "Disconnect" : "Connect"}
+                            </Button>
+                          </div>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                </div>
 
                     {/* Web Search */}
                     <div className="flex items-center justify-between rounded-xl border border-border bg-card p-2.5 text-xs shadow-2xs">
