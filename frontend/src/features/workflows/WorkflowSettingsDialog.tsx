@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Copy, Settings2 } from "lucide-react";
+import { Copy, Settings2, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -37,6 +37,7 @@ export function WorkflowSettingsDialog({
   const [exposeAsTool, setExposeAsTool] = useState(workflow.exposeAsTool);
   const [toolName, setToolName] = useState(workflow.toolName || "");
   const [toolDescription, setToolDescription] = useState(workflow.toolDescription || "");
+  const [toolRequireApproval, setToolRequireApproval] = useState(workflow.toolRequireApproval ?? true);
 
   const apiBase = window.location.origin;
   const webhookUrl = webhookSlug ? `${apiBase}/api/webhooks/${webhookSlug}` : "";
@@ -63,6 +64,7 @@ export function WorkflowSettingsDialog({
       exposeAsTool,
       toolName: toolName.trim(),
       toolDescription: toolDescription.trim(),
+      toolRequireApproval,
     });
     onOpenChange(false);
   }
@@ -201,6 +203,19 @@ export function WorkflowSettingsDialog({
                     placeholder="Explain when the model should call this workflow..."
                     className="h-8 text-xs"
                   />
+                </div>
+
+                <div className="flex items-center justify-between rounded-md border border-amber-500/30 bg-amber-500/5 p-2.5">
+                  <div className="space-y-0.5 pr-2">
+                    <p className="font-medium text-xs text-foreground flex items-center gap-1.5">
+                      <ShieldCheck className="size-3.5 text-amber-600 dark:text-amber-400" />
+                      <span>Require Approval Before Execution</span>
+                    </p>
+                    <p className="text-[10px] text-muted-foreground">
+                      Pause the AI run and require human confirmation before invoking external tools.
+                    </p>
+                  </div>
+                  <Switch checked={toolRequireApproval} onCheckedChange={setToolRequireApproval} />
                 </div>
               </>
             )}

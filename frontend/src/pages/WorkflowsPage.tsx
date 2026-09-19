@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import { useNavigate } from "react-router";
+import { useEffect, useMemo, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router";
 import {
   ArrowRight,
   Bot,
@@ -44,10 +44,25 @@ import type { Workflow } from "@/lib/types";
 
 export function WorkflowsPage() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { data: workflows, isLoading } = useWorkflows();
   const createWorkflow = useCreateWorkflow();
   const updateWorkflow = useUpdateWorkflow();
   const deleteWorkflow = useDeleteWorkflow();
+
+  useEffect(() => {
+    const connected = searchParams.get("connected");
+    const error = searchParams.get("error");
+    if (connected) {
+      toast.success(`${connected.toUpperCase()} account connected successfully via OAuth!`);
+      searchParams.delete("connected");
+      setSearchParams(searchParams, { replace: true });
+    } else if (error) {
+      toast.error(`OAuth connection error: ${error}`);
+      searchParams.delete("error");
+      setSearchParams(searchParams, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
 
   // Navigation tab
   const [activeTab, setActiveTab] = useState<"my" | "templates">("my");
