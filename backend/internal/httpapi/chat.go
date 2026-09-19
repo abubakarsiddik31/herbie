@@ -419,6 +419,59 @@ func (s *Server) mcpTools(ctx context.Context, userID string) ([]tool.Tool[chat.
 		_ = json.Unmarshal(serverRecord.Headers, &headers)
 
 		safeClient := workflow.NewSafeHTTPClient(s.deps.Cfg.ToolAllowPrivateHosts, 20*time.Second)
+
+		// Check if this is a built-in curated 1-click MCP app
+		if strings.HasPrefix(serverRecord.URL, "internal://mcp/") && serverRecord.AppID != nil {
+			catalogApp, ok := mcp.GetCatalogApp(*serverRecord.AppID)
+			if ok {
+				for _, dt := range catalogApp.Tools {
+					toolName := sanitizeToolName(dt.Name)
+					toolDesc := fmt.Sprintf("[%s MCP App] %s", catalogApp.Name, dt.Description)
+					tName := dt.Name
+					t, terr := tool.New(tool.Tool[chat.Deps]{
+						Name:        toolName,
+						Description: toolDesc,
+						Schema:      dt.InputSchema,
+						Timeout:     30 * time.Second,
+						Exec: func(c context.Context, _ chat.Deps, args json.RawMessage) (tool.Result, error) {
+							start := time.Now()
+							out, err := mcp.ExecuteBuiltinTool(c, safeClient, tName, args, headers)
+							dur := time.Since(start).Milliseconds()
+							status := "success"
+							var errStr *string
+							if err != nil {
+								status = "failed"
+								msg := err.Error()
+								errStr = &msg
+							}
+							if s.deps.Audits != nil {
+								_ = s.deps.Audits.RecordToolAudit(c, storage.ToolAuditLog{
+									UserID:       userID,
+									CallerType:   "chat_agent",
+									CallerID:     serverRecord.ID,
+									ToolName:     toolName,
+									Action:       "execute",
+									InputSummary: string(args),
+									Status:       status,
+									Error:        errStr,
+									DurationMs:   dur,
+									CreatedAt:    time.Now(),
+								})
+							}
+							if err != nil {
+								return tool.Text(fmt.Sprintf("MCP Error: %v", err)), nil
+							}
+							return tool.Text(out), nil
+						},
+					})
+					if terr == nil {
+						tools = append(tools, t)
+					}
+				}
+				continue
+			}
+		}
+
 		client := mcp.NewClient(serverRecord.URL, safeClient, headers)
 
 		discTools, err := client.ListTools(ctx)
