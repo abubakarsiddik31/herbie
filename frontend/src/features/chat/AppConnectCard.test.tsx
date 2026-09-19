@@ -7,6 +7,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { AppConnectCard } from "./AppConnectCard";
 
 let startCalledWith: string | null = null;
+let linkCalledWith: string | null = null;
 
 const server = setupServer(
   http.get("*/api/mcp/servers", () =>
@@ -14,6 +15,15 @@ const server = setupServer(
       servers: [],
     }),
   ),
+  http.get("*/api/mcp/catalog", () =>
+    HttpResponse.json({
+      catalog: [],
+    }),
+  ),
+  http.post("*/api/mcp/catalog/:appId/link", ({ params }) => {
+    linkCalledWith = params.appId as string;
+    return HttpResponse.json({ ok: true });
+  }),
   http.get("*/api/tool-oauth/providers", () =>
     HttpResponse.json({
       providers: [
@@ -37,6 +47,7 @@ beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
 afterEach(() => {
   server.resetHandlers();
   startCalledWith = null;
+  linkCalledWith = null;
 });
 afterAll(() => server.close());
 
@@ -54,15 +65,30 @@ describe("AppConnectCard", () => {
     });
 
     expect(await screen.findByText("Google Calendar Connection Required")).toBeInTheDocument();
-    expect(screen.getByText("Connect Google Calendar")).toBeInTheDocument();
+    expect(screen.getByText("OAuth Connect")).toBeInTheDocument();
+    expect(screen.getByText("1-Click Link")).toBeInTheDocument();
 
     // Stub window.location.href assignment
-    const btn = screen.getByText("Connect Google Calendar");
+    const btn = screen.getByText("OAuth Connect");
     fireEvent.click(btn);
 
     await waitFor(() => {
       expect(startCalledWith).toContain("google_calendar");
       expect(startCalledWith).toContain("return_to=/chat/test-123");
+    });
+  });
+
+  it("triggers 1-click link when clicking 1-Click Link button", async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(<AppConnectCard providerId="github" />, {
+      wrapper: wrapper(client),
+    });
+
+    const linkBtn = await screen.findByText("1-Click Link");
+    fireEvent.click(linkBtn);
+
+    await waitFor(() => {
+      expect(linkCalledWith).toBe("github");
     });
   });
 

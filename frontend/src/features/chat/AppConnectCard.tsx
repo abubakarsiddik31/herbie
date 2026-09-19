@@ -1,11 +1,12 @@
 import { useState } from "react";
-import { ExternalLink, CheckCircle2, Loader2, Plug } from "lucide-react";
+import { ExternalLink, CheckCircle2, Loader2, Sparkles, SlidersHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { apiFetch } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { useToolOAuthProviders } from "@/features/workflows/useWorkflows";
+import { useLinkCatalogApp } from "@/features/mcp/useMCPCatalog";
 import { LinkAppDialog } from "@/features/mcp/LinkAppDialog";
 import { MentionAppIcon } from "./MentionMenu";
 
@@ -38,6 +39,7 @@ const PROVIDER_METADATA: Record<
 
 export function AppConnectCard({ providerId, className, returnTo }: AppConnectCardProps) {
   const { data: providers } = useToolOAuthProviders();
+  const linkCatalogApp = useLinkCatalogApp();
   const [connecting, setConnecting] = useState(false);
   const [linkDialogOpen, setLinkDialogOpen] = useState(false);
 
@@ -50,6 +52,10 @@ export function AppConnectCard({ providerId, className, returnTo }: AppConnectCa
   const provider = providers?.find((p) => p.id === providerId);
   const isConnected = !!provider?.connected;
   const isConfigured = provider ? provider.configured : true;
+
+  async function handleOneClickLink() {
+    await linkCatalogApp.mutateAsync({ appId: providerId });
+  }
 
   async function handleConnect() {
     setConnecting(true);
@@ -137,35 +143,51 @@ export function AppConnectCard({ providerId, className, returnTo }: AppConnectCa
         <div className="flex items-center justify-end gap-2 pt-1 border-t border-border/50">
           <Button
             size="xs"
-            variant="outline"
+            variant="ghost"
+            type="button"
             onClick={() => setLinkDialogOpen(true)}
-            className="gap-1.5 text-xs font-medium text-purple-600 dark:text-purple-400 border-purple-500/30 hover:bg-purple-500/10 shadow-xs"
+            className="gap-1 text-xs text-muted-foreground hover:text-foreground h-7 px-2"
           >
-            <Plug className="size-3" />
-            <span>Link via MCP</span>
+            <SlidersHorizontal className="size-3" />
+            <span>Options</span>
           </Button>
 
           {isConfigured && (
             <Button
               size="xs"
-              variant="default"
+              variant="outline"
               disabled={connecting}
               onClick={handleConnect}
-              className="gap-1.5 text-xs font-medium shadow-xs"
+              className="gap-1.5 text-xs font-medium h-7"
             >
               {connecting ? (
                 <>
                   <Loader2 className="size-3 animate-spin" />
-                  <span>Redirecting…</span>
+                  <span>Connecting…</span>
                 </>
               ) : (
                 <>
                   <ExternalLink className="size-3" />
-                  <span>Connect {meta.name}</span>
+                  <span>OAuth Connect</span>
                 </>
               )}
             </Button>
           )}
+
+          <Button
+            size="xs"
+            variant="default"
+            disabled={linkCatalogApp.isPending}
+            onClick={handleOneClickLink}
+            className="gap-1.5 text-xs font-medium bg-purple-600 hover:bg-purple-700 text-white shadow-xs h-7"
+          >
+            {linkCatalogApp.isPending ? (
+              <Loader2 className="size-3 animate-spin" />
+            ) : (
+              <Sparkles className="size-3" />
+            )}
+            <span>1-Click Link</span>
+          </Button>
         </div>
       </div>
 

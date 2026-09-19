@@ -6,71 +6,71 @@ import type { ReactNode } from "react";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { LinkAppDialog } from "./LinkAppDialog";
 
-let createdServerPayload: unknown = null;
+let linkCalledAppId: string | null = null;
+let unlinkCalledAppId: string | null = null;
 
 const server = setupServer(
-  http.get("*/api/tool-oauth/providers", () =>
+  http.get("*/api/mcp/catalog", () =>
     HttpResponse.json({
-      providers: [
+      catalog: [
         {
           id: "github",
           name: "GitHub",
-          configured: false,
+          mention: "github",
+          category: "Developer",
+          description: "Inspect repositories, search code, list pull requests, and manage issues.",
+          icon: "github",
+          requiresAuth: false,
+          authType: "token",
+          authPrompt: "Optional Personal Access Token",
           connected: false,
+          tools: [{ name: "github_search_repos", description: "Search repos", inputSchema: {} }],
         },
         {
           id: "slack",
           name: "Slack",
-          configured: true,
+          mention: "slack",
+          category: "Communication",
+          description: "Send notifications and announcements to Slack.",
+          icon: "slack",
+          requiresAuth: false,
           connected: false,
+          tools: [{ name: "slack_post_message", description: "Post message", inputSchema: {} }],
         },
         {
           id: "google_calendar",
           name: "Google Calendar",
-          configured: true,
+          mention: "calendar",
+          category: "Productivity",
+          description: "View schedule, check agenda, and manage events.",
+          icon: "calendar",
+          requiresAuth: false,
           connected: true,
-          connectedVia: "oauth",
+          tools: [{ name: "google_calendar", description: "Manage events", inputSchema: {} }],
         },
       ],
     }),
   ),
-  http.get("*/api/mcp/servers", () =>
+  http.get("*/api/tool-oauth/providers", () =>
     HttpResponse.json({
-      servers: [],
+      providers: [],
     }),
   ),
-  http.post("*/api/mcp/servers/test", () =>
-    HttpResponse.json({
-      ok: true,
-      count: 3,
-      tools: [
-        { name: "list_issues", description: "List GitHub issues", inputSchema: {} },
-        { name: "create_issue", description: "Create GitHub issue", inputSchema: {} },
-        { name: "list_pull_requests", description: "List PRs", inputSchema: {} },
-      ],
-    }),
-  ),
-  http.post("*/api/mcp/servers", async ({ request }) => {
-    createdServerPayload = await request.json();
-    return HttpResponse.json({
-      server: {
-        id: "mcp-gh-1",
-        userId: "user-1",
-        name: "github_mcp_server",
-        url: "http://localhost:8000/mcp",
-        appId: "github",
-        enabled: true,
-        createdAt: "2026-09-19T00:00:00Z",
-        updatedAt: "2026-09-19T00:00:00Z",
-      },
-    });
+  http.post("*/api/mcp/catalog/:appId/link", ({ params }) => {
+    linkCalledAppId = params.appId as string;
+    return HttpResponse.json({ ok: true });
+  }),
+  http.post("*/api/mcp/catalog/:appId/unlink", ({ params }) => {
+    unlinkCalledAppId = params.appId as string;
+    return HttpResponse.json({ ok: true });
   }),
 );
 
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
 afterEach(() => {
   server.resetHandlers();
-  createdServerPayload = null;
+  linkCalledAppId = null;
+  unlinkCalledAppId = null;
 });
 afterAll(() => server.close());
 
@@ -81,59 +81,59 @@ function wrapper(client: QueryClient) {
 }
 
 describe("LinkAppDialog", () => {
-  it("renders with GitHub preselected and displays MCP preset form", async () => {
+  it("renders curated MCP catalog with 1-click controls", async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    render(<LinkAppDialog open={true} onOpenChange={vi.fn()} initialAppId="github" />, {
+    render(<LinkAppDialog open={true} onOpenChange={vi.fn()} />, {
       wrapper: wrapper(client),
     });
 
-    expect(await screen.findByText("Link GitHub App")).toBeInTheDocument();
-    expect(screen.getByText("Link via MCP Server (Recommended)")).toBeInTheDocument();
-    expect(screen.getByDisplayValue("GitHub MCP Server")).toBeInTheDocument();
-    expect(screen.getByDisplayValue("http://localhost:8000/mcp")).toBeInTheDocument();
+    expect(await screen.findByText("Apps & MCP Integrations")).toBeInTheDocument();
+    expect(await screen.findByText("GitHub")).toBeInTheDocument();
+    expect(screen.getByText("Slack")).toBeInTheDocument();
+    expect(screen.getByText("Google Calendar")).toBeInTheDocument();
+    expect(screen.getByText("Connected")).toBeInTheDocument();
   });
 
-  it("tests MCP server connection and saves app-linked MCP server", async () => {
-    const onOpenChange = vi.fn();
+  it("triggers 1-click link on GitHub", async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    render(<LinkAppDialog open={true} onOpenChange={onOpenChange} initialAppId="github" />, {
+    render(<LinkAppDialog open={true} onOpenChange={vi.fn()} />, {
       wrapper: wrapper(client),
     });
 
-    // Test connection
-    const testBtn = screen.getByText("Test Connection");
-    fireEvent.click(testBtn);
+    const linkButtons = await screen.findAllByText("1-Click Link");
+    fireEvent.click(linkButtons[0]);
 
     await waitFor(() => {
-      expect(screen.getByText("Endpoint Active — Discovered 3 Tool(s)")).toBeInTheDocument();
-      expect(screen.getByText("github_list_issues")).toBeInTheDocument();
-    });
-
-    // Save and link
-    const saveBtn = screen.getByText("Link GitHub via MCP");
-    fireEvent.click(saveBtn);
-
-    await waitFor(() => {
-      expect(createdServerPayload).toMatchObject({
-        name: "github_mcp_server",
-        url: "http://localhost:8000/mcp",
-        appId: "github",
-      });
-      expect(onOpenChange).toHaveBeenCalledWith(false);
+      expect(linkCalledAppId).toBe("github");
     });
   });
 
-  it("switches to Slack preset when clicking Slack pill", async () => {
+  it("triggers 1-click unlink on connected app", async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    render(<LinkAppDialog open={true} onOpenChange={vi.fn()} initialAppId="github" />, {
+    render(<LinkAppDialog open={true} onOpenChange={vi.fn()} />, {
       wrapper: wrapper(client),
     });
 
-    const slackPill = screen.getByRole("button", { name: "Slack" });
-    fireEvent.click(slackPill);
+    const unlinkBtn = await screen.findByRole("button", { name: /unlink/i });
+    fireEvent.click(unlinkBtn);
 
-    expect(await screen.findByText("Link Slack App")).toBeInTheDocument();
-    expect(screen.getByDisplayValue("Slack MCP Server")).toBeInTheDocument();
-    expect(screen.getByDisplayValue("http://localhost:8001/mcp")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(unlinkCalledAppId).toBe("google_calendar");
+    });
+  });
+
+  it("filters apps by category", async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(<LinkAppDialog open={true} onOpenChange={vi.fn()} />, {
+      wrapper: wrapper(client),
+    });
+
+    expect(await screen.findByText("GitHub")).toBeInTheDocument();
+
+    const commFilter = screen.getByRole("button", { name: "Communication" });
+    fireEvent.click(commFilter);
+
+    expect(screen.getByText("Slack")).toBeInTheDocument();
+    expect(screen.queryByText("GitHub")).not.toBeInTheDocument();
   });
 });

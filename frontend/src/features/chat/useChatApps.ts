@@ -91,6 +91,43 @@ export function useChatApps() {
       requiresConnection: false,
     });
 
+    // 5. Curated MCP Apps if linked
+    const webFetchServer = mcpServers?.find((s) => s.appId === "web_fetch" && s.enabled);
+    if (webFetchServer) {
+      list.push({
+        id: "web_fetch",
+        name: "Web Reader & Fetch",
+        mention: "web_fetch",
+        description: "Fetch web articles, extract clean text, and parse HTML content",
+        type: "mcp",
+        iconName: "globe",
+        connected: true,
+        connectedVia: "mcp",
+        mcpServerId: webFetchServer.id,
+        mcpServerName: webFetchServer.name,
+        configured: true,
+        requiresConnection: false,
+      });
+    }
+
+    const codeRunnerServer = mcpServers?.find((s) => s.appId === "code_runner" && s.enabled);
+    if (codeRunnerServer) {
+      list.push({
+        id: "code_runner",
+        name: "Code Sandbox",
+        mention: "code_runner",
+        description: "Execute mathematical calculations and format data in sandbox",
+        type: "mcp",
+        iconName: "wrench",
+        connected: true,
+        connectedVia: "mcp",
+        mcpServerId: codeRunnerServer.id,
+        mcpServerName: codeRunnerServer.name,
+        configured: true,
+        requiresConnection: false,
+      });
+    }
+
     // 5. Active Workflows exposed as chat tools
     if (workflows) {
       for (const wf of workflows) {
