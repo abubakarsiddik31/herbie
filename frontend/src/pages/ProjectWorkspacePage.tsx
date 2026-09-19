@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Link, useParams } from "react-router";
+import { Link, useSearchParams, useParams } from "react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
@@ -40,7 +40,6 @@ import { RunLoader } from "@/components/ai/RunLoader";
 import { StreamingText } from "@/components/ai/StreamingText";
 import { ThinkingTrace } from "@/components/ai/ThinkingTrace";
 import { useSidebar } from "@/components/layout/SidebarContext";
-import { SourceCards, type CiteJump } from "@/features/chat/SourceCards";
 import { useChat } from "@/features/chat/useChat";
 import { useVoiceInput } from "@/features/chat/useVoiceInput";
 import { ParsedFileViewerDialog } from "@/features/documents/ParsedFileViewerDialog";
@@ -80,6 +79,11 @@ function toChatMessage(m: ChatMessage): ChatMessage {
 
 export function ProjectWorkspacePage() {
   const { projectId } = useParams<{ projectId: string }>();
+  const [searchParams, setSearchParams] = useSearchParams();
+  // Deep links from the sidebar: ?c=<conversationId|new> picks the chat,
+  // ?f=<fileId> opens a source in the viewer.
+  const convParam = searchParams.get("c");
+  const fileParam = searchParams.get("f");
   const queryClient = useQueryClient();
   const { toggleSidebar, setMobileOpen } = useSidebar();
 
@@ -98,7 +102,6 @@ export function ProjectWorkspacePage() {
   const [attachments, setAttachments] = useState<PendingImage[]>([]);
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
   const [extractingFiles, setExtractingFiles] = useState(false);
-  const [citeJump, setCiteJump] = useState<(CiteJump & { msgId: string }) | null>(null);
   const [viewingFile, setViewingFile] = useState<{
     title: string;
     documentId?: string | null;
@@ -117,14 +120,50 @@ export function ProjectWorkspacePage() {
     void queryClient.invalidateQueries({ queryKey: ["project", projectId] });
   });
 
-  // Pick first conversation if available, or create one
+  // Switching projects must drop the previous project's selection and chat
+  // state, otherwise the detail query would fetch another project's chat.
   useEffect(() => {
-    if (projectData && !selectedConvId) {
+    setSelectedConvId(null);
+    seededRef.current = null;
+    reset();
+  }, [projectId, reset]);
+
+  // Sidebar navigation drives the selection: a conversation id selects it,
+  // "new" starts a fresh chat (first send creates the conversation).
+  useEffect(() => {
+    if (convParam === "new") setSelectedConvId(null);
+    else if (convParam) setSelectedConvId(convParam);
+  }, [convParam]);
+
+  // Pick first conversation if available, or create one — but never override
+  // an explicit ?c= target.
+  useEffect(() => {
+    if (projectData && !selectedConvId && !convParam) {
       if (projectData.conversations.length > 0) {
         setSelectedConvId(projectData.conversations[0].id);
       }
     }
-  }, [projectData, selectedConvId]);
+  }, [projectData, selectedConvId, convParam]);
+
+  // Open the requested source once the project's files are loaded, then drop
+  // the param so clicking the same file again re-triggers the viewer.
+  useEffect(() => {
+    if (!fileParam) return;
+    if (projectData) {
+      const f = projectData.files.find((x) => x.id === fileParam);
+      if (f) {
+        setViewingFile({
+          title: f.filename,
+          documentId: f.id,
+          sizeBytes: f.sizeBytes,
+          status: f.status,
+          chunkCount: f.chunkCount,
+        });
+      }
+    }
+    searchParams.delete("f");
+    setSearchParams(searchParams, { replace: true });
+  }, [fileParam, projectData, searchParams, setSearchParams]);
 
   const { data: detail, isFetching: detailLoading } = useQuery({
     queryKey: ["conversation", selectedConvId],
@@ -230,6 +269,10 @@ export function ProjectWorkspacePage() {
         convId = conv.id;
         setSelectedConvId(convId);
         seededRef.current = convId;
+        if (convParam) {
+          searchParams.delete("c");
+          setSearchParams(searchParams, { replace: true });
+        }
       }
       await send(outgoingText, convId, images);
     } catch (err) {
@@ -412,20 +455,16 @@ export function ProjectWorkspacePage() {
                                 citations={
                                   m.sources && m.sources.length > 0
                                     ? {
-                                        count: m.sources.length,
-                                        onCite: (n) =>
-                                          setCiteJump((j) => ({
-                                            msgId: m.id,
-                                            n,
-                                            seq: (j?.seq ?? 0) + 1,
-                                          })),
+                                        sources: m.sources,
+                                        // Citation click opens the project's indexed source.
+                                        onCite: (n) => {
+                                          const s = m.sources?.[n - 1];
+                                          if (s) setViewingFile({ title: s.title, documentId: s.documentId });
+                                        },
                                       }
                                     : undefined
                                 }
                               />
-                            )}
-                            {!m.streaming && m.sources && m.sources.length > 0 && (
-                              <SourceCards sources={m.sources} jump={citeJump?.msgId === m.id ? citeJump : null} />
                             )}
                             {m.error && <p className="text-destructive text-sm">{m.error}</p>}
                           </div>

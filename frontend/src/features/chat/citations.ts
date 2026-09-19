@@ -1,8 +1,9 @@
 // remarkCitations turns bracket citations ([1], [2, 5]) in assistant answers
-// into links the UI can intercept. It only rewrites plain text nodes —
+// into one cite:N link per number, which the UI renders as a chip with a
+// hover preview (file name + page). It only rewrites plain text nodes —
 // inlineCode and code blocks carry raw values, so `[1]` inside backticks is
-// never touched. Numbers outside 1..max stay plain text, matching the
-// backend's citation discipline (only shown brackets are valid).
+// never touched. Numbers outside 1..max stay as bracketed plain text,
+// matching the backend's citation discipline (only shown brackets are valid).
 
 interface TextNode {
   type: "text";
@@ -35,12 +36,11 @@ function splitCitationText(node: TextNode, max: number): MdNode[] {
     if (m.index > last) out.push({ type: "text", value: node.value.slice(last, m.index) });
     const nums = m[1].split(",").map((s) => parseInt(s.trim(), 10));
     if (nums.every((n) => n >= 1 && n <= max)) {
-      out.push({ type: "text", value: "[" });
-      nums.forEach((n, i) => {
-        if (i > 0) out.push({ type: "text", value: ", " });
+      // One chip per number; the UI drops the brackets when every number in
+      // the group is valid, so spacing comes from the chip's own margin.
+      for (const n of nums) {
         out.push({ type: "link", url: `cite:${n}`, children: [{ type: "text", value: String(n) }] });
-      });
-      out.push({ type: "text", value: "]" });
+      }
     } else {
       out.push({ type: "text", value: m[0] });
     }

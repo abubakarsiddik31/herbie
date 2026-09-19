@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "react-router";
 import { apiFetch } from "@/lib/api";
@@ -7,11 +6,9 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { BrandMark } from "@/components/BrandMark";
 import { StreamingText } from "@/components/ai/StreamingText";
-import { SourceCards, type CiteJump } from "@/features/chat/SourceCards";
 
 export function SharedPage() {
   const { token } = useParams();
-  const [citeJump, setCiteJump] = useState<(CiteJump & { msgId: string }) | null>(null);
   const thread = useQuery({
     queryKey: ["shared", token],
     queryFn: () => apiFetch<SharedThread>(`/api/shared/${token}`),
@@ -86,18 +83,9 @@ export function SharedPage() {
                   content={m.content}
                   streaming={false}
                   citations={
-                    m.sources && m.sources.length > 0
-                      ? {
-                          count: m.sources.length,
-                          onCite: (n) =>
-                            setCiteJump((j) => ({ msgId: m.id, n, seq: (j?.seq ?? 0) + 1 })),
-                        }
-                      : undefined
+                    m.sources && m.sources.length > 0 ? { sources: m.sources } : undefined
                   }
                 />
-                {m.sources && m.sources.length > 0 && (
-                  <SourceCards sources={m.sources} jump={citeJump?.msgId === m.id ? citeJump : null} />
-                )}
                 {m.truncated && (
                   <Badge variant="outline" className="text-muted-foreground text-xs">
                     stopped early

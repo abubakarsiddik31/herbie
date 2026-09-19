@@ -67,7 +67,6 @@ import { ConversationSettingsDialog } from "@/features/chat/ConversationSettings
 import { conversationFilename, downloadMarkdown, toMarkdown } from "@/features/chat/exportMarkdown";
 import { ShareDialog } from "@/features/chat/ShareDialog";
 import { ShortcutsDialog } from "@/features/chat/ShortcutsDialog";
-import { SourceCards, type CiteJump } from "@/features/chat/SourceCards";
 import { useChat } from "@/features/chat/useChat";
 import { useModels } from "@/features/chat/useModels";
 import { useVoiceInput } from "@/features/chat/useVoiceInput";
@@ -147,7 +146,6 @@ export function ChatPage() {
   const [attachments, setAttachments] = useState<PendingImage[]>([]);
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
   const [extractingFiles, setExtractingFiles] = useState(false);
-  const [citeJump, setCiteJump] = useState<(CiteJump & { msgId: string }) | null>(null);
   const [viewingFile, setViewingFile] = useState<{
     title: string;
     documentId?: string | null;
@@ -842,22 +840,15 @@ export function ChatPage() {
                               citations={
                                 m.sources && m.sources.length > 0
                                   ? {
-                                      count: m.sources.length,
-                                      onCite: (n) =>
-                                        setCiteJump((j) => ({
-                                          msgId: m.id,
-                                          n,
-                                          seq: (j?.seq ?? 0) + 1,
-                                        })),
+                                      sources: m.sources,
+                                      // Citation click opens the indexed source document.
+                                      onCite: (n) => {
+                                        const s = m.sources?.[n - 1];
+                                        if (s) setViewingFile({ title: s.title, documentId: s.documentId });
+                                      },
                                     }
                                   : undefined
                               }
-                            />
-                          )}
-                          {!m.streaming && m.sources && m.sources.length > 0 && (
-                            <SourceCards
-                              sources={m.sources}
-                              jump={citeJump?.msgId === m.id ? citeJump : null}
                             />
                           )}
                           {!m.streaming && (() => {

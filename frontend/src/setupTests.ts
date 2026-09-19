@@ -30,6 +30,14 @@ if (typeof window !== "undefined") {
       toJSON: () => "",
     });
   }
+
+  if (!globalThis.ResizeObserver) {
+    globalThis.ResizeObserver = class ResizeObserver {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    };
+  }
 }
 
 

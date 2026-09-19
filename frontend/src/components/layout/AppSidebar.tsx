@@ -48,13 +48,111 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 import { ShareDialog } from "@/features/chat/ShareDialog";
 import { useConversations, useDeleteConversation } from "@/features/chat/useConversations";
 import { useTools } from "@/features/tools/useTools";
-import { useProjects } from "@/features/projects/useProjects";
+import { useProjects, useProject, type Project } from "@/features/projects/useProjects";
 import { useToolOAuthProviders, useWorkflows } from "@/features/workflows/useWorkflows";
 import { useMCPServers } from "@/features/mcp/useMCPServers";
 import { MCPServersDialog } from "@/features/mcp/MCPServersDialog";
 import { useSidebar } from "./SidebarContext";
 
 const GROUP_ORDER = ["Today", "Yesterday", "Previous 7 days", "Older"] as const;
+
+/** One expandable project row in the sidebar, ChatGPT-style: chats
+ *  nest under the project, fetched lazily when it expands. */
+function SidebarProject({ project }: { project: Project }) {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { setMobileOpen } = useSidebar();
+  const [expanded, setExpanded] = useState(false);
+  // Details (chats) load only while the project is expanded.
+  const { data: detail, isLoading } = useProject(expanded ? project.id : null);
+
+  const workspacePath = `/projects/${project.id}`;
+  const inWorkspace = location.pathname === workspacePath;
+  const activeConv = inWorkspace ? new URLSearchParams(location.search).get("c") : null;
+
+  function open(target: { conv?: string } = {}) {
+    setMobileOpen(false);
+    navigate(target.conv ? `${workspacePath}?c=${target.conv}` : workspacePath);
+  }
+
+  return (
+    <div>
+      <div
+        className={cn(
+          "group flex items-center rounded-lg text-xs transition-colors",
+          inWorkspace
+            ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
+            : "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
+        )}
+      >
+        <button
+          type="button"
+          onClick={() => setExpanded((e) => !e)}
+          aria-expanded={expanded}
+          aria-label={`${expanded ? "Collapse" : "Expand"} ${project.name}`}
+          className="flex shrink-0 items-center p-1.5 pl-2 outline-none"
+        >
+          <ChevronDown
+            className={cn("size-3 text-muted-foreground/70 transition-transform", !expanded && "-rotate-90")}
+          />
+        </button>
+        <button
+          type="button"
+          onClick={() => open()}
+          title={project.name}
+          className="min-w-0 flex-1 truncate py-1.5 text-left outline-none"
+        >
+          {project.name}
+        </button>
+        <button
+          type="button"
+          onClick={() => open({ conv: "new" })}
+          aria-label={`New chat in ${project.name}`}
+          title="New chat in this project"
+          className="hidden shrink-0 p-1.5 pr-2 outline-none group-hover:flex"
+        >
+          <Plus className="size-3" />
+        </button>
+      </div>
+
+      {expanded && (
+        <div className="ml-4 pl-2 border-l border-sidebar-border/60 py-1 space-y-0.5 animate-in fade-in duration-150">
+          {isLoading && (
+            <div className="space-y-1.5 px-1 py-1">
+              <Skeleton className="h-5 w-4/5 rounded-md" />
+              <Skeleton className="h-5 w-3/5 rounded-md" />
+            </div>
+          )}
+          {detail && (
+            <>
+              {detail.conversations.length === 0 ? (
+                <p className="px-2 py-0.5 text-[11px] text-muted-foreground/60">No chats yet</p>
+              ) : (
+                detail.conversations.map((c) => (
+                  <button
+                    key={c.id}
+                    type="button"
+                    onClick={() => open({ conv: c.id })}
+                    title={c.title || "Untitled"}
+                    className={cn(
+                      "flex w-full items-center gap-2 rounded-md px-2 py-1 text-[11px] transition-colors",
+                      activeConv === c.id
+                        ? "bg-sidebar-accent/60 text-sidebar-accent-foreground font-medium"
+                        : "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
+                    )}
+                  >
+                    <MessageSquare className="size-3 shrink-0 opacity-70" />
+                    <span className="min-w-0 flex-1 truncate text-left">{c.title || "Untitled"}</span>
+                  </button>
+                ))
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function groupKey(updatedAt: string): string {
   const d = new Date(updatedAt);
@@ -589,6 +687,18 @@ export function AppSidebar() {
         {/* Conversation history */}
         <ScrollArea className="min-h-0 flex-1 px-2">
           <nav className="space-y-0.5 pb-3">
+            {projects && projects.length > 0 && (
+              <div className="pt-2">
+                <p className="px-2 pb-1 text-[10px] font-semibold tracking-wider text-muted-foreground/60 uppercase">
+                  Projects
+                </p>
+                <div className="space-y-0.5">
+                  {projects.map((p) => (
+                    <SidebarProject key={p.id} project={p} />
+                  ))}
+                </div>
+              </div>
+            )}
             {conversationsLoading && (
               <div className="space-y-2 px-1 pt-1">
                 {[0, 1, 2, 3].map((i) => (

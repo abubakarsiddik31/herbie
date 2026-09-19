@@ -1,5 +1,4 @@
 import { cleanup, render, screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
@@ -12,7 +11,7 @@ const thread = {
   messages: [
     { id: "m1", role: "user", content: "What is this?", truncated: false, createdAt: "2026-01-01T00:00:00Z" },
     {
-      id: "m2", role: "assistant", content: "An **answer**.", truncated: false,
+      id: "m2", role: "assistant", content: "An **answer** [1].", truncated: false,
       createdAt: "2026-01-01T00:01:00Z",
       sources: [
         { documentId: "d1", title: "doc.md", heading: "H", page: 0, score: 0.9, snippet: "proof" },
@@ -54,8 +53,7 @@ describe("SharedPage", () => {
     expect(await screen.findByText("Shared thread")).toBeInTheDocument();
     expect(await screen.findByText("What is this?")).toBeInTheDocument();
     expect(await screen.findByText("answer")).toBeInTheDocument();
-    await userEvent.click(await screen.findByRole("button", { name: "Sources (1)" }));
-    expect(await screen.findByText("doc.md")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Source 1: doc.md" })).toBeInTheDocument();
   });
 
   it("explains revoked or unknown links", async () => {
