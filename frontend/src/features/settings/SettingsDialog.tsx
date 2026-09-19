@@ -152,7 +152,7 @@ export function SettingsDialog({ open, onOpenChange, defaultTab = "general" }: P
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent showCloseButton={false} className="sm:max-w-3xl p-0 overflow-hidden rounded-2xl gap-0">
+      <DialogContent showCloseButton={false} className="sm:max-w-3xl md:max-w-4xl p-0 overflow-hidden rounded-2xl gap-0">
         <div className="flex items-center justify-between border-b px-5 py-3.5">
           <DialogTitle className="text-base font-semibold tracking-tight">Settings</DialogTitle>
           <Button
@@ -444,53 +444,53 @@ export function SettingsDialog({ open, onOpenChange, defaultTab = "general" }: P
                       const isUnlinking = unlinkCatalogApp.isPending && unlinkCatalogApp.variables === "google_calendar";
                       return (
                         <div className={cn(
-                          "flex items-center justify-between rounded-xl border p-3 text-xs shadow-2xs transition-colors",
+                          "flex flex-col justify-between rounded-xl border p-3.5 text-xs shadow-2xs transition-colors min-h-[108px]",
                           isConnected
                             ? "border-emerald-500/30 bg-emerald-500/[0.03] dark:bg-emerald-500/[0.06]"
                             : "border-border/80 bg-card hover:border-border"
                         )}>
-                          <div className="flex items-center gap-2.5 min-w-0 flex-1 mr-2">
+                          <div className="flex items-center justify-between gap-2">
                             <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-sky-500/10 text-sky-600 dark:text-sky-400">
                               <Calendar className="size-4" />
                             </div>
-                            <div className="min-w-0 flex-1">
-                              <div className="flex items-center gap-1.5 min-w-0">
-                                <span className="font-semibold text-foreground text-xs truncate">Google Calendar</span>
-                                <span className="rounded bg-muted/70 px-1 py-0.2 font-mono text-[9px] text-muted-foreground shrink-0">@calendar</span>
-                              </div>
-                              <p className="text-[11px] text-muted-foreground truncate mt-0.5">
-                                {isConnected ? "Connected via OAuth" : "Agenda & event creation"}
-                              </p>
-                            </div>
-                          </div>
-                          <div className="shrink-0">
-                            {isConnected ? (
-                              <div className="flex items-center gap-1.5">
-                                <Badge variant="outline" className="border-emerald-600/30 bg-emerald-600/10 text-emerald-700 dark:text-emerald-400 text-[10px] gap-1 px-1.5 py-0.5 font-medium shrink-0">
-                                  <CheckCircle2 className="size-2.5 text-emerald-600 dark:text-emerald-400" />
-                                  <span>Connected</span>
-                                </Badge>
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              {isConnected ? (
+                                <>
+                                  <Badge variant="outline" className="border-emerald-600/30 bg-emerald-600/10 text-emerald-700 dark:text-emerald-400 text-[10px] gap-1 px-1.5 py-0.5 font-medium shrink-0">
+                                    <CheckCircle2 className="size-2.5 text-emerald-600 dark:text-emerald-400" />
+                                    <span>Connected</span>
+                                  </Badge>
+                                  <Button
+                                    size="xs"
+                                    variant="ghost"
+                                    type="button"
+                                    disabled={isUnlinking}
+                                    onClick={() => unlinkCatalogApp.mutate("google_calendar")}
+                                    className="h-6 px-1.5 text-[10px] text-muted-foreground hover:text-destructive hover:bg-destructive/10 shrink-0"
+                                  >
+                                    {isUnlinking ? <Loader2 className="size-2.5 animate-spin" /> : "Disconnect"}
+                                  </Button>
+                                </>
+                              ) : (
                                 <Button
                                   size="xs"
-                                  variant="ghost"
                                   type="button"
-                                  disabled={isUnlinking}
-                                  onClick={() => unlinkCatalogApp.mutate("google_calendar")}
-                                  className="h-6 px-1.5 text-[10px] text-muted-foreground hover:text-destructive hover:bg-destructive/10 shrink-0"
+                                  onClick={() => openOAuthPopup("google_calendar")}
+                                  className="h-7 px-3 text-xs font-medium bg-emerald-600 hover:bg-emerald-700 text-white dark:bg-emerald-600 dark:hover:bg-emerald-500 shadow-2xs shrink-0 rounded-lg transition-colors"
                                 >
-                                  {isUnlinking ? <Loader2 className="size-2.5 animate-spin" /> : "Disconnect"}
+                                  Connect
                                 </Button>
-                              </div>
-                            ) : (
-                              <Button
-                                size="xs"
-                                type="button"
-                                onClick={() => openOAuthPopup("google_calendar")}
-                                className="h-7 px-3 text-xs font-medium bg-emerald-600 hover:bg-emerald-700 text-white dark:bg-emerald-600 dark:hover:bg-emerald-500 shadow-2xs shrink-0 rounded-lg transition-colors"
-                              >
-                                Connect
-                              </Button>
-                            )}
+                              )}
+                            </div>
+                          </div>
+                          <div className="mt-2.5 min-w-0">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="font-semibold text-foreground text-xs">Google Calendar</span>
+                              <span className="rounded bg-muted/70 px-1 py-0.2 font-mono text-[9px] text-muted-foreground shrink-0">@calendar</span>
+                            </div>
+                            <p className="text-[11px] text-muted-foreground mt-0.5 leading-normal">
+                              {isConnected ? "Connected via OAuth" : "Agenda & event creation"}
+                            </p>
                           </div>
                         </div>
                       );
@@ -503,53 +503,53 @@ export function SettingsDialog({ open, onOpenChange, defaultTab = "general" }: P
                       const isUnlinking = unlinkCatalogApp.isPending && unlinkCatalogApp.variables === "github";
                       return (
                         <div className={cn(
-                          "flex items-center justify-between rounded-xl border p-3 text-xs shadow-2xs transition-colors",
+                          "flex flex-col justify-between rounded-xl border p-3.5 text-xs shadow-2xs transition-colors min-h-[108px]",
                           isConnected
                             ? "border-emerald-500/30 bg-emerald-500/[0.03] dark:bg-emerald-500/[0.06]"
                             : "border-border/80 bg-card hover:border-border"
                         )}>
-                          <div className="flex items-center gap-2.5 min-w-0 flex-1 mr-2">
+                          <div className="flex items-center justify-between gap-2">
                             <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted text-foreground">
                               <GitBranch className="size-4" />
                             </div>
-                            <div className="min-w-0 flex-1">
-                              <div className="flex items-center gap-1.5 min-w-0">
-                                <span className="font-semibold text-foreground text-xs truncate">GitHub</span>
-                                <span className="rounded bg-muted/70 px-1 py-0.2 font-mono text-[9px] text-muted-foreground shrink-0">@github</span>
-                              </div>
-                              <p className="text-[11px] text-muted-foreground truncate mt-0.5">
-                                {isConnected ? "Connected via OAuth" : "Repos, PRs & issues"}
-                              </p>
-                            </div>
-                          </div>
-                          <div className="shrink-0">
-                            {isConnected ? (
-                              <div className="flex items-center gap-1.5">
-                                <Badge variant="outline" className="border-emerald-600/30 bg-emerald-600/10 text-emerald-700 dark:text-emerald-400 text-[10px] gap-1 px-1.5 py-0.5 font-medium shrink-0">
-                                  <CheckCircle2 className="size-2.5 text-emerald-600 dark:text-emerald-400" />
-                                  <span>Connected</span>
-                                </Badge>
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              {isConnected ? (
+                                <>
+                                  <Badge variant="outline" className="border-emerald-600/30 bg-emerald-600/10 text-emerald-700 dark:text-emerald-400 text-[10px] gap-1 px-1.5 py-0.5 font-medium shrink-0">
+                                    <CheckCircle2 className="size-2.5 text-emerald-600 dark:text-emerald-400" />
+                                    <span>Connected</span>
+                                  </Badge>
+                                  <Button
+                                    size="xs"
+                                    variant="ghost"
+                                    type="button"
+                                    disabled={isUnlinking}
+                                    onClick={() => unlinkCatalogApp.mutate("github")}
+                                    className="h-6 px-1.5 text-[10px] text-muted-foreground hover:text-destructive hover:bg-destructive/10 shrink-0"
+                                  >
+                                    {isUnlinking ? <Loader2 className="size-2.5 animate-spin" /> : "Disconnect"}
+                                  </Button>
+                                </>
+                              ) : (
                                 <Button
                                   size="xs"
-                                  variant="ghost"
                                   type="button"
-                                  disabled={isUnlinking}
-                                  onClick={() => unlinkCatalogApp.mutate("github")}
-                                  className="h-6 px-1.5 text-[10px] text-muted-foreground hover:text-destructive hover:bg-destructive/10 shrink-0"
+                                  onClick={() => openOAuthPopup("github")}
+                                  className="h-7 px-3 text-xs font-medium bg-emerald-600 hover:bg-emerald-700 text-white dark:bg-emerald-600 dark:hover:bg-emerald-500 shadow-2xs shrink-0 rounded-lg transition-colors"
                                 >
-                                  {isUnlinking ? <Loader2 className="size-2.5 animate-spin" /> : "Disconnect"}
+                                  Connect
                                 </Button>
-                              </div>
-                            ) : (
-                              <Button
-                                size="xs"
-                                type="button"
-                                onClick={() => openOAuthPopup("github")}
-                                className="h-7 px-3 text-xs font-medium bg-emerald-600 hover:bg-emerald-700 text-white dark:bg-emerald-600 dark:hover:bg-emerald-500 shadow-2xs shrink-0 rounded-lg transition-colors"
-                              >
-                                Connect
-                              </Button>
-                            )}
+                              )}
+                            </div>
+                          </div>
+                          <div className="mt-2.5 min-w-0">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="font-semibold text-foreground text-xs">GitHub</span>
+                              <span className="rounded bg-muted/70 px-1 py-0.2 font-mono text-[9px] text-muted-foreground shrink-0">@github</span>
+                            </div>
+                            <p className="text-[11px] text-muted-foreground mt-0.5 leading-normal">
+                              {isConnected ? "Connected via OAuth" : "Repos, PRs & issues"}
+                            </p>
                           </div>
                         </div>
                       );
@@ -562,75 +562,75 @@ export function SettingsDialog({ open, onOpenChange, defaultTab = "general" }: P
                       const isUnlinking = unlinkCatalogApp.isPending && unlinkCatalogApp.variables === "slack";
                       return (
                         <div className={cn(
-                          "flex items-center justify-between rounded-xl border p-3 text-xs shadow-2xs transition-colors",
+                          "flex flex-col justify-between rounded-xl border p-3.5 text-xs shadow-2xs transition-colors min-h-[108px]",
                           isConnected
                             ? "border-emerald-500/30 bg-emerald-500/[0.03] dark:bg-emerald-500/[0.06]"
                             : "border-border/80 bg-card hover:border-border"
                         )}>
-                          <div className="flex items-center gap-2.5 min-w-0 flex-1 mr-2">
+                          <div className="flex items-center justify-between gap-2">
                             <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
                               <MessageSquare className="size-4" />
                             </div>
-                            <div className="min-w-0 flex-1">
-                              <div className="flex items-center gap-1.5 min-w-0">
-                                <span className="font-semibold text-foreground text-xs truncate">Slack</span>
-                                <span className="rounded bg-muted/70 px-1 py-0.2 font-mono text-[9px] text-muted-foreground shrink-0">@slack</span>
-                              </div>
-                              <p className="text-[11px] text-muted-foreground truncate mt-0.5">
-                                {isConnected ? "Connected via OAuth" : "Channel notifications"}
-                              </p>
-                            </div>
-                          </div>
-                          <div className="shrink-0">
-                            {isConnected ? (
-                              <div className="flex items-center gap-1.5">
-                                <Badge variant="outline" className="border-emerald-600/30 bg-emerald-600/10 text-emerald-700 dark:text-emerald-400 text-[10px] gap-1 px-1.5 py-0.5 font-medium shrink-0">
-                                  <CheckCircle2 className="size-2.5 text-emerald-600 dark:text-emerald-400" />
-                                  <span>Connected</span>
-                                </Badge>
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              {isConnected ? (
+                                <>
+                                  <Badge variant="outline" className="border-emerald-600/30 bg-emerald-600/10 text-emerald-700 dark:text-emerald-400 text-[10px] gap-1 px-1.5 py-0.5 font-medium shrink-0">
+                                    <CheckCircle2 className="size-2.5 text-emerald-600 dark:text-emerald-400" />
+                                    <span>Connected</span>
+                                  </Badge>
+                                  <Button
+                                    size="xs"
+                                    variant="ghost"
+                                    type="button"
+                                    disabled={isUnlinking}
+                                    onClick={() => unlinkCatalogApp.mutate("slack")}
+                                    className="h-6 px-1.5 text-[10px] text-muted-foreground hover:text-destructive hover:bg-destructive/10 shrink-0"
+                                  >
+                                    {isUnlinking ? <Loader2 className="size-2.5 animate-spin" /> : "Disconnect"}
+                                  </Button>
+                                </>
+                              ) : (
                                 <Button
                                   size="xs"
-                                  variant="ghost"
                                   type="button"
-                                  disabled={isUnlinking}
-                                  onClick={() => unlinkCatalogApp.mutate("slack")}
-                                  className="h-6 px-1.5 text-[10px] text-muted-foreground hover:text-destructive hover:bg-destructive/10 shrink-0"
+                                  onClick={() => openOAuthPopup("slack")}
+                                  className="h-7 px-3 text-xs font-medium bg-emerald-600 hover:bg-emerald-700 text-white dark:bg-emerald-600 dark:hover:bg-emerald-500 shadow-2xs shrink-0 rounded-lg transition-colors"
                                 >
-                                  {isUnlinking ? <Loader2 className="size-2.5 animate-spin" /> : "Disconnect"}
+                                  Connect
                                 </Button>
-                              </div>
-                            ) : (
-                              <Button
-                                size="xs"
-                                type="button"
-                                onClick={() => openOAuthPopup("slack")}
-                                className="h-7 px-3 text-xs font-medium bg-emerald-600 hover:bg-emerald-700 text-white dark:bg-emerald-600 dark:hover:bg-emerald-500 shadow-2xs shrink-0 rounded-lg transition-colors"
-                              >
-                                Connect
-                              </Button>
-                            )}
+                              )}
+                            </div>
+                          </div>
+                          <div className="mt-2.5 min-w-0">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="font-semibold text-foreground text-xs">Slack</span>
+                              <span className="rounded bg-muted/70 px-1 py-0.2 font-mono text-[9px] text-muted-foreground shrink-0">@slack</span>
+                            </div>
+                            <p className="text-[11px] text-muted-foreground mt-0.5 leading-normal">
+                              {isConnected ? "Connected via OAuth" : "Channel notifications"}
+                            </p>
                           </div>
                         </div>
                       );
                     })()}
 
                     {/* Web Search */}
-                    <div className="flex items-center justify-between rounded-xl border border-border/80 bg-card p-3 text-xs shadow-2xs hover:border-border transition-colors">
-                      <div className="flex items-center gap-2.5 min-w-0 flex-1 mr-2">
+                    <div className="flex flex-col justify-between rounded-xl border border-border/80 bg-card p-3.5 text-xs shadow-2xs hover:border-border transition-colors min-h-[108px]">
+                      <div className="flex items-center justify-between gap-2">
                         <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-cyan-500/10 text-cyan-600 dark:text-cyan-400">
                           <Globe className="size-4" />
                         </div>
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-1.5 min-w-0">
-                            <span className="font-semibold text-foreground text-xs truncate">Web Search</span>
-                            <span className="rounded bg-muted/70 px-1 py-0.2 font-mono text-[9px] text-muted-foreground shrink-0">@web</span>
-                          </div>
-                          <p className="text-[11px] text-muted-foreground truncate mt-0.5">Live public web retrieval</p>
-                        </div>
+                        <Badge variant="outline" className="border-cyan-600/30 bg-cyan-600/10 text-cyan-700 dark:text-cyan-400 text-[10px] px-2 py-0.5 font-medium shrink-0">
+                          Built-in
+                        </Badge>
                       </div>
-                      <Badge variant="outline" className="border-cyan-600/30 bg-cyan-600/10 text-cyan-700 dark:text-cyan-400 text-[10px] px-2 py-0.5 font-medium shrink-0">
-                        Built-in
-                      </Badge>
+                      <div className="mt-2.5 min-w-0">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="font-semibold text-foreground text-xs">Web Search</span>
+                          <span className="rounded bg-muted/70 px-1 py-0.2 font-mono text-[9px] text-muted-foreground shrink-0">@web</span>
+                        </div>
+                        <p className="text-[11px] text-muted-foreground mt-0.5 leading-normal">Live public web retrieval</p>
+                      </div>
                     </div>
 
                     {/* Web Reader & Fetch */}
@@ -640,55 +640,55 @@ export function SettingsDialog({ open, onOpenChange, defaultTab = "general" }: P
                       const isLinking = linkCatalogApp.isPending && linkCatalogApp.variables?.appId === "web_fetch";
                       return (
                         <div className={cn(
-                          "flex items-center justify-between rounded-xl border p-3 text-xs shadow-2xs transition-colors",
+                          "flex flex-col justify-between rounded-xl border p-3.5 text-xs shadow-2xs transition-colors min-h-[108px]",
                           isConnected
                             ? "border-emerald-500/30 bg-emerald-500/[0.03] dark:bg-emerald-500/[0.06]"
                             : "border-border/80 bg-card hover:border-border"
                         )}>
-                          <div className="flex items-center gap-2.5 min-w-0 flex-1 mr-2">
+                          <div className="flex items-center justify-between gap-2">
                             <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-blue-500/10 text-blue-600 dark:text-blue-400">
                               <Globe className="size-4" />
                             </div>
-                            <div className="min-w-0 flex-1">
-                              <div className="flex items-center gap-1.5 min-w-0">
-                                <span className="font-semibold text-foreground text-xs truncate">Web Reader</span>
-                                <span className="rounded bg-muted/70 px-1 py-0.2 font-mono text-[9px] text-muted-foreground shrink-0">@web_fetch</span>
-                              </div>
-                              <p className="text-[11px] text-muted-foreground truncate mt-0.5">
-                                {isConnected ? "Connected via MCP" : "Article text extraction"}
-                              </p>
-                            </div>
-                          </div>
-                          <div className="shrink-0">
-                            {isConnected ? (
-                              <div className="flex items-center gap-1.5">
-                                <Badge variant="outline" className="border-emerald-600/30 bg-emerald-600/10 text-emerald-700 dark:text-emerald-400 text-[10px] gap-1 px-1.5 py-0.5 font-medium shrink-0">
-                                  <CheckCircle2 className="size-2.5 text-emerald-600 dark:text-emerald-400" />
-                                  <span>Connected</span>
-                                </Badge>
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              {isConnected ? (
+                                <>
+                                  <Badge variant="outline" className="border-emerald-600/30 bg-emerald-600/10 text-emerald-700 dark:text-emerald-400 text-[10px] gap-1 px-1.5 py-0.5 font-medium shrink-0">
+                                    <CheckCircle2 className="size-2.5 text-emerald-600 dark:text-emerald-400" />
+                                    <span>Connected</span>
+                                  </Badge>
+                                  <Button
+                                    size="xs"
+                                    variant="ghost"
+                                    type="button"
+                                    disabled={isUnlinking}
+                                    onClick={() => unlinkCatalogApp.mutate("web_fetch")}
+                                    className="h-6 px-1.5 text-[10px] text-muted-foreground hover:text-destructive hover:bg-destructive/10 shrink-0"
+                                  >
+                                    {isUnlinking ? <Loader2 className="size-2.5 animate-spin" /> : "Disconnect"}
+                                  </Button>
+                                </>
+                              ) : (
                                 <Button
                                   size="xs"
-                                  variant="ghost"
                                   type="button"
-                                  disabled={isUnlinking}
-                                  onClick={() => unlinkCatalogApp.mutate("web_fetch")}
-                                  className="h-6 px-1.5 text-[10px] text-muted-foreground hover:text-destructive hover:bg-destructive/10 shrink-0"
+                                  disabled={isLinking}
+                                  onClick={() => linkCatalogApp.mutate({ appId: "web_fetch" })}
+                                  className="h-7 px-3 text-xs font-medium bg-emerald-600 hover:bg-emerald-700 text-white dark:bg-emerald-600 dark:hover:bg-emerald-500 shadow-2xs shrink-0 rounded-lg transition-colors"
                                 >
-                                  {isUnlinking ? <Loader2 className="size-2.5 animate-spin" /> : "Disconnect"}
+                                  {isLinking ? <Loader2 className="size-3 animate-spin mr-1" /> : null}
+                                  <span>Connect</span>
                                 </Button>
-                              </div>
-                            ) : (
-                              <Button
-                                size="xs"
-                                type="button"
-                                disabled={isLinking}
-                                onClick={() => linkCatalogApp.mutate({ appId: "web_fetch" })}
-                                className="h-7 px-3 text-xs font-medium bg-emerald-600 hover:bg-emerald-700 text-white dark:bg-emerald-600 dark:hover:bg-emerald-500 shadow-2xs shrink-0 rounded-lg transition-colors"
-                              >
-                                {isLinking ? <Loader2 className="size-3 animate-spin mr-1" /> : null}
-                                <span>Connect</span>
-                              </Button>
-                            )}
+                              )}
+                            </div>
+                          </div>
+                          <div className="mt-2.5 min-w-0">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="font-semibold text-foreground text-xs">Web Reader</span>
+                              <span className="rounded bg-muted/70 px-1 py-0.2 font-mono text-[9px] text-muted-foreground shrink-0">@web_fetch</span>
+                            </div>
+                            <p className="text-[11px] text-muted-foreground mt-0.5 leading-normal">
+                              {isConnected ? "Connected via MCP" : "Article text extraction"}
+                            </p>
                           </div>
                         </div>
                       );
@@ -701,55 +701,55 @@ export function SettingsDialog({ open, onOpenChange, defaultTab = "general" }: P
                       const isLinking = linkCatalogApp.isPending && linkCatalogApp.variables?.appId === "code_runner";
                       return (
                         <div className={cn(
-                          "flex items-center justify-between rounded-xl border p-3 text-xs shadow-2xs transition-colors",
+                          "flex flex-col justify-between rounded-xl border p-3.5 text-xs shadow-2xs transition-colors min-h-[108px]",
                           isConnected
                             ? "border-emerald-500/30 bg-emerald-500/[0.03] dark:bg-emerald-500/[0.06]"
                             : "border-border/80 bg-card hover:border-border"
                         )}>
-                          <div className="flex items-center gap-2.5 min-w-0 flex-1 mr-2">
+                          <div className="flex items-center justify-between gap-2">
                             <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-amber-500/10 text-amber-600 dark:text-amber-400">
                               <Terminal className="size-4" />
                             </div>
-                            <div className="min-w-0 flex-1">
-                              <div className="flex items-center gap-1.5 min-w-0">
-                                <span className="font-semibold text-foreground text-xs truncate">Code Sandbox</span>
-                                <span className="rounded bg-muted/70 px-1 py-0.2 font-mono text-[9px] text-muted-foreground shrink-0">@code_runner</span>
-                              </div>
-                              <p className="text-[11px] text-muted-foreground truncate mt-0.5">
-                                {isConnected ? "Connected via MCP" : "Sandbox calculations"}
-                              </p>
-                            </div>
-                          </div>
-                          <div className="shrink-0">
-                            {isConnected ? (
-                              <div className="flex items-center gap-1.5">
-                                <Badge variant="outline" className="border-emerald-600/30 bg-emerald-600/10 text-emerald-700 dark:text-emerald-400 text-[10px] gap-1 px-1.5 py-0.5 font-medium shrink-0">
-                                  <CheckCircle2 className="size-2.5 text-emerald-600 dark:text-emerald-400" />
-                                  <span>Connected</span>
-                                </Badge>
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              {isConnected ? (
+                                <>
+                                  <Badge variant="outline" className="border-emerald-600/30 bg-emerald-600/10 text-emerald-700 dark:text-emerald-400 text-[10px] gap-1 px-1.5 py-0.5 font-medium shrink-0">
+                                    <CheckCircle2 className="size-2.5 text-emerald-600 dark:text-emerald-400" />
+                                    <span>Connected</span>
+                                  </Badge>
+                                  <Button
+                                    size="xs"
+                                    variant="ghost"
+                                    type="button"
+                                    disabled={isUnlinking}
+                                    onClick={() => unlinkCatalogApp.mutate("code_runner")}
+                                    className="h-6 px-1.5 text-[10px] text-muted-foreground hover:text-destructive hover:bg-destructive/10 shrink-0"
+                                  >
+                                    {isUnlinking ? <Loader2 className="size-2.5 animate-spin" /> : "Disconnect"}
+                                  </Button>
+                                </>
+                              ) : (
                                 <Button
                                   size="xs"
-                                  variant="ghost"
                                   type="button"
-                                  disabled={isUnlinking}
-                                  onClick={() => unlinkCatalogApp.mutate("code_runner")}
-                                  className="h-6 px-1.5 text-[10px] text-muted-foreground hover:text-destructive hover:bg-destructive/10 shrink-0"
+                                  disabled={isLinking}
+                                  onClick={() => linkCatalogApp.mutate({ appId: "code_runner" })}
+                                  className="h-7 px-3 text-xs font-medium bg-emerald-600 hover:bg-emerald-700 text-white dark:bg-emerald-600 dark:hover:bg-emerald-500 shadow-2xs shrink-0 rounded-lg transition-colors"
                                 >
-                                  {isUnlinking ? <Loader2 className="size-2.5 animate-spin" /> : "Disconnect"}
+                                  {isLinking ? <Loader2 className="size-3 animate-spin mr-1" /> : null}
+                                  <span>Connect</span>
                                 </Button>
-                              </div>
-                            ) : (
-                              <Button
-                                size="xs"
-                                type="button"
-                                disabled={isLinking}
-                                onClick={() => linkCatalogApp.mutate({ appId: "code_runner" })}
-                                className="h-7 px-3 text-xs font-medium bg-emerald-600 hover:bg-emerald-700 text-white dark:bg-emerald-600 dark:hover:bg-emerald-500 shadow-2xs shrink-0 rounded-lg transition-colors"
-                              >
-                                {isLinking ? <Loader2 className="size-3 animate-spin mr-1" /> : null}
-                                <span>Connect</span>
-                              </Button>
-                            )}
+                              )}
+                            </div>
+                          </div>
+                          <div className="mt-2.5 min-w-0">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="font-semibold text-foreground text-xs">Code Sandbox</span>
+                              <span className="rounded bg-muted/70 px-1 py-0.2 font-mono text-[9px] text-muted-foreground shrink-0">@code_runner</span>
+                            </div>
+                            <p className="text-[11px] text-muted-foreground mt-0.5 leading-normal">
+                              {isConnected ? "Connected via MCP" : "Sandbox calculations"}
+                            </p>
                           </div>
                         </div>
                       );

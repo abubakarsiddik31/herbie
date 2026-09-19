@@ -73,9 +73,15 @@ describe("SettingsDialog - Integrated Apps & Tools", () => {
     expect(await screen.findByText("Connected")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Disconnect" })).toBeInTheDocument();
 
+    // Code Sandbox and Web Reader are clearly visible with handles
+    expect(screen.getByText("Code Sandbox")).toBeInTheDocument();
+    expect(screen.getByText("@code_runner")).toBeInTheDocument();
+    expect(screen.getByText("Web Reader")).toBeInTheDocument();
+    expect(screen.getByText("@web_fetch")).toBeInTheDocument();
+
     // Google Calendar and Slack are unconnected -> show green "Connect" buttons
     const connectButtons = screen.getAllByRole("button", { name: "Connect" });
-    expect(connectButtons.length).toBeGreaterThanOrEqual(2);
+    expect(connectButtons.length).toBeGreaterThanOrEqual(4);
     // Verify connect button has emerald / green styling
     expect(connectButtons[0].className).toContain("bg-emerald-600");
   });
