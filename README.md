@@ -2,12 +2,10 @@
 
 <p>
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/logo-mark-dark.svg" />
-    <img src="docs/assets/logo-mark.svg" alt="Herbie — the bubble-bot" width="150" />
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/logo-lockup-dark.svg" />
+    <img src="docs/assets/logo-lockup.svg" alt="Herbie" width="320" />
   </picture>
 </p>
-
-# Herbie
 
 **The free, self-hosted open alternative to ChatGPT Plus and Claude Pro.**  
 Built for developers and power users who want multi-model freedom, visual workflow automation, 1-click MCP apps, custom API tools, and production-grade RAG without vendor lock-in.
