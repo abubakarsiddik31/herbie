@@ -165,6 +165,20 @@ export function ChatPage() {
       searchParams.delete("error");
       setSearchParams(searchParams, { replace: true });
     }
+
+    const mention = searchParams.get("mention");
+    if (mention) {
+      setInput(`@${mention} `);
+      searchParams.delete("mention");
+      setSearchParams(searchParams, { replace: true });
+      setTimeout(() => {
+        if (textareaRef.current) {
+          textareaRef.current.focus();
+          const len = mention.length + 2;
+          textareaRef.current.setSelectionRange(len, len);
+        }
+      }, 0);
+    }
   }, [searchParams, setSearchParams]);
 
   const detectedApp = useMemo(() => {

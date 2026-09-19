@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { useToolOAuthProviders, useWorkflows } from "@/features/workflows/useWorkflows";
 import { useTools } from "@/features/tools/useTools";
+import { useMCPServers } from "@/features/mcp/useMCPServers";
 
 export interface ChatApp {
   id: string;
@@ -18,6 +19,7 @@ export function useChatApps() {
   const { data: oauthProviders, isLoading: isOAuthLoading } = useToolOAuthProviders();
   const { data: workflows, isLoading: isWorkflowsLoading } = useWorkflows();
   const { data: customTools, isLoading: isToolsLoading } = useTools();
+  const { data: mcpServers, isLoading: isMCPLoading } = useMCPServers();
 
   const apps = useMemo<ChatApp[]>(() => {
     const list: ChatApp[] = [];
@@ -116,8 +118,27 @@ export function useChatApps() {
       }
     }
 
+    // 7. Enabled MCP Servers
+    if (mcpServers) {
+      for (const s of mcpServers) {
+        if (s.enabled) {
+          list.push({
+            id: `mcp_${s.id}`,
+            name: s.name,
+            mention: s.name.toLowerCase().replace(/\s+/g, "_"),
+            description: `Model Context Protocol server (${s.url})`,
+            type: "custom_tool",
+            iconName: "workflow",
+            connected: true,
+            configured: true,
+            requiresConnection: false,
+          });
+        }
+      }
+    }
+
     return list;
-  }, [oauthProviders, workflows, customTools]);
+  }, [oauthProviders, workflows, customTools, mcpServers]);
 
   const filterApps = (query: string): ChatApp[] => {
     const q = query.toLowerCase().trim();
@@ -139,7 +160,7 @@ export function useChatApps() {
     apps,
     filterApps,
     getAppByMention,
-    isLoading: isOAuthLoading || isWorkflowsLoading || isToolsLoading,
+    isLoading: isOAuthLoading || isWorkflowsLoading || isToolsLoading || isMCPLoading,
   };
 }
 

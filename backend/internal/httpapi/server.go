@@ -53,12 +53,22 @@ type ServerDeps struct {
 	Compactor *chat.Compactor
 	// The retrieval stack's collaborators for the documents API. All nil
 	// when RAG is disabled.
-	RAG       RagRunner
-	Docs      DocStore
-	Projects  ProjectStore
-	Workflows WorkflowStore
-	Vectors   rag.VectorStore
-	Objects   storage.ObjectStore
+	RAG        RagRunner
+	Docs       DocStore
+	Projects   ProjectStore
+	Workflows  WorkflowStore
+	MCPServers MCPServerStore
+	Vectors    rag.VectorStore
+	Objects    storage.ObjectStore
+}
+
+type MCPServerStore interface {
+	Create(ctx context.Context, item storage.MCPServer) (storage.MCPServer, error)
+	List(ctx context.Context, userID string) ([]storage.MCPServer, error)
+	ListEnabled(ctx context.Context, userID string) ([]storage.MCPServer, error)
+	ByID(ctx context.Context, id, userID string) (storage.MCPServer, error)
+	Update(ctx context.Context, item storage.MCPServer) (storage.MCPServer, error)
+	Delete(ctx context.Context, id, userID string) error
 }
 
 // RagSearchFunc is rag.Service.Search narrowed to what the chat path
@@ -158,6 +168,12 @@ func newServer(deps ServerDeps) (*Server, http.Handler) {
 	authed.HandleFunc("GET /api/tool-oauth/{provider}/start", s.handleToolOAuthStart)
 	authed.HandleFunc("POST /api/tool-oauth/{provider}/disconnect", s.handleToolOAuthDisconnect)
 	authed.HandleFunc("GET /api/tool-audit-logs", s.handleListToolAuditLogs)
+	authed.HandleFunc("GET /api/mcp/servers", s.handleListMCPServers)
+	authed.HandleFunc("POST /api/mcp/servers", s.handleCreateMCPServer)
+	authed.HandleFunc("POST /api/mcp/servers/{id}/toggle", s.handleToggleMCPServer)
+	authed.HandleFunc("DELETE /api/mcp/servers/{id}", s.handleDeleteMCPServer)
+	authed.HandleFunc("POST /api/mcp/servers/test", s.handleTestMCPServer)
+	authed.HandleFunc("POST /api/mcp", s.handleMCPEndpoint)
 	s.mux.Handle("/api/", requireAuth(deps.Tokens, authed))
 
 	return s, withCORS(deps.Cfg.FrontendOrigin, logRequests(deps.Log, s.mux))
