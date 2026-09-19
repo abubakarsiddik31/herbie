@@ -18,7 +18,6 @@ import {
   Power,
   Settings,
   ShieldCheck,
-  Sparkles,
   Sun,
   Terminal,
   Trash2,
@@ -44,7 +43,6 @@ import { useTools, useUpdateTool } from "@/features/tools/useTools";
 import { useDocuments } from "@/features/documents/useDocuments";
 import { useToolOAuthProviders, useWorkflows } from "@/features/workflows/useWorkflows";
 import { useMCPServers } from "@/features/mcp/useMCPServers";
-import { LinkAppDialog } from "@/features/mcp/LinkAppDialog";
 import { useLinkCatalogApp, useUnlinkCatalogApp } from "@/features/mcp/useMCPCatalog";
 
 export const MAX_INSTRUCTIONS_CHARS = 4000;
@@ -92,13 +90,6 @@ export function SettingsDialog({ open, onOpenChange, defaultTab = "general" }: P
   const { data: docs } = useDocuments();
   const linkCatalogApp = useLinkCatalogApp();
   const unlinkCatalogApp = useUnlinkCatalogApp();
-  const [linkAppDialogOpen, setLinkAppDialogOpen] = useState(false);
-  const [linkAppInitialId, setLinkAppInitialId] = useState<string>("github");
-
-  function openLinkApp(id: string) {
-    setLinkAppInitialId(id);
-    setLinkAppDialogOpen(true);
-  }
 
   async function handleOAuthConnect(providerId: string) {
     try {
@@ -661,99 +652,6 @@ export function SettingsDialog({ open, onOpenChange, defaultTab = "general" }: P
                   </div>
                 </div>
 
-                    {/* Web Search */}
-                    <div className="flex items-center justify-between rounded-xl border border-border bg-card p-2.5 text-xs shadow-2xs">
-                      <div className="flex items-center gap-2.5 min-w-0">
-                        <div className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-cyan-500/10 text-cyan-600 dark:text-cyan-400">
-                          <Globe className="size-3.5" />
-                        </div>
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-1.5">
-                            <span className="font-semibold text-foreground truncate">Web Search</span>
-                            <span className="font-mono text-[10px] text-muted-foreground">@web</span>
-                          </div>
-                          <p className="text-[10px] text-muted-foreground truncate">Live public web retrieval</p>
-                        </div>
-                      </div>
-                      <Badge variant="outline" className="border-cyan-600/30 bg-cyan-600/10 text-cyan-700 dark:text-cyan-400 text-[10px] px-1.5 py-0 font-normal shrink-0">
-                        Built-in
-                      </Badge>
-                    </div>
-
-                    {/* Web Reader & Fetch */}
-                    {(() => {
-                      const isConnected = mcpServers?.some((s) => s.appId === "web_fetch" && s.enabled);
-                      return (
-                        <div className="flex items-center justify-between rounded-xl border border-border bg-card p-2.5 text-xs shadow-2xs">
-                          <div className="flex items-center gap-2.5 min-w-0">
-                            <div className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-blue-500/10 text-blue-600 dark:text-blue-400">
-                              <Globe className="size-3.5" />
-                            </div>
-                            <div className="min-w-0">
-                              <div className="flex items-center gap-1.5">
-                                <span className="font-semibold text-foreground truncate">Web Reader</span>
-                                <span className="font-mono text-[10px] text-muted-foreground">@web_fetch</span>
-                              </div>
-                              <p className="text-[10px] text-muted-foreground truncate">Article text extraction</p>
-                            </div>
-                          </div>
-                          <div className="flex items-center gap-1.5 shrink-0">
-                            <Badge variant="outline" className={cn("text-[10px] gap-1 px-1.5 py-0 font-normal shrink-0", isConnected ? "border-emerald-600/30 bg-emerald-600/10 text-emerald-700 dark:text-emerald-400" : "text-muted-foreground")}>
-                              {isConnected && <CheckCircle2 className="size-2.5" />}
-                              <span>{isConnected ? "MCP" : "Not Linked"}</span>
-                            </Badge>
-                            <Button
-                              size="xs"
-                              variant={isConnected ? "ghost" : "default"}
-                              type="button"
-                              onClick={() => isConnected ? unlinkCatalogApp.mutate("web_fetch") : linkCatalogApp.mutate({ appId: "web_fetch" })}
-                              className={cn("h-6 px-2 text-[10px]", isConnected ? "text-destructive hover:bg-destructive/10" : "bg-purple-600 hover:bg-purple-700 text-white")}
-                            >
-                              {isConnected ? "Unlink" : "1-Click Link"}
-                            </Button>
-                          </div>
-                        </div>
-                      );
-                    })()}
-
-                    {/* Code Sandbox */}
-                    {(() => {
-                      const isConnected = mcpServers?.some((s) => s.appId === "code_runner" && s.enabled);
-                      return (
-                        <div className="flex items-center justify-between rounded-xl border border-border bg-card p-2.5 text-xs shadow-2xs">
-                          <div className="flex items-center gap-2.5 min-w-0">
-                            <div className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-amber-500/10 text-amber-600 dark:text-amber-400">
-                              <Terminal className="size-3.5" />
-                            </div>
-                            <div className="min-w-0">
-                              <div className="flex items-center gap-1.5">
-                                <span className="font-semibold text-foreground truncate">Code Sandbox</span>
-                                <span className="font-mono text-[10px] text-muted-foreground">@code_runner</span>
-                              </div>
-                              <p className="text-[10px] text-muted-foreground truncate">Sandbox calculations</p>
-                            </div>
-                          </div>
-                          <div className="flex items-center gap-1.5 shrink-0">
-                            <Badge variant="outline" className={cn("text-[10px] gap-1 px-1.5 py-0 font-normal shrink-0", isConnected ? "border-emerald-600/30 bg-emerald-600/10 text-emerald-700 dark:text-emerald-400" : "text-muted-foreground")}>
-                              {isConnected && <CheckCircle2 className="size-2.5" />}
-                              <span>{isConnected ? "MCP" : "Not Linked"}</span>
-                            </Badge>
-                            <Button
-                              size="xs"
-                              variant={isConnected ? "ghost" : "default"}
-                              type="button"
-                              onClick={() => isConnected ? unlinkCatalogApp.mutate("code_runner") : linkCatalogApp.mutate({ appId: "code_runner" })}
-                              className={cn("h-6 px-2 text-[10px]", isConnected ? "text-destructive hover:bg-destructive/10" : "bg-purple-600 hover:bg-purple-700 text-white")}
-                            >
-                              {isConnected ? "Unlink" : "1-Click Link"}
-                            </Button>
-                          </div>
-                        </div>
-                      );
-                    })()}
-                  </div>
-                </div>
-
                 {/* Configured Custom HTTP Tools */}
                 <div className="space-y-2.5 pt-2 border-t border-border/60">
                   <div className="flex items-center justify-between">
@@ -931,12 +829,6 @@ export function SettingsDialog({ open, onOpenChange, defaultTab = "general" }: P
           </div>
         </div>
       </DialogContent>
-
-      <LinkAppDialog
-        open={linkAppDialogOpen}
-        onOpenChange={setLinkAppDialogOpen}
-        initialAppId={linkAppInitialId}
-      />
     </Dialog>
   );
 }
