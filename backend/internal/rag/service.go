@@ -167,7 +167,7 @@ func (s *Service) IngestWithKey(ctx context.Context, key, userID, documentID, do
 
 	// Cache the full parsed markdown in the object store (MinIO) in the same folder
 	if parsedText, err := ExtractTextWithFilename(mime, docTitle, bytes.NewReader(content)); err == nil && parsedText != "" {
-		_ = s.objects.Put(ctx, ParsedObjectKey(userID, documentID), "text/markdown", strings.NewReader(parsedText), int64(len(parsedText)))
+		_ = s.objects.Put(ctx, ParsedObjectKey(key), "text/markdown", strings.NewReader(parsedText), int64(len(parsedText)))
 	}
 
 	total := strings.Join(chunkTexts(chunks), "")
