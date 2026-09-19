@@ -1,4 +1,5 @@
 import { useAuth } from "@/stores/auth";
+import type { User } from "@/lib/types";
 
 const BASE = import.meta.env.VITE_API_URL ?? "http://localhost:8080";
 
@@ -18,13 +19,21 @@ export async function tryRefresh(): Promise<boolean> {
   refreshing ??= fetch(`${BASE}/api/auth/refresh`, {
     method: "POST",
     credentials: "include",
-  }).then(async (res) => {
-    if (!res.ok) return false;
-    const data = (await res.json()) as { accessToken: string };
-    const { user, setAuth } = useAuth.getState();
-    if (user) setAuth(user, data.accessToken);
-    return true;
-  }).finally(() => { refreshing = null; });
+  })
+    .then(async (res) => {
+      if (!res.ok) return false;
+      const data = (await res.json()) as { accessToken: string; user?: User };
+      const user = data.user ?? useAuth.getState().user;
+      if (user) {
+        useAuth.getState().setAuth(user, data.accessToken);
+        return true;
+      }
+      return false;
+    })
+    .catch(() => false)
+    .finally(() => {
+      refreshing = null;
+    });
   return refreshing;
 }
 

@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ThemeProvider } from "next-themes";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router";
@@ -16,17 +17,44 @@ import { ProjectsPage } from "@/pages/ProjectsPage";
 import { ProjectWorkspacePage } from "@/pages/ProjectWorkspacePage";
 import { WorkflowsPage } from "@/pages/WorkflowsPage";
 import { WorkflowCanvasPage } from "@/pages/WorkflowCanvasPage";
+import { tryRefresh } from "@/lib/api";
+import { useAuth } from "@/stores/auth";
 
 const queryClient = new QueryClient();
 
 export default function App() {
+  const [initializing, setInitializing] = useState(() => {
+    if (typeof window !== "undefined" && window.location.pathname.startsWith("/auth/callback")) {
+      return false;
+    }
+    return true;
+  });
+  const token = useAuth((s) => s.accessToken);
+
+  useEffect(() => {
+    if (!initializing) return;
+    void tryRefresh().finally(() => {
+      setInitializing(false);
+    });
+  }, [initializing]);
+
+  if (initializing) {
+    return (
+      <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
+        <div className="flex min-h-svh items-center justify-center bg-background text-foreground">
+          <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+        </div>
+      </ThemeProvider>
+    );
+  }
+
   return (
     <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
       <QueryClientProvider client={queryClient}>
         <BrowserRouter>
         <Routes>
-          <Route path="/login" element={<LoginPage />} />
-          <Route path="/register" element={<RegisterPage />} />
+          <Route path="/login" element={token ? <Navigate to="/chat" replace /> : <LoginPage />} />
+          <Route path="/register" element={token ? <Navigate to="/chat" replace /> : <RegisterPage />} />
           <Route path="/auth/callback" element={<OAuthCallbackPage />} />
           <Route path="/s/:token" element={<SharedPage />} />
           <Route element={<RequireAuth />}>

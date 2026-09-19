@@ -69,7 +69,10 @@ func (s *Server) handleRefresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.setRefreshCookie(w, r, res)
-	writeJSON(w, http.StatusOK, map[string]any{"accessToken": res.AccessToken})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"accessToken": res.AccessToken,
+		"user":        map[string]string{"id": res.User.ID, "email": res.User.Email},
+	})
 }
 
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {

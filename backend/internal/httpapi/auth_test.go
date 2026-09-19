@@ -74,6 +74,19 @@ func TestRefreshSetsRotatedCookie(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("refresh: %d %s", rec.Code, rec.Body.String())
 	}
+	var body struct {
+		AccessToken string `json:"accessToken"`
+		User        struct {
+			ID    string `json:"id"`
+			Email string `json:"email"`
+		} `json:"user"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode refresh body: %v", err)
+	}
+	if body.AccessToken == "" || body.User.Email != "a@b.co" {
+		t.Fatalf("expected accessToken and user, got %+v", body)
+	}
 	if c := rec.Result().Cookies()[0]; c.Value == cookie.Value {
 		t.Fatal("refresh cookie must rotate")
 	}

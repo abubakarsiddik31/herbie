@@ -1,7 +1,7 @@
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
-import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
-import { apiFetch } from "./api";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { apiFetch, tryRefresh } from "./api";
 import { useAuth } from "@/stores/auth";
 
 const server = setupServer(
@@ -14,8 +14,8 @@ const server = setupServer(
   }),
 );
 
+beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
 beforeEach(() => {
-  server.listen({ onUnhandledRequest: "error" });
   useAuth.setState({ user: { id: "u", email: "a@b.co" }, accessToken: "stale" });
 });
 afterEach(() => server.resetHandlers());
@@ -26,5 +26,42 @@ describe("apiFetch", () => {
     const res = await apiFetch<{ ok: boolean }>("/api/things");
     expect(res.ok).toBe(true);
     expect(useAuth.getState().accessToken).toBe("fresh");
+  });
+});
+
+describe("tryRefresh", () => {
+  it("restores user and token on fresh reload when returned by server", async () => {
+    server.use(
+      http.post("*/api/auth/refresh", () =>
+        HttpResponse.json({
+          accessToken: "restored-token",
+          user: { id: "u-reloaded", email: "reloaded@test.com" },
+        }),
+      ),
+    );
+    useAuth.getState().clear();
+
+    const ok = await tryRefresh();
+    expect(ok).toBe(true);
+    expect(useAuth.getState()).toEqual({
+      accessToken: "restored-token",
+      user: { id: "u-reloaded", email: "reloaded@test.com" },
+      setAuth: expect.any(Function),
+      clear: expect.any(Function),
+    });
+  });
+
+  it("returns false and leaves auth cleared when refresh rejects", async () => {
+    server.use(
+      http.post("*/api/auth/refresh", () =>
+        HttpResponse.json({ error: { code: "unauthorized", message: "no cookie" } }, { status: 401 }),
+      ),
+    );
+    useAuth.getState().clear();
+
+    const ok = await tryRefresh();
+    expect(ok).toBe(false);
+    expect(useAuth.getState().accessToken).toBeNull();
+    expect(useAuth.getState().user).toBeNull();
   });
 });
