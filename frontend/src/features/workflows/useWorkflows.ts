@@ -125,6 +125,21 @@ export function useToolOAuthProviders() {
   });
 }
 
+export function useConfigureToolOAuth() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ provider, ...body }: { provider: string; clientId?: string; clientSecret?: string; token?: string; refreshToken?: string }) =>
+      apiFetch<{ ok: boolean }>(`/api/tool-oauth/${provider}/config`, {
+        method: "POST",
+        json: body,
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["tool-oauth-providers"] });
+      void queryClient.invalidateQueries({ queryKey: ["workflow-credentials"] });
+    },
+  });
+}
+
 export function useDisconnectToolOAuth() {
   const queryClient = useQueryClient();
   return useMutation({

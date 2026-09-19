@@ -6,7 +6,6 @@ import type { ReactNode } from "react";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { AppConnectCard } from "./AppConnectCard";
 
-let startCalledWith: string | null = null;
 let linkCalledWith: string | null = null;
 
 const server = setupServer(
@@ -36,9 +35,7 @@ const server = setupServer(
       ],
     }),
   ),
-  http.get("*/api/tool-oauth/:provider/start", ({ params, request }) => {
-    const url = new URL(request.url);
-    startCalledWith = `${params.provider}?return_to=${url.searchParams.get("return_to")}`;
+  http.get("*/api/tool-oauth/:provider/start", () => {
     return HttpResponse.json({ url: "https://accounts.google.com/o/oauth2/v2/auth?test=1" });
   }),
 );
@@ -46,7 +43,6 @@ const server = setupServer(
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
 afterEach(() => {
   server.resetHandlers();
-  startCalledWith = null;
   linkCalledWith = null;
 });
 afterAll(() => server.close());
@@ -58,7 +54,7 @@ function wrapper(client: QueryClient) {
 }
 
 describe("AppConnectCard", () => {
-  it("renders connect prompt for unlinked provider and triggers OAuth start", async () => {
+  it("renders connect prompt for unlinked provider and opens popup", async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(<AppConnectCard providerId="google_calendar" returnTo="/chat/test-123" />, {
       wrapper: wrapper(client),
@@ -67,14 +63,10 @@ describe("AppConnectCard", () => {
     expect(await screen.findByText("Google Calendar Connection Required")).toBeInTheDocument();
     expect(screen.getByText("Connect Google Calendar")).toBeInTheDocument();
 
-    // Stub window.location.href assignment
     const btn = screen.getByText("Connect Google Calendar");
     fireEvent.click(btn);
 
-    await waitFor(() => {
-      expect(startCalledWith).toContain("google_calendar");
-      expect(startCalledWith).toContain("return_to=/chat/test-123");
-    });
+    expect(await screen.findByText("Open Google Calendar Popup")).toBeInTheDocument();
   });
 
   it("triggers link when clicking Connect button", async () => {

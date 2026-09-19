@@ -44,6 +44,7 @@ import { useDocuments } from "@/features/documents/useDocuments";
 import { useToolOAuthProviders, useWorkflows } from "@/features/workflows/useWorkflows";
 import { useMCPServers } from "@/features/mcp/useMCPServers";
 import { useLinkCatalogApp, useUnlinkCatalogApp } from "@/features/mcp/useMCPCatalog";
+import { OAuthPopupDialog } from "@/features/workflows/OAuthPopupDialog";
 
 export const MAX_INSTRUCTIONS_CHARS = 4000;
 export const MAX_MEMORY_CHARS = 1000;
@@ -90,19 +91,12 @@ export function SettingsDialog({ open, onOpenChange, defaultTab = "general" }: P
   const { data: docs } = useDocuments();
   const linkCatalogApp = useLinkCatalogApp();
   const unlinkCatalogApp = useUnlinkCatalogApp();
+  const [oauthPopupOpen, setOauthPopupOpen] = useState(false);
+  const [oauthPopupProvider, setOauthPopupProvider] = useState<string>("google_calendar");
 
-  async function handleOAuthConnect(providerId: string) {
-    try {
-      const dest = window.location.pathname + window.location.search;
-      const data = await apiFetch<{ url: string }>(
-        `/api/tool-oauth/${providerId}/start?return_to=${encodeURIComponent(dest)}`,
-      );
-      if (data.url) {
-        window.location.href = data.url;
-      }
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : `Failed to start ${providerId} OAuth`);
-    }
+  function openOAuthPopup(providerId: string) {
+    setOauthPopupProvider(providerId);
+    setOauthPopupOpen(true);
   }
 
   useEffect(() => {
@@ -471,7 +465,7 @@ export function SettingsDialog({ open, onOpenChange, defaultTab = "general" }: P
                               size="xs"
                               variant={isConnected ? "outline" : "default"}
                               type="button"
-                              onClick={() => isConnected ? unlinkCatalogApp.mutate("google_calendar") : handleOAuthConnect("google_calendar")}
+                              onClick={() => isConnected ? unlinkCatalogApp.mutate("google_calendar") : openOAuthPopup("google_calendar")}
                               className={cn("h-6 px-2 text-[10px]", isConnected ? "text-destructive hover:bg-destructive/10 border-destructive/30" : "")}
                             >
                               {isConnected ? "Disconnect" : "Connect"}
@@ -510,7 +504,7 @@ export function SettingsDialog({ open, onOpenChange, defaultTab = "general" }: P
                               size="xs"
                               variant={isConnected ? "outline" : "default"}
                               type="button"
-                              onClick={() => isConnected ? unlinkCatalogApp.mutate("github") : linkCatalogApp.mutate({ appId: "github" })}
+                              onClick={() => isConnected ? unlinkCatalogApp.mutate("github") : openOAuthPopup("github")}
                               className={cn("h-6 px-2 text-[10px]", isConnected ? "text-destructive hover:bg-destructive/10 border-destructive/30" : "")}
                             >
                               {isConnected ? "Disconnect" : "Connect"}
@@ -549,7 +543,7 @@ export function SettingsDialog({ open, onOpenChange, defaultTab = "general" }: P
                               size="xs"
                               variant={isConnected ? "outline" : "default"}
                               type="button"
-                              onClick={() => isConnected ? unlinkCatalogApp.mutate("slack") : linkCatalogApp.mutate({ appId: "slack" })}
+                              onClick={() => isConnected ? unlinkCatalogApp.mutate("slack") : openOAuthPopup("slack")}
                               className={cn("h-6 px-2 text-[10px]", isConnected ? "text-destructive hover:bg-destructive/10 border-destructive/30" : "")}
                             >
                               {isConnected ? "Disconnect" : "Connect"}
@@ -829,6 +823,12 @@ export function SettingsDialog({ open, onOpenChange, defaultTab = "general" }: P
           </div>
         </div>
       </DialogContent>
+
+      <OAuthPopupDialog
+        open={oauthPopupOpen}
+        onOpenChange={setOauthPopupOpen}
+        providerId={oauthPopupProvider}
+      />
     </Dialog>
   );
 }
