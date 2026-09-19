@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -314,4 +315,60 @@ func TestDeleteDocumentCrossUser(t *testing.T) {
 	if len(fv.deleted) != 0 || len(fo.deleted) != 0 || len(docs.deleted) != 0 {
 		t.Fatal("cross-user delete must be a no-op")
 	}
+}
+
+func TestHandleExtractTextCSV(t *testing.T) {
+	h, token, _, _, _, _ := newDocsServer(t, 20<<20)
+	rec := uploadDocToPath(t, h, "/api/extract-text", token, "table.csv", "Name,Age\nAlice,30\nBob,25")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+	}
+	var res struct {
+		Filename string `json:"filename"`
+		Text     string `json:"text"`
+		Size     int64  `json:"size"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil {
+		t.Fatal(err)
+	}
+	if res.Filename != "table.csv" {
+		t.Fatalf("filename: %s", res.Filename)
+	}
+	if !strings.Contains(res.Text, "| Name | Age |") || !strings.Contains(res.Text, "| Alice | 30 |") {
+		t.Fatalf("extracted text: %s", res.Text)
+	}
+}
+
+func TestUploadDocumentMultiFormat(t *testing.T) {
+	h, token, docs, fr, _, _ := newDocsServer(t, 20<<20)
+	rec := uploadDoc(t, h, token, "data.csv", "id,name\n1,alpha")
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+	}
+	if fr.calls != 1 || len(docs.rows) != 1 {
+		t.Fatalf("calls %d rows %d", fr.calls, len(docs.rows))
+	}
+}
+
+func uploadDocToPath(t *testing.T, h http.Handler, path, token, filename, content string) *httptest.ResponseRecorder {
+	t.Helper()
+	var body bytes.Buffer
+	w := multipart.NewWriter(&body)
+	fw, err := w.CreateFormFile("file", filename)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.Copy(fw, strings.NewReader(content)); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	req, _ := http.NewRequest(http.MethodPost, path, &body)
+	req.Header.Set("Content-Type", w.FormDataContentType())
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	return rec
 }

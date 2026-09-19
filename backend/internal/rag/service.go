@@ -130,7 +130,7 @@ func (s *Service) Ingest(ctx context.Context, userID, documentID, docTitle, mime
 	if err := s.objects.Put(ctx, key, contentType, bytes.NewReader(content), int64(len(content))); err != nil {
 		return 0, EmbedUsage{}, fmt.Errorf("store original: %w", err)
 	}
-	sections, err := ExtractSections(mime, bytes.NewReader(content))
+	sections, err := ExtractSectionsWithFilename(mime, docTitle, bytes.NewReader(content))
 	if err != nil {
 		return 0, EmbedUsage{}, fmt.Errorf("extract text: %w", err)
 	}

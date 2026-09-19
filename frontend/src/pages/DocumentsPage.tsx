@@ -107,7 +107,7 @@ export function DocumentsPage() {
           <FileUp className="text-muted-foreground" />
           <p className="text-sm font-medium">Drop files here or click to upload</p>
           <p className="text-muted-foreground text-xs">
-            txt, md, pdf, docx — up to 20 MB. Documents are chunked, embedded, and searchable
+            pdf, docx, xlsx, pptx, txt, md, csv, tsv, json — up to 20 MB. Documents are chunked, embedded, and searchable
             from chat.
           </p>
           <input

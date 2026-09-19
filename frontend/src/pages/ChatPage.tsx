@@ -1001,7 +1001,7 @@ export function ChatPage() {
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept="image/png,image/jpeg,image/webp,image/gif,.pdf,.docx,.txt,.md,.json,.csv,.py,.js,.ts,.tsx,.jsx,.go,.rs,.sh,.sql,.yaml,.yml"
+                  accept="image/png,image/jpeg,image/webp,image/gif,.pdf,.docx,.xlsx,.pptx,.txt,.md,.json,.csv,.tsv,.py,.js,.ts,.tsx,.jsx,.go,.rs,.sh,.sql,.yaml,.yml"
                   multiple
                   hidden
                   onChange={(e) => void pickFiles(e.target.files)}

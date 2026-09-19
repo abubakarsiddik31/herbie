@@ -100,7 +100,7 @@ export function uploadWithProgress(
   });
 }
 
-const ACCEPTED = ".txt,.md,.pdf,.docx";
+const ACCEPTED = ".txt,.md,.pdf,.docx,.xlsx,.pptx,.csv,.tsv,.json,.yaml,.yml,.py,.js,.ts,.tsx,.jsx,.go,.rs,.sh,.sql";
 
 export function useDocumentActions() {
   const queryClient = useQueryClient();

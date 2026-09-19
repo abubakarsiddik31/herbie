@@ -213,7 +213,7 @@ func (s *Server) handleUploadProjectFile(w http.ResponseWriter, r *http.Request)
 	ext := strings.ToLower(filepath.Ext(header.Filename))
 	mime, ok := allowedUploadTypes[ext]
 	if !ok {
-		writeError(w, http.StatusUnsupportedMediaType, "unsupported_type", "allowed types: txt, md, pdf, docx")
+		writeError(w, http.StatusUnsupportedMediaType, "unsupported_type", "allowed types: pdf, docx, xlsx, pptx, txt, md, csv, tsv, json, code files")
 		return
 	}
 	content, err := io.ReadAll(file)

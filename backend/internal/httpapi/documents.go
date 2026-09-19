@@ -33,10 +33,29 @@ type RagRunner interface {
 
 // allowedUploadTypes maps the filename extension to the extraction mime.
 var allowedUploadTypes = map[string]string{
-	".txt":  "text/plain",
-	".md":   "text/markdown",
-	".pdf":  "application/pdf",
-	".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+	".txt":      "text/plain",
+	".md":       "text/markdown",
+	".markdown": "text/markdown",
+	".pdf":      "application/pdf",
+	".docx":     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+	".xlsx":     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+	".pptx":     "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+	".csv":      "text/csv",
+	".tsv":      "text/tab-separated-values",
+	".json":     "application/json",
+	".yaml":     "application/x-yaml",
+	".yml":      "application/x-yaml",
+	".xml":      "application/xml",
+	".html":     "text/html",
+	".py":       "text/x-python",
+	".js":       "text/javascript",
+	".ts":       "text/typescript",
+	".tsx":      "text/typescript-jsx",
+	".jsx":      "text/javascript-jsx",
+	".go":       "text/x-go",
+	".rs":       "text/x-rust",
+	".sh":       "text/x-shellscript",
+	".sql":      "text/x-sql",
 }
 
 type documentJSON struct {
@@ -85,7 +104,7 @@ func (s *Server) handleUploadDocument(w http.ResponseWriter, r *http.Request) {
 	ext := strings.ToLower(filepath.Ext(header.Filename))
 	mime, ok := allowedUploadTypes[ext]
 	if !ok {
-		writeError(w, http.StatusUnsupportedMediaType, "unsupported_type", "allowed types: txt, md, pdf, docx")
+		writeError(w, http.StatusUnsupportedMediaType, "unsupported_type", "allowed types: pdf, docx, xlsx, pptx, txt, md, csv, tsv, json, code files")
 		return
 	}
 
@@ -223,7 +242,7 @@ func (s *Server) handleExtractText(w http.ResponseWriter, r *http.Request) {
 	if mime == "" {
 		mime = "text/plain"
 	}
-	text, err := rag.ExtractText(mime, file)
+	text, err := rag.ExtractTextWithFilename(mime, header.Filename, file)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "extract_error", err.Error())
 		return

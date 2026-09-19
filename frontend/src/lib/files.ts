@@ -11,6 +11,8 @@ export interface AttachedFile {
 export const MAX_ATTACHED_FILES = 5;
 export const MAX_FILE_SIZE_BYTES = 10 << 20; // 10 MB
 
+export const BINARY_DOC_EXTENSIONS = new Set(["pdf", "docx", "xlsx", "pptx"]);
+
 const TEXT_EXTENSIONS = new Set([
   "txt", "md", "markdown", "json", "csv", "tsv", "log",
   "py", "js", "jsx", "ts", "tsx", "go", "rs", "java", "c", "cpp", "h", "hpp",
@@ -20,7 +22,7 @@ const TEXT_EXTENSIONS = new Set([
 
 export function isSupportedDocOrCodeFile(file: File): boolean {
   const ext = file.name.split(".").pop()?.toLowerCase() || "";
-  if (ext === "pdf" || ext === "docx") return true;
+  if (BINARY_DOC_EXTENSIONS.has(ext)) return true;
   if (TEXT_EXTENSIONS.has(ext)) return true;
   if (file.type.startsWith("text/")) return true;
   return false;
@@ -33,7 +35,7 @@ export async function processAttachedFile(file: File): Promise<AttachedFile> {
 
   const ext = file.name.split(".").pop()?.toLowerCase() || "";
 
-  if (ext === "pdf" || ext === "docx") {
+  if (BINARY_DOC_EXTENSIONS.has(ext)) {
     const formData = new FormData();
     formData.append("file", file);
     const res = await apiFetch<{ filename: string; text: string; size: number }>("/api/extract-text", {

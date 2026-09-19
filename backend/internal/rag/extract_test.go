@@ -151,6 +151,98 @@ func TestExtractSectionsDocxHeadings(t *testing.T) {
 	}
 }
 
+func TestExtractCSV(t *testing.T) {
+	csvData := "Name,Role,Score\nAlice,Engineer,95\nBob,Designer,88"
+	got, err := ExtractText("text/csv", strings.NewReader(csvData))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, "| Name | Role | Score |") || !strings.Contains(got, "| Alice | Engineer | 95 |") {
+		t.Fatalf("csv text: %q", got)
+	}
+
+	secs, err := ExtractSections("text/csv", strings.NewReader(csvData))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(secs) != 1 || !strings.Contains(secs[0].Text, "Alice") {
+		t.Fatalf("csv sections: %+v", secs)
+	}
+}
+
+func TestExtractTSV(t *testing.T) {
+	tsvData := "Item\tPrice\nApple\t1.50\nBanana\t0.75"
+	got, err := ExtractText("text/tab-separated-values", strings.NewReader(tsvData))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, "| Item | Price |") || !strings.Contains(got, "| Apple | 1.50 |") {
+		t.Fatalf("tsv text: %q", got)
+	}
+}
+
+func TestExtractXLSX(t *testing.T) {
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	wb, _ := zw.Create("xl/workbook.xml")
+	wb.Write([]byte(`<?xml version="1.0"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Sales" sheetId="1" r:id="rId1"/></sheets></workbook>`))
+	rels, _ := zw.Create("xl/_rels/workbook.xml.rels")
+	rels.Write([]byte(`<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>`))
+	ws, _ := zw.Create("xl/worksheets/sheet1.xml")
+	ws.Write([]byte(`<?xml version="1.0"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>Revenue</t></is></c><c r="B1"><v>5000</v></c></row></sheetData></worksheet>`))
+	zw.Close()
+
+	got, err := ExtractText(xlsxMime, bytes.NewReader(buf.Bytes()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, "Revenue") || !strings.Contains(got, "5000") {
+		t.Fatalf("xlsx text: %q", got)
+	}
+
+	secs, err := ExtractSections(xlsxMime, bytes.NewReader(buf.Bytes()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(secs) == 0 || !strings.Contains(secs[0].Heading, "Sales") {
+		t.Fatalf("xlsx sections: %+v", secs)
+	}
+}
+
+func TestExtractPPTX(t *testing.T) {
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	pres, _ := zw.Create("ppt/presentation.xml")
+	pres.Write([]byte(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:presentation xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <p:sldIdLst><p:sldId id="256" r:id="rId1"/></p:sldIdLst>
+</p:presentation>`))
+	rels, _ := zw.Create("ppt/_rels/presentation.xml.rels")
+	rels.Write([]byte(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide1.xml"/>
+</Relationships>`))
+	slide, _ := zw.Create("ppt/slides/slide1.xml")
+	slide.Write([]byte(`<?xml version="1.0"?><p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"><p:cSld><p:spTree><p:sp><p:nvSpPr><p:nvPr><p:ph type="title"/></p:nvPr></p:nvSpPr><p:txBody><a:p><a:r><a:t>Quarterly Review</a:t></a:r></a:p></p:txBody></p:sp><p:sp><p:txBody><a:p><a:r><a:t>Key takeaways</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld></p:sld>`))
+	zw.Close()
+
+	got, err := ExtractText(pptxMime, bytes.NewReader(buf.Bytes()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, "Quarterly Review") || !strings.Contains(got, "Key takeaways") {
+		t.Fatalf("pptx text: %q", got)
+	}
+
+	secs, err := ExtractSections(pptxMime, bytes.NewReader(buf.Bytes()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(secs) == 0 || !strings.Contains(secs[0].Heading, "Quarterly Review") {
+		t.Fatalf("pptx sections: %+v", secs)
+	}
+}
+
 func TestEstTokens(t *testing.T) {
 	if EstTokens("") != 1 || EstTokens("abcd") != 1 || EstTokens("abcdefgh") != 2 {
 		t.Fatalf("est: %d %d %d", EstTokens(""), EstTokens("abcd"), EstTokens("abcdefgh"))

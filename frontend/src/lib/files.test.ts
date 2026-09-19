@@ -5,9 +5,13 @@ describe("files utility", () => {
   it("recognizes supported document and code files", () => {
     expect(isSupportedDocOrCodeFile(new File([], "app.py"))).toBe(true);
     expect(isSupportedDocOrCodeFile(new File([], "doc.pdf"))).toBe(true);
+    expect(isSupportedDocOrCodeFile(new File([], "report.docx"))).toBe(true);
+    expect(isSupportedDocOrCodeFile(new File([], "sheet.xlsx"))).toBe(true);
+    expect(isSupportedDocOrCodeFile(new File([], "slides.pptx"))).toBe(true);
     expect(isSupportedDocOrCodeFile(new File([], "notes.md"))).toBe(true);
     expect(isSupportedDocOrCodeFile(new File([], "script.sh"))).toBe(true);
     expect(isSupportedDocOrCodeFile(new File([], "data.csv"))).toBe(true);
+    expect(isSupportedDocOrCodeFile(new File([], "data.tsv"))).toBe(true);
     expect(isSupportedDocOrCodeFile(new File([], "binary.exe"))).toBe(false);
   });
 

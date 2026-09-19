@@ -9,6 +9,7 @@ import {
   FileCode,
   FileText,
   FolderGit2,
+  Loader2,
   Mic,
   Paperclip,
   Sidebar,
@@ -83,6 +84,7 @@ export function ProjectWorkspacePage() {
   const createProjectConv = useCreateProjectConversation(projectId ?? null);
 
   const [filesOpen, setFilesOpen] = useState(true);
+  const [projectFileDragging, setProjectFileDragging] = useState(false);
   const [instructionsOpen, setInstructionsOpen] = useState(false);
   const [selectedConvId, setSelectedConvId] = useState<string | null>(null);
 
@@ -161,11 +163,14 @@ export function ProjectWorkspacePage() {
         imgFiles.push(f);
       } else if (isSupportedDocOrCodeFile(f)) {
         docFiles.push(f);
+      } else {
+        toast.error(`Unsupported file type: ${f.name}`);
       }
     }
 
     if (imgFiles.length > 0) {
-      const { images } = await readImageFiles(imgFiles);
+      const { images, errors } = await readImageFiles(imgFiles);
+      for (const message of errors) toast.error(message);
       setAttachments((prev) => [...prev, ...images].slice(0, MAX_IMAGES_PER_MESSAGE));
     }
 
@@ -173,10 +178,16 @@ export function ProjectWorkspacePage() {
       setExtractingFiles(true);
       try {
         for (const df of docFiles) {
-          if (attachedFiles.length >= MAX_ATTACHED_FILES) break;
+          if (attachedFiles.length >= MAX_ATTACHED_FILES) {
+            toast.error(`Maximum ${MAX_ATTACHED_FILES} files per message`);
+            break;
+          }
           const attached = await processAttachedFile(df);
           setAttachedFiles((prev) => [...prev, attached]);
+          toast.success(`Attached ${df.name}`);
         }
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Failed to attach file");
       } finally {
         setExtractingFiles(false);
       }
@@ -392,14 +403,29 @@ export function ProjectWorkspacePage() {
               {attachedFiles.length > 0 && (
                 <div className="mb-2 flex flex-wrap gap-2">
                   {attachedFiles.map((doc) => (
-                    <div key={doc.id} className="flex items-center gap-1.5 rounded-xl border bg-muted/50 px-2.5 py-1 text-xs">
+                    <div key={doc.id} className="flex items-center gap-1.5 rounded-xl border border-border/80 bg-muted/50 px-2.5 py-1 text-xs shadow-xs">
                       <FileCode className="size-3.5 text-primary shrink-0" />
                       <span className="font-medium truncate max-w-[160px]">{doc.name}</span>
-                      <button type="button" onClick={() => setAttachedFiles((p) => p.filter((f) => f.id !== doc.id))}>
-                        <X className="size-3 text-muted-foreground hover:text-destructive" />
+                      <span className="text-[10px] text-muted-foreground font-mono">
+                        ({Math.ceil(doc.size / 1024)} KB)
+                      </span>
+                      <button
+                        type="button"
+                        aria-label={`Remove ${doc.name}`}
+                        onClick={() => setAttachedFiles((p) => p.filter((f) => f.id !== doc.id))}
+                        className="ml-1 rounded-full p-0.5 text-muted-foreground hover:text-destructive hover:bg-muted"
+                      >
+                        <X className="size-3" />
                       </button>
                     </div>
                   ))}
+                </div>
+              )}
+
+              {extractingFiles && (
+                <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground bg-muted/40 px-3 py-1.5 rounded-xl">
+                  <Loader2 className="size-3.5 animate-spin text-primary" />
+                  <span>Reading file content…</span>
                 </div>
               )}
 
@@ -426,6 +452,7 @@ export function ProjectWorkspacePage() {
                     <input
                       ref={fileInputRef}
                       type="file"
+                      accept="image/png,image/jpeg,image/webp,image/gif,.pdf,.docx,.xlsx,.pptx,.txt,.md,.json,.csv,.tsv,.py,.js,.ts,.tsx,.jsx,.go,.rs,.sh,.sql,.yaml,.yml"
                       multiple
                       hidden
                       onChange={(e) => void pickComposerFiles(e.target.files)}
@@ -435,6 +462,7 @@ export function ProjectWorkspacePage() {
                       variant="ghost"
                       size="icon-xs"
                       onClick={() => fileInputRef.current?.click()}
+                      disabled={status === "running" || pending.length > 0 || extractingFiles}
                       className="text-muted-foreground hover:text-foreground"
                       title="Attach file to message"
                     >
@@ -500,18 +528,33 @@ export function ProjectWorkspacePage() {
                 ref={projectFileInputRef}
                 type="file"
                 multiple
-                accept=".txt,.md,.pdf,.docx"
+                accept=".txt,.md,.pdf,.docx,.xlsx,.pptx,.csv,.tsv,.json,.yaml,.yml,.py,.js,.ts,.tsx,.jsx,.go,.rs,.sh,.sql"
                 hidden
                 onChange={(e) => void handleProjectFileUpload(e.target.files)}
               />
               <button
                 type="button"
                 onClick={() => projectFileInputRef.current?.click()}
-                className="w-full flex flex-col items-center justify-center gap-1.5 rounded-xl border border-dashed border-border/80 p-4 text-center hover:bg-muted/40 transition-colors"
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  setProjectFileDragging(true);
+                }}
+                onDragLeave={() => setProjectFileDragging(false)}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setProjectFileDragging(false);
+                  void handleProjectFileUpload(e.dataTransfer.files);
+                }}
+                className={cn(
+                  "w-full flex flex-col items-center justify-center gap-1.5 rounded-xl border border-dashed p-4 text-center transition-colors",
+                  projectFileDragging
+                    ? "border-primary bg-primary/5"
+                    : "border-border/80 hover:bg-muted/40"
+                )}
               >
                 <Upload className="size-4 text-muted-foreground" />
                 <span className="text-xs font-medium">Upload project file</span>
-                <span className="text-[10px] text-muted-foreground">PDF, TXT, MD, DOCX</span>
+                <span className="text-[10px] text-muted-foreground">PDF, DOCX, XLSX, PPTX, TXT, MD, CSV</span>
               </button>
             </div>
 
