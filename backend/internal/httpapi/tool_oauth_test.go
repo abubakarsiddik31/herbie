@@ -40,6 +40,17 @@ func (f *fakeAuditStore) ListToolAudits(_ context.Context, userID string, limit 
 	return res, nil
 }
 
+func (f *fakeAuditStore) ListAllToolAudits(_ context.Context, limit int) ([]storage.ToolAuditLog, error) {
+	var res []storage.ToolAuditLog
+	for i := len(f.audits) - 1; i >= 0; i-- {
+		res = append(res, f.audits[i])
+		if len(res) >= limit {
+			break
+		}
+	}
+	return res, nil
+}
+
 func newToolOAuthTestServer(t *testing.T, wfStore *fakeWorkflowStore, auditStore *fakeAuditStore) (*Server, http.Handler, string) {
 	t.Helper()
 	secret := "0123456789abcdef0123456789abcdef"

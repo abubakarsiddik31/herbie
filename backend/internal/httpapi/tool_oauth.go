@@ -434,7 +434,7 @@ func (s *Server) handleToolOAuthCallback(w http.ResponseWriter, r *http.Request)
 
 	code := r.URL.Query().Get("code")
 	state := r.URL.Query().Get("state")
-	if code == "" || state != expectedState {
+	if code == "" || subtle.ConstantTimeCompare([]byte(state), []byte(expectedState)) != 1 {
 		fail("state_mismatch")
 		return
 	}
@@ -737,6 +737,7 @@ func (s *Server) handleToolOAuthDisconnect(w http.ResponseWriter, r *http.Reques
 
 func (s *Server) handleListToolAuditLogs(w http.ResponseWriter, r *http.Request) {
 	userID, _ := userIDFrom(r.Context())
+	role := userRoleFrom(r.Context())
 	if userID == "" {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "login required")
 		return
@@ -754,7 +755,13 @@ func (s *Server) handleListToolAuditLogs(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
-	logs, err := s.deps.Audits.ListToolAudits(r.Context(), userID, limit)
+	var logs []storage.ToolAuditLog
+	var err error
+	if role == "admin" && r.URL.Query().Get("all") == "true" {
+		logs, err = s.deps.Audits.ListAllToolAudits(r.Context(), limit)
+	} else {
+		logs, err = s.deps.Audits.ListToolAudits(r.Context(), userID, limit)
+	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal", "could not list audit logs")
 		return

@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -683,7 +684,7 @@ func (s *Server) handlePublicWebhook(w http.ResponseWriter, r *http.Request) {
 		if providedSecret == "" && strings.HasPrefix(r.Header.Get("Authorization"), "Bearer ") {
 			providedSecret = strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 		}
-		if providedSecret != wf.WebhookSecret {
+		if subtle.ConstantTimeCompare([]byte(providedSecret), []byte(wf.WebhookSecret)) != 1 {
 			writeError(w, http.StatusUnauthorized, "unauthorized", "invalid webhook secret")
 			return
 		}

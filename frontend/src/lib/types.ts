@@ -1,4 +1,4 @@
-export interface User { id: string; email: string }
+export interface User { id: string; email: string; role?: "admin" | "user" | string }
 export interface OAuthProvider { id: string; name: string }
 export interface SharedThread { title: string; messages: ChatMessage[] }
 export interface Conversation {

@@ -22,14 +22,38 @@ func NewFakeUsers() *FakeUsers {
 	return &FakeUsers{byEmail: map[string]auth.UserRecord{}}
 }
 
-func (f *FakeUsers) Create(_ context.Context, email, hash string) (auth.UserRecord, error) {
+func (f *FakeUsers) Create(_ context.Context, email, hash string, role ...string) (auth.UserRecord, error) {
 	if _, ok := f.byEmail[email]; ok {
 		return auth.UserRecord{}, auth.ErrEmailTaken
 	}
-	rec := auth.UserRecord{ID: "u-" + email, Email: email, PasswordHash: hash, HasPassword: true}
+	userRole := "user"
+	if len(role) > 0 && role[0] != "" {
+		userRole = role[0]
+	}
+	rec := auth.UserRecord{ID: "u-" + email, Email: email, PasswordHash: hash, HasPassword: true, Role: userRole, CreatedAt: time.Now()}
 	f.byEmail[email] = rec
 	f.created = append(f.created, rec)
 	return rec, nil
+}
+
+func (f *FakeUsers) Count(_ context.Context) (int, error) {
+	return len(f.created), nil
+}
+
+func (f *FakeUsers) SetRole(_ context.Context, userID, role string) error {
+	for i, rec := range f.created {
+		if rec.ID == userID {
+			rec.Role = role
+			f.created[i] = rec
+			f.byEmail[rec.Email] = rec
+			return nil
+		}
+	}
+	return auth.ErrUserNotFound
+}
+
+func (f *FakeUsers) List(_ context.Context) ([]auth.UserRecord, error) {
+	return f.created, nil
 }
 
 func (f *FakeUsers) ByEmail(_ context.Context, email string) (auth.UserRecord, error) {
@@ -112,11 +136,15 @@ func (f *FakeOAuthStore) FindUserByProvider(_ context.Context, provider, subject
 	return f.users.ByID(context.Background(), id)
 }
 
-func (f *FakeOAuthStore) CreateOAuthUser(_ context.Context, email string) (auth.UserRecord, error) {
+func (f *FakeOAuthStore) CreateOAuthUser(_ context.Context, email string, role ...string) (auth.UserRecord, error) {
 	if _, ok := f.users.byEmail[email]; ok {
 		return auth.UserRecord{}, auth.ErrEmailTaken
 	}
-	rec := auth.UserRecord{ID: "u-" + email, Email: email}
+	userRole := "user"
+	if len(role) > 0 && role[0] != "" {
+		userRole = role[0]
+	}
+	rec := auth.UserRecord{ID: "u-" + email, Email: email, Role: userRole, CreatedAt: time.Now()}
 	f.users.byEmail[email] = rec
 	f.users.created = append(f.users.created, rec)
 	return rec, nil

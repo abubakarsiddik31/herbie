@@ -29,6 +29,11 @@ table "users" {
     type    = text
     null    = true
   }
+  column "role" {
+    type    = text
+    null    = false
+    default = "user"
+  }
   column "default_instructions" {
     type    = text
     null    = false
@@ -45,6 +50,9 @@ table "users" {
   index "users_email_key" {
     unique  = true
     columns = [column.email]
+  }
+  index "idx_users_role" {
+    columns = [column.role]
   }
 }
 

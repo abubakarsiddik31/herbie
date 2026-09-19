@@ -52,6 +52,9 @@ func main() {
 		log.Error("auth", "err", err)
 		os.Exit(1)
 	}
+	if len(cfg.AdminEmails) > 0 {
+		svc.SetAdminEmails(cfg.AdminEmails)
+	}
 	tokens, err := auth.NewTokenMaker(cfg.JWTSecret)
 	if err != nil {
 		log.Error("auth", "err", err)
@@ -162,6 +165,7 @@ func main() {
 		Msgs:       storage.NewMessages(pool),
 		Shares:     storage.NewShares(pool),
 		Profiles:   users,
+		Users:      users,
 		Memories:   storage.NewMemories(pool),
 		Usage:      storage.NewUsage(pool),
 		Tools:      storage.NewTools(pool),

@@ -22,6 +22,26 @@ func TestTokenRoundTrip(t *testing.T) {
 	if err != nil || got != "u-1" {
 		t.Fatalf("Verify = %q, %v", got, err)
 	}
+	sub, role, err := tm.VerifyClaims(token)
+	if err != nil || sub != "u-1" || role != "user" {
+		t.Fatalf("VerifyClaims = %q, %q, %v", sub, role, err)
+	}
+}
+
+func TestTokenWithAdminRole(t *testing.T) {
+	tm, err := NewTokenMaker("0123456789abcdef0123456789abcdef")
+	if err != nil {
+		t.Fatalf("NewTokenMaker: %v", err)
+	}
+	now := time.Now()
+	token, _, err := tm.IssueWithRole("u-admin", "admin", now)
+	if err != nil {
+		t.Fatalf("IssueWithRole: %v", err)
+	}
+	sub, role, err := tm.VerifyClaims(token)
+	if err != nil || sub != "u-admin" || role != "admin" {
+		t.Fatalf("VerifyClaims = %q, %q, %v", sub, role, err)
+	}
 }
 
 func TestTokenSecretTooShort(t *testing.T) {

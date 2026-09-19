@@ -52,10 +52,18 @@ func logRequests(log *slog.Logger, next http.Handler) http.Handler {
 
 type ctxKey int
 
-const userKey ctxKey = 1
+const (
+	userKey ctxKey = 1
+	roleKey ctxKey = 2
+)
 
-func withUser(ctx context.Context, userID string) context.Context {
-	return context.WithValue(ctx, userKey, userID)
+func withUser(ctx context.Context, userID string, role ...string) context.Context {
+	r := "user"
+	if len(role) > 0 && role[0] != "" {
+		r = role[0]
+	}
+	ctx = context.WithValue(ctx, userKey, userID)
+	return context.WithValue(ctx, roleKey, r)
 }
 
 func userIDFrom(ctx context.Context) (string, bool) {
@@ -63,22 +71,43 @@ func userIDFrom(ctx context.Context) (string, bool) {
 	return id, ok
 }
 
-// requireAuth validates the bearer token and puts the user ID on the
+func userRoleFrom(ctx context.Context) string {
+	role, ok := ctx.Value(roleKey).(string)
+	if !ok || role == "" {
+		return "user"
+	}
+	return role
+}
+
+// requireAuth validates the bearer token and puts the user ID and role on the
 // request context for downstream handlers.
 func requireAuth(tokens *auth.TokenMaker, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		header := r.Header.Get("Authorization")
 		token, ok := strings.CutPrefix(header, "Bearer ")
+		token = strings.TrimSpace(token)
 		if !ok || token == "" {
 			writeError(w, http.StatusUnauthorized, "unauthorized", "missing bearer token")
 			return
 		}
-		userID, err := tokens.Verify(token)
+		userID, role, err := tokens.VerifyClaims(token)
 		if err != nil {
 			writeError(w, http.StatusUnauthorized, "unauthorized", "invalid token")
 			return
 		}
-		next.ServeHTTP(w, r.WithContext(withUser(r.Context(), userID)))
+		next.ServeHTTP(w, r.WithContext(withUser(r.Context(), userID, role)))
+	})
+}
+
+// requireRole enforces that the authenticated caller has the required role (e.g. "admin").
+func requireRole(role string, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		userRole := userRoleFrom(r.Context())
+		if userRole != role {
+			writeError(w, http.StatusForbidden, "forbidden", role+" role required")
+			return
+		}
+		next.ServeHTTP(w, r)
 	})
 }
 
@@ -90,7 +119,7 @@ func withCORS(origin string, next http.Handler) http.Handler {
 		w.Header().Set("Access-Control-Allow-Origin", origin)
 		w.Header().Set("Access-Control-Allow-Credentials", "true")
 		w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
 			return

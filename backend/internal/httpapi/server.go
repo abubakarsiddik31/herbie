@@ -32,6 +32,7 @@ type ServerDeps struct {
 	Audits    storage.AuditStore
 	Shares    ShareStore
 	Profiles  ProfileStore
+	Users     UserAdminStore
 	Memories  MemoryStore
 	Convos    ConvoStore
 	Msgs      MsgStore
@@ -183,6 +184,13 @@ func newServer(deps ServerDeps) (*Server, http.Handler) {
 	authed.HandleFunc("DELETE /api/mcp/servers/{id}", s.handleDeleteMCPServer)
 	authed.HandleFunc("POST /api/mcp/servers/test", s.handleTestMCPServer)
 	authed.HandleFunc("POST /api/mcp", s.handleMCPEndpoint)
+
+	// Admin API (RBAC guarded: requires role=admin)
+	authed.Handle("GET /api/admin/users", requireRole("admin", http.HandlerFunc(s.handleAdminListUsers)))
+	authed.Handle("PATCH /api/admin/users/{id}/role", requireRole("admin", http.HandlerFunc(s.handleAdminUpdateUserRole)))
+	authed.Handle("GET /api/admin/audits", requireRole("admin", http.HandlerFunc(s.handleAdminListAudits)))
+	authed.Handle("GET /api/admin/stats", requireRole("admin", http.HandlerFunc(s.handleAdminStats)))
+
 	s.mux.Handle("/api/", requireAuth(deps.Tokens, authed))
 
 	return s, withCORS(deps.Cfg.FrontendOrigin, logRequests(deps.Log, s.mux))

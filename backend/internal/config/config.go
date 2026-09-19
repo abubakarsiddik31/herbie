@@ -27,6 +27,7 @@ type Config struct {
 	AnthropicBaseURL string
 	JWTSecret        string
 	FrontendOrigin   string
+	AdminEmails      []string
 	ChatInputRate    float64 // USD per 1M input tokens (fallback rate)
 	ChatOutputRate   float64 // USD per 1M output tokens (fallback rate)
 
@@ -239,6 +240,15 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 
+	var adminEmails []string
+	if rawAdmin := strings.TrimSpace(os.Getenv("ADMIN_EMAILS")); rawAdmin != "" {
+		for _, e := range strings.Split(rawAdmin, ",") {
+			if trimmed := strings.TrimSpace(e); trimmed != "" {
+				adminEmails = append(adminEmails, trimmed)
+			}
+		}
+	}
+
 	cfg := Config{
 		Port:             env("APP_PORT", "8080"),
 		DatabaseURL:      os.Getenv("DATABASE_URL"),
@@ -251,6 +261,7 @@ func Load() (Config, error) {
 		AnthropicBaseURL: os.Getenv("ANTHROPIC_BASE_URL"),
 		JWTSecret:        os.Getenv("JWT_SECRET"),
 		FrontendOrigin:   env("FRONTEND_ORIGIN", "http://localhost:5173"),
+		AdminEmails:      adminEmails,
 		ChatInputRate:    inputRate,
 		ChatOutputRate:   outputRate,
 

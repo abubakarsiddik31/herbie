@@ -4,11 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/mail"
+	"strings"
 	"time"
 )
 
 var (
 	ErrEmailTaken         = errors.New("email already registered")
+	ErrInvalidEmail       = errors.New("invalid email address")
 	ErrWeakPassword       = errors.New("password must be at least 10 characters")
 	ErrInvalidCredentials = errors.New("invalid email or password")
 	ErrInvalidRefresh     = errors.New("invalid refresh token")
@@ -25,6 +28,8 @@ type UserRecord struct {
 	Email        string
 	PasswordHash string
 	HasPassword  bool
+	Role         string // "admin" or "user"
+	CreatedAt    time.Time
 }
 
 type RefreshRecord struct {
@@ -34,7 +39,7 @@ type RefreshRecord struct {
 }
 
 type UserStore interface {
-	Create(ctx context.Context, email, passwordHash string) (UserRecord, error)
+	Create(ctx context.Context, email, passwordHash string, role ...string) (UserRecord, error)
 	ByEmail(ctx context.Context, email string) (UserRecord, error)
 	ByID(ctx context.Context, id string) (UserRecord, error)
 }
@@ -48,7 +53,7 @@ type RefreshStore interface {
 
 type OAuthStore interface {
 	FindUserByProvider(ctx context.Context, provider, subject string) (UserRecord, error)
-	CreateOAuthUser(ctx context.Context, email string) (UserRecord, error)
+	CreateOAuthUser(ctx context.Context, email string, role ...string) (UserRecord, error)
 	LinkProvider(ctx context.Context, userID, provider, subject string) error
 	StoreCode(ctx context.Context, userID, codeHash string, expiresAt time.Time) error
 	ConsumeCode(ctx context.Context, codeHash string) (string, error)
@@ -63,10 +68,11 @@ type AuthResult struct {
 }
 
 type Service struct {
-	users   UserStore
-	refresh RefreshStore
-	oauth   OAuthStore
-	tokens  *TokenMaker
+	users       UserStore
+	refresh     RefreshStore
+	oauth       OAuthStore
+	tokens      *TokenMaker
+	adminEmails map[string]bool
 }
 
 func NewService(users UserStore, refresh RefreshStore, oauth OAuthStore, secret string) (*Service, error) {
@@ -74,11 +80,70 @@ func NewService(users UserStore, refresh RefreshStore, oauth OAuthStore, secret 
 	if err != nil {
 		return nil, err
 	}
-	return &Service{users: users, refresh: refresh, oauth: oauth, tokens: tm}, nil
+	return &Service{
+		users:       users,
+		refresh:     refresh,
+		oauth:       oauth,
+		tokens:      tm,
+		adminEmails: make(map[string]bool),
+	}, nil
+}
+
+func (s *Service) SetAdminEmails(emails []string) {
+	m := make(map[string]bool, len(emails))
+	for _, e := range emails {
+		m[normalizeEmail(e)] = true
+	}
+	s.adminEmails = m
+}
+
+func (s *Service) isAdminEmail(email string) bool {
+	if s.adminEmails == nil {
+		return false
+	}
+	return s.adminEmails[normalizeEmail(email)]
+}
+
+func (s *Service) isFirstUser(ctx context.Context) bool {
+	if s.users == nil {
+		return false
+	}
+	if counter, ok := s.users.(interface {
+		Count(ctx context.Context) (int, error)
+	}); ok {
+		count, err := counter.Count(ctx)
+		return err == nil && count == 0
+	}
+	return false
+}
+
+func normalizeEmail(email string) string {
+	return strings.TrimSpace(strings.ToLower(email))
+}
+
+func isValidEmail(email string) bool {
+	if len(email) < 3 || len(email) > 254 {
+		return false
+	}
+	parsed, err := mail.ParseAddress(email)
+	if err != nil || parsed.Address != email {
+		return false
+	}
+	at := strings.IndexByte(email, '@')
+	if at <= 0 || at == len(email)-1 {
+		return false
+	}
+	domain := email[at+1:]
+	dot := strings.IndexByte(domain, '.')
+	return dot > 0 && dot < len(domain)-1
 }
 
 func (s *Service) issue(ctx context.Context, user UserRecord) (AuthResult, error) {
-	access, exp, err := s.tokens.Issue(user.ID, time.Now())
+	role := user.Role
+	if role == "" {
+		role = "user"
+	}
+	access, exp, err := s.tokens.IssueWithRole(user.ID, role, time.Now())
 	if err != nil {
 		return AuthResult{}, err
 	}
@@ -93,11 +158,15 @@ func (s *Service) issue(ctx context.Context, user UserRecord) (AuthResult, error
 	return AuthResult{
 		AccessToken: access, AccessExpiresAt: exp,
 		RefreshToken: refresh, RefreshExpiresAt: refreshExp,
-		User: UserRecord{ID: user.ID, Email: user.Email},
+		User: UserRecord{ID: user.ID, Email: user.Email, Role: role},
 	}, nil
 }
 
 func (s *Service) Register(ctx context.Context, email, password string) (AuthResult, error) {
+	email = normalizeEmail(email)
+	if !isValidEmail(email) {
+		return AuthResult{}, ErrInvalidEmail
+	}
 	if len(password) < 10 {
 		return AuthResult{}, ErrWeakPassword
 	}
@@ -105,14 +174,22 @@ func (s *Service) Register(ctx context.Context, email, password string) (AuthRes
 	if err != nil {
 		return AuthResult{}, err
 	}
-	user, err := s.users.Create(ctx, email, hash)
+	role := "user"
+	if s.isAdminEmail(email) || s.isFirstUser(ctx) {
+		role = "admin"
+	}
+	user, err := s.users.Create(ctx, email, hash, role)
 	if err != nil {
 		return AuthResult{}, err
+	}
+	if user.Role == "" {
+		user.Role = role
 	}
 	return s.issue(ctx, user)
 }
 
 func (s *Service) Login(ctx context.Context, email, password string) (AuthResult, error) {
+	email = normalizeEmail(email)
 	user, err := s.users.ByEmail(ctx, email)
 	if err != nil {
 		return AuthResult{}, ErrInvalidCredentials
@@ -123,6 +200,17 @@ func (s *Service) Login(ctx context.Context, email, password string) (AuthResult
 	if err := CheckPassword(user.PasswordHash, password); err != nil {
 		return AuthResult{}, ErrInvalidCredentials
 	}
+	if user.Role == "" {
+		user.Role = "user"
+	}
+	if s.isAdminEmail(email) && user.Role != "admin" {
+		if updater, ok := s.users.(interface {
+			SetRole(ctx context.Context, userID, role string) error
+		}); ok {
+			_ = updater.SetRole(ctx, user.ID, "admin")
+			user.Role = "admin"
+		}
+	}
 	return s.issue(ctx, user)
 }
 
@@ -130,7 +218,19 @@ func (s *Service) Login(ctx context.Context, email, password string) (AuthResult
 // identity signs in; an email matching a password account links it; a new
 // email provisions a passwordless account and links it.
 func (s *Service) OAuthLogin(ctx context.Context, provider, subject, email string) (AuthResult, error) {
+	email = normalizeEmail(email)
 	if user, err := s.oauth.FindUserByProvider(ctx, provider, subject); err == nil {
+		if user.Role == "" {
+			user.Role = "user"
+		}
+		if s.isAdminEmail(email) && user.Role != "admin" {
+			if updater, ok := s.users.(interface {
+				SetRole(ctx context.Context, userID, role string) error
+			}); ok {
+				_ = updater.SetRole(ctx, user.ID, "admin")
+				user.Role = "admin"
+			}
+		}
 		return s.issue(ctx, user)
 	} else if !errors.Is(err, ErrOAuthUnlinked) {
 		return AuthResult{}, err
@@ -139,13 +239,31 @@ func (s *Service) OAuthLogin(ctx context.Context, provider, subject, email strin
 		if err := s.oauth.LinkProvider(ctx, existing.ID, provider, subject); err != nil {
 			return AuthResult{}, err
 		}
+		if existing.Role == "" {
+			existing.Role = "user"
+		}
+		if s.isAdminEmail(email) && existing.Role != "admin" {
+			if updater, ok := s.users.(interface {
+				SetRole(ctx context.Context, userID, role string) error
+			}); ok {
+				_ = updater.SetRole(ctx, existing.ID, "admin")
+				existing.Role = "admin"
+			}
+		}
 		return s.issue(ctx, existing)
 	} else if !errors.Is(err, ErrUserNotFound) && !errors.Is(err, ErrInvalidCredentials) {
 		return AuthResult{}, err
 	}
-	user, err := s.oauth.CreateOAuthUser(ctx, email)
+	role := "user"
+	if s.isAdminEmail(email) || s.isFirstUser(ctx) {
+		role = "admin"
+	}
+	user, err := s.oauth.CreateOAuthUser(ctx, email, role)
 	if err != nil {
 		return AuthResult{}, err
+	}
+	if user.Role == "" {
+		user.Role = role
 	}
 	if err := s.oauth.LinkProvider(ctx, user.ID, provider, subject); err != nil {
 		return AuthResult{}, err
@@ -206,14 +324,21 @@ func (s *Service) Refresh(ctx context.Context, refreshToken string) (AuthResult,
 		}
 		return AuthResult{}, fmt.Errorf("rotate refresh token: %w", err)
 	}
-	access, exp, err := s.tokens.Issue(user.ID, time.Now())
+	role := user.Role
+	if role == "" {
+		role = "user"
+	}
+	if s.isAdminEmail(user.Email) {
+		role = "admin"
+	}
+	access, exp, err := s.tokens.IssueWithRole(user.ID, role, time.Now())
 	if err != nil {
 		return AuthResult{}, err
 	}
 	return AuthResult{
 		AccessToken: access, AccessExpiresAt: exp,
 		RefreshToken: newToken, RefreshExpiresAt: newExp,
-		User: UserRecord{ID: user.ID, Email: user.Email},
+		User: UserRecord{ID: user.ID, Email: user.Email, Role: role},
 	}, nil
 }
 

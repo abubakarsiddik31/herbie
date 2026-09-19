@@ -25,6 +25,8 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case errors.Is(err, auth.ErrEmailTaken):
 			writeError(w, http.StatusConflict, "email_taken", "that email is already registered")
+		case errors.Is(err, auth.ErrInvalidEmail):
+			writeError(w, http.StatusBadRequest, "invalid_email", "invalid email address format")
 		case errors.Is(err, auth.ErrWeakPassword):
 			writeError(w, http.StatusBadRequest, "weak_password", "password must be at least 10 characters")
 		default:
@@ -32,10 +34,14 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	role := res.User.Role
+	if role == "" {
+		role = "user"
+	}
 	s.setRefreshCookie(w, r, res)
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"accessToken": res.AccessToken,
-		"user":        map[string]string{"id": res.User.ID, "email": res.User.Email},
+		"user":        map[string]string{"id": res.User.ID, "email": res.User.Email, "role": role},
 	})
 }
 
@@ -50,10 +56,14 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "invalid_credentials", "invalid email or password")
 		return
 	}
+	role := res.User.Role
+	if role == "" {
+		role = "user"
+	}
 	s.setRefreshCookie(w, r, res)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"accessToken": res.AccessToken,
-		"user":        map[string]string{"id": res.User.ID, "email": res.User.Email},
+		"user":        map[string]string{"id": res.User.ID, "email": res.User.Email, "role": role},
 	})
 }
 
@@ -68,10 +78,14 @@ func (s *Server) handleRefresh(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "refresh rejected")
 		return
 	}
+	role := res.User.Role
+	if role == "" {
+		role = "user"
+	}
 	s.setRefreshCookie(w, r, res)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"accessToken": res.AccessToken,
-		"user":        map[string]string{"id": res.User.ID, "email": res.User.Email},
+		"user":        map[string]string{"id": res.User.ID, "email": res.User.Email, "role": role},
 	})
 }
 
@@ -86,7 +100,8 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 	id, _ := userIDFrom(r.Context())
-	writeJSON(w, http.StatusOK, map[string]string{"id": id})
+	role := userRoleFrom(r.Context())
+	writeJSON(w, http.StatusOK, map[string]string{"id": id, "role": role})
 }
 
 // setRefreshCookie sends the opaque refresh token as an HttpOnly cookie

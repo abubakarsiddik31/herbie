@@ -28,6 +28,7 @@ type ToolAuditLog struct {
 type AuditStore interface {
 	RecordToolAudit(ctx context.Context, log ToolAuditLog) error
 	ListToolAudits(ctx context.Context, userID string, limit int) ([]ToolAuditLog, error)
+	ListAllToolAudits(ctx context.Context, limit int) ([]ToolAuditLog, error)
 }
 
 type Audits struct {
@@ -93,6 +94,34 @@ func (a *Audits) ListToolAudits(ctx context.Context, userID string, limit int) (
 	)
 	if err != nil {
 		return nil, fmt.Errorf("list tool audit logs: %w", err)
+	}
+	defer rows.Close()
+
+	var logs []ToolAuditLog
+	for rows.Next() {
+		l, err := scanToolAuditLog(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan tool audit log: %w", err)
+		}
+		logs = append(logs, l)
+	}
+	return logs, rows.Err()
+}
+
+func (a *Audits) ListAllToolAudits(ctx context.Context, limit int) ([]ToolAuditLog, error) {
+	if a == nil || a.pool == nil {
+		return nil, nil
+	}
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
+
+	rows, err := a.pool.Query(ctx,
+		`SELECT `+auditColumns+` FROM tool_audit_logs ORDER BY created_at DESC LIMIT $1`,
+		limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list all tool audit logs: %w", err)
 	}
 	defer rows.Close()
 

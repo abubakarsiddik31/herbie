@@ -173,3 +173,66 @@ func TestOAuthCodeSingleUse(t *testing.T) {
 		t.Fatalf("expected ErrInvalidOAuthCode, got %v", err)
 	}
 }
+
+func TestEmailValidationAndNormalization(t *testing.T) {
+	ctx := context.Background()
+	svc := newTestService()
+
+	// Invalid emails
+	for _, bad := range []string{"", "plainaddress", "#@%^%#$@#$@#.com", "@example.com", "Joe Smith <email@example.com>"} {
+		if _, err := svc.Register(ctx, bad, "longenough1"); !errors.Is(err, auth.ErrInvalidEmail) {
+			t.Errorf("expected ErrInvalidEmail for %q, got %v", bad, err)
+		}
+	}
+
+	// Whitespace and case normalization
+	res, err := svc.Register(ctx, "  User@Domain.COM  ", "longenough1")
+	if err != nil {
+		t.Fatalf("Register normalized email: %v", err)
+	}
+	if res.User.Email != "user@domain.com" {
+		t.Fatalf("expected normalized email user@domain.com, got %q", res.User.Email)
+	}
+
+	// Login with different case and spacing
+	loginRes, err := svc.Login(ctx, "USER@DOMAIN.com ", "longenough1")
+	if err != nil {
+		t.Fatalf("Login with case/space variance: %v", err)
+	}
+	if loginRes.User.ID != res.User.ID {
+		t.Fatalf("user ID mismatch")
+	}
+}
+
+func TestFirstUserAdminAndRBAC(t *testing.T) {
+	ctx := context.Background()
+	svc := newTestService()
+
+	// First registered user becomes admin
+	first, err := svc.Register(ctx, "admin@test.dev", "longenough1")
+	if err != nil {
+		t.Fatalf("first user: %v", err)
+	}
+	if first.User.Role != "admin" {
+		t.Fatalf("first user should be admin, got %q", first.User.Role)
+	}
+
+	// Second registered user is regular user
+	second, err := svc.Register(ctx, "regular@test.dev", "longenough1")
+	if err != nil {
+		t.Fatalf("second user: %v", err)
+	}
+	if second.User.Role != "user" {
+		t.Fatalf("second user should be user, got %q", second.User.Role)
+	}
+
+	// Configured admin emails
+	svc.SetAdminEmails([]string{"vip@test.dev"})
+	vip, err := svc.Register(ctx, "vip@test.dev", "longenough1")
+	if err != nil {
+		t.Fatalf("vip user: %v", err)
+	}
+	if vip.User.Role != "admin" {
+		t.Fatalf("vip user should be admin, got %q", vip.User.Role)
+	}
+}

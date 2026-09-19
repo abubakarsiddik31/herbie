@@ -21,19 +21,25 @@ func NewOAuthIdentities(pool *pgxpool.Pool) *OAuthIdentities { return &OAuthIden
 func scanUser(row pgx.Row) (auth.UserRecord, error) {
 	var rec auth.UserRecord
 	var hash *string
-	if err := row.Scan(&rec.ID, &rec.Email, &hash); err != nil {
+	var role *string
+	if err := row.Scan(&rec.ID, &rec.Email, &hash, &role); err != nil {
 		return auth.UserRecord{}, err
 	}
 	if hash != nil {
 		rec.PasswordHash = *hash
 		rec.HasPassword = true
 	}
+	if role != nil && *role != "" {
+		rec.Role = *role
+	} else {
+		rec.Role = "user"
+	}
 	return rec, nil
 }
 
 func (o *OAuthIdentities) FindUserByProvider(ctx context.Context, provider, subject string) (auth.UserRecord, error) {
 	rec, err := scanUser(o.pool.QueryRow(ctx,
-		`SELECT u.id, u.email::text, u.password_hash FROM users u
+		`SELECT u.id, u.email::text, u.password_hash, u.role FROM users u
 		 JOIN oauth_accounts a ON a.user_id = u.id
 		 WHERE a.provider = $1 AND a.provider_subject = $2`, provider, subject))
 	if err != nil {
@@ -45,10 +51,14 @@ func (o *OAuthIdentities) FindUserByProvider(ctx context.Context, provider, subj
 	return rec, nil
 }
 
-func (o *OAuthIdentities) CreateOAuthUser(ctx context.Context, email string) (auth.UserRecord, error) {
+func (o *OAuthIdentities) CreateOAuthUser(ctx context.Context, email string, role ...string) (auth.UserRecord, error) {
+	userRole := "user"
+	if len(role) > 0 && role[0] != "" {
+		userRole = role[0]
+	}
 	rec, err := scanUser(o.pool.QueryRow(ctx,
-		`INSERT INTO users (email, password_hash) VALUES ($1, NULL)
-		 RETURNING id, email::text, password_hash`, email))
+		`INSERT INTO users (email, password_hash, role) VALUES ($1, NULL, $2)
+		 RETURNING id, email::text, password_hash, role`, email, userRole))
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
