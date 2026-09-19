@@ -19,7 +19,7 @@ Built for developers and power users who want multi-model freedom, visual workfl
 [![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-v4-06B6D4?logo=tailwindcss&logoColor=white)](https://tailwindcss.com/)
 [![Docker Compose](https://img.shields.io/badge/Docker_Compose-Ready-2496ED?logo=docker&logoColor=white)](deploy/docker-compose.yml)
 
-[Quickstart](#quickstart) • [Features](#features) • [Architecture](#architecture) • [Workflows](#visual-workflow-automation) • [Production RAG](#production-rag) • [Tools & Search](#tools--built-in-web-search) • [Contributing](CONTRIBUTING.md)
+[Why Herbie?](#why-herbie) • [Architecture](#architecture) • [Quickstart](#quickstart) • [Integrations](#optional-integrations) • [Contributing](CONTRIBUTING.md)
 
 </div>
 
@@ -31,72 +31,18 @@ SaaS AI subscriptions lock you into a single provider, hide token costs, silo yo
 
 Under the hood, Herbie pairs a high-concurrency Go backend powered by [golem](https://github.com/abubakarsiddik31/golem) with an instant React 19 + TypeScript frontend.
 
-```text
-┌──────────────────────────────────────────────────────────────────────────────┐
-│                                   HERBIE                                     │
-├──────────────────────────────────────────────────────────────────────────────┤
-│  ⚡ Multi-Model Chat     │  📁 Scoped Projects     │  ⚡ Visual Workflows     │
-│  Gemini · OpenAI · Claude│  Custom prompt + docs   │  n8n-style canvas nodes │
-├──────────────────────────┼─────────────────────────┼─────────────────────────┤
-│  🔌 Curated MCP Apps     │  🛠️ Custom API Tools    │  📚 Production RAG       │
-│  Model Context Protocol  │  Human-in-the-loop      │  Weaviate · Re-ranking  │
-├──────────────────────────┼─────────────────────────┼─────────────────────────┤
-│  📊 Micro-USD Metering   │  🎙️ Multimodal & Voice  │  🔒 Privacy & Security  │
-│  Sub-cent spend ledger   │  Images + Web Speech    │  In-memory JWT + Rotate │
-└──────────────────────────────────────────────────────────────────────────────┘
-```
-
----
-
-## Features
-
-### 🌐 Multi-Model Freedom
-- **Per-Conversation Model Selection**: Chat with **Google Gemini** (Gemini 2.5 Flash, 3.5 Flash), **OpenAI** (GPT-4o, GPT-4o-mini), **Anthropic** (Claude 3.5 Sonnet), or custom **local proxy endpoints** (Ollama, vLLM, LiteLLM).
-- **Independent Context & Settings**: Customize system instructions, temperature, and model parameters on any conversation thread at any time.
-- **Deep Thread History**: URL-addressable threads (`/chat/:id`), message editing with downstream history truncation, response regeneration, and single-click markdown export.
-
-### 📁 Claude-Style Project Workspaces
-- Organize conversations, documents, and reference materials into isolated project spaces.
-- Set workspace-level instructions and pin relevant project files that automatically feed the agent's context window.
-
-### ⚡ Visual Workflow Automation (Canvas Nodes)
-- Node-based automation canvas powered by `@xyflow/react` on `/workflows`.
-- **Triggers**: Manual execution, test payloads, or unique incoming Webhook URLs (`/api/webhooks/:slug` with optional secret verification).
-- **Core Nodes**: Universal HTTP requests (GET/POST/PUT/DELETE with Basic, Bearer, or API-key auth), Golem custom tools bridge, Slack, Discord, and GitHub issue/comment actions.
-- **AI Transformations**: Prompt catalog models with templating and structured JSON outputs.
-- **Agent Tool Bridge**: Flip **"Expose as Agent Tool"** on any workflow so the main chat assistant can autonomously run your workflow as a native tool during conversation!
-
-### 🔌 1-Click MCP (Model Context Protocol) Apps
-- Connect external capabilities seamlessly via standard Model Context Protocol.
-- Built-in curated catalog to link and unlink integrations with single-click OAuth popup authorization.
-- Deduplicated tool namespaces with active status indicators directly in the chat sidebar.
-
-### 🛠️ Custom Tools & Built-in Web Search
-- **API Tool Builder**: Register any HTTP endpoint with JSON parameters, static headers, and path/query parameter binding. Includes a gallery of 18 pre-built templates (Weather, GitHub, Hacker News, Wikipedia, Crypto rates, etc.).
-- **Human-in-the-Loop Safety**: Enable *"Ask before running"* to pause agent execution and prompt you with an interactive Approve/Deny card before making external requests.
-- **Built-in Web Search**: First-class web search support powered by **Wigolo** (local-first, keyless on-device engine), **Tavily**, or **Brave Search** with verified markdown citations.
-- **SSRF Hardening**: Strict DNS-level validation blocks loopback, private RFC-1918, and link-local destinations.
-
-### 📚 Production RAG (Retrieval-Augmented Generation)
-- **Multi-Format Extraction**: Ingest PDF, DOCX, Markdown, and TXT files (up to 20 MB).
-- **Hybrid Vector + Keyword Search**: Dense vectors in Weaviate (`gemini-embedding-001`, 768 dims) combined with BM25 keyword matching.
-- **Listwise LLM Re-Ranking**: Filters candidate chunks with listwise re-ranking before injecting into the prompt context.
-- **Strict Bracket Citations**: Verified `[n] (Doc § Heading, p.N)` citations referencing only chunks actually retrieved, paired with interactive source cards.
-- **Hot History Compaction**: Threads exceeding token thresholds automatically compress older turns without losing context.
-
-### 📊 Exact Token & Spend Metering
-- Real-time token counters on every assistant response.
-- Micro-USD spend ledger calculating prompt, completion, embedding, and re-ranking costs down to **$0.00001**.
-- Usage dashboard featuring 30-day burn charts, per-model consumption tables, and document storage metrics.
-
-### 🎙️ Multimodal Vision & Client-Side Voice
-- Attach up to 4 images (PNG, JPEG, WebP, GIF, ≤ 4 MB each) per prompt for vision-capable models.
-- Hands-free dictation using the browser's native Web Speech API (speech processing stays completely local to your browser).
-
-### 🔒 Enterprise Security Core
-- **In-Memory JWT**: Short-lived (15 min) HS256 access tokens stored only in frontend memory to prevent XSS credential exfiltration.
-- **HttpOnly Rotating Refresh**: 30-day opaque refresh cookies (`SameSite=Lax`, path `/api/auth`) with automatic single-use rotation and family reuse revocation.
-- **Silent Refresh on Reload**: Seamless session restoration on browser refresh without leaking tokens to `localStorage`.
+| Capability | What It Delivers | Highlights & Details |
+|---|---|---|
+| **⚡ Multi-Model Chat** | Per-thread model selection across cloud providers or local models | Google Gemini, OpenAI, Anthropic Claude, or local Ollama/vLLM endpoints; custom temperature & system prompts |
+| **📁 Project Workspaces** | Scoped workspaces with isolated knowledge and custom guidelines | Dedicated chat threads, persistent reference docs, and automatic context injection |
+| **⚡ Visual Workflows** | Node-based automation canvas powered by `@xyflow/react` | Webhook triggers, universal HTTP requests, LLM transformations, and branch logic |
+| **🤖 Agent Tool Bridge** | Seamless integration between workflows and conversational chat | "Expose as Agent Tool" allows the chat assistant to autonomously execute workflows |
+| **🛠️ Custom API Tools** | Register HTTP APIs with typed parameters and safety controls | 18 pre-built templates, SSRF DNS protection, and interactive Approve/Deny approval cards |
+| **🔌 Curated MCP Apps** | 1-click integrations via standard Model Context Protocol (MCP) | GitHub, Slack, Google Calendar, Web Reader, Code Sandbox, and custom external MCP servers |
+| **📚 Production RAG** | Hybrid vector + keyword retrieval with listwise LLM re-ranking | Ingest PDF, DOCX, MD, and TXT via Weaviate & MinIO with verified inline bracket citations `[n]` |
+| **📊 Micro-USD Metering** | Granular sub-cent cost tracking across models and runs | Per-run token counters, 5-decimal USD ledger ($0.00001), and 30-day burn charts |
+| **🎙️ Multimodal & Voice** | Vision attachment input and client-side speech-to-text | Up to 4 image attachments per prompt; native browser Web Speech API dictation |
+| **🔒 Privacy & Security** | Self-hosted control running entirely on your infrastructure | In-memory access tokens, HttpOnly rotating refresh cookies, and AES-256-GCM vault encryption |
 
 ---
 
