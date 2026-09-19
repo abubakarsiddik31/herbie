@@ -3,12 +3,17 @@ import { Link, useLocation, useNavigate } from "react-router";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
+  Calendar,
+  ChevronDown,
   FolderGit2,
   Gauge,
+  GitBranch,
+  Globe,
   LogOut,
   MessageSquare,
   PanelLeftClose,
   Pencil,
+  Plug,
   Plus,
   Search,
   Settings,
@@ -43,7 +48,9 @@ import { ShareDialog } from "@/features/chat/ShareDialog";
 import { useConversations, useDeleteConversation } from "@/features/chat/useConversations";
 import { useTools } from "@/features/tools/useTools";
 import { useProjects } from "@/features/projects/useProjects";
-import { useWorkflows } from "@/features/workflows/useWorkflows";
+import { useToolOAuthProviders, useWorkflows } from "@/features/workflows/useWorkflows";
+import { useMCPServers } from "@/features/mcp/useMCPServers";
+import { MCPServersDialog } from "@/features/mcp/MCPServersDialog";
 import { useSidebar } from "./SidebarContext";
 
 const GROUP_ORDER = ["Today", "Yesterday", "Previous 7 days", "Older"] as const;
@@ -87,7 +94,20 @@ export function AppSidebar() {
   const { data: tools } = useTools();
   const { data: projects } = useProjects();
   const { data: workflows } = useWorkflows();
+  const { data: oauthProviders } = useToolOAuthProviders();
+  const { data: mcpServers } = useMCPServers();
+  const [mcpDialogOpen, setMcpDialogOpen] = useState(false);
+  const [appsExpanded, setAppsExpanded] = useState(true);
   const deleteConversation = useDeleteConversation();
+
+  const gcalConnected = oauthProviders?.find((p) => p.id === "google_calendar")?.connected;
+  const ghConnected = oauthProviders?.find((p) => p.id === "github")?.connected;
+  const slackConnected = oauthProviders?.find((p) => p.id === "slack")?.connected;
+
+  function handleTriggerApp(mention: string) {
+    setMobileOpen(false);
+    navigate(`/chat?mention=${mention}`);
+  }
 
   const renameMutation = useMutation({
     mutationFn: ({ id, title }: { id: string; title: string }) =>
@@ -286,6 +306,150 @@ export function AppSidebar() {
               </Badge>
             )}
           </Link>
+
+          {/* Apps & MCP in the same area as Projects and Workflows */}
+          <div className="space-y-0.5">
+            <div
+              className={cn(
+                "flex items-center justify-between rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors group",
+                appsExpanded
+                  ? "bg-sidebar-accent/60 text-sidebar-accent-foreground font-semibold"
+                  : "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
+              )}
+            >
+              <button
+                type="button"
+                onClick={() => setAppsExpanded(!appsExpanded)}
+                className="flex items-center gap-2.5 flex-1 text-left"
+              >
+                <Plug className="size-3.5 shrink-0 text-purple-500" />
+                <span className="flex-1">Apps & MCP</span>
+                <ChevronDown
+                  className={cn(
+                    "size-3 text-muted-foreground/70 transition-transform duration-200",
+                    appsExpanded && "rotate-180"
+                  )}
+                />
+              </button>
+              <div className="flex items-center gap-1">
+                <Badge variant="secondary" className="px-1.5 py-0 text-[10px] font-mono h-4">
+                  {(gcalConnected ? 1 : 0) + (ghConnected ? 1 : 0) + (slackConnected ? 1 : 0) + 1 + (mcpServers?.filter((s) => s.enabled).length ?? 0)}
+                </Badge>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setMcpDialogOpen(true);
+                  }}
+                  className="p-0.5 rounded text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100 transition-opacity"
+                  title="Add / Configure MCP Servers"
+                >
+                  <Plus className="size-3" />
+                </button>
+              </div>
+            </div>
+
+            {appsExpanded && (
+              <div className="ml-3 pl-2.5 border-l border-sidebar-border/60 py-1 space-y-0.5 animate-in fade-in duration-150">
+                {/* Google Calendar */}
+                <button
+                  type="button"
+                  onClick={() => handleTriggerApp("calendar")}
+                  className="flex w-full items-center justify-between rounded-md px-2 py-1 text-[11px] text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-foreground group"
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    <Calendar className="size-3 shrink-0 text-sky-500" />
+                    <span className="truncate">Google Calendar</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[10px] font-mono text-muted-foreground opacity-0 group-hover:opacity-100">@calendar</span>
+                    <span
+                      className={cn(
+                        "size-1.5 rounded-full",
+                        gcalConnected ? "bg-emerald-500 shadow-[0_0_4px_rgba(16,185,129,0.5)]" : "bg-muted-foreground/40"
+                      )}
+                      title={gcalConnected ? "Connected" : "Not connected"}
+                    />
+                  </div>
+                </button>
+
+                {/* GitHub */}
+                <button
+                  type="button"
+                  onClick={() => handleTriggerApp("github")}
+                  className="flex w-full items-center justify-between rounded-md px-2 py-1 text-[11px] text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-foreground group"
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    <GitBranch className="size-3 shrink-0 text-neutral-700 dark:text-neutral-300" />
+                    <span className="truncate">GitHub</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[10px] font-mono text-muted-foreground opacity-0 group-hover:opacity-100">@github</span>
+                    <span
+                      className={cn(
+                        "size-1.5 rounded-full",
+                        ghConnected ? "bg-emerald-500 shadow-[0_0_4px_rgba(16,185,129,0.5)]" : "bg-muted-foreground/40"
+                      )}
+                      title={ghConnected ? "Connected" : "Not connected"}
+                    />
+                  </div>
+                </button>
+
+                {/* Slack */}
+                <button
+                  type="button"
+                  onClick={() => handleTriggerApp("slack")}
+                  className="flex w-full items-center justify-between rounded-md px-2 py-1 text-[11px] text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-foreground group"
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    <MessageSquare className="size-3 shrink-0 text-emerald-500" />
+                    <span className="truncate">Slack</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[10px] font-mono text-muted-foreground opacity-0 group-hover:opacity-100">@slack</span>
+                    <span
+                      className={cn(
+                        "size-1.5 rounded-full",
+                        slackConnected ? "bg-emerald-500 shadow-[0_0_4px_rgba(16,185,129,0.5)]" : "bg-muted-foreground/40"
+                      )}
+                      title={slackConnected ? "Connected" : "Not connected"}
+                    />
+                  </div>
+                </button>
+
+                {/* Web Search */}
+                <button
+                  type="button"
+                  onClick={() => handleTriggerApp("web")}
+                  className="flex w-full items-center justify-between rounded-md px-2 py-1 text-[11px] text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-foreground group"
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    <Globe className="size-3 shrink-0 text-cyan-500" />
+                    <span className="truncate">Web Search</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[10px] font-mono text-muted-foreground opacity-0 group-hover:opacity-100">@web</span>
+                    <span className="size-1.5 rounded-full bg-cyan-500" title="Built-in" />
+                  </div>
+                </button>
+
+                {/* MCP External Servers */}
+                <button
+                  type="button"
+                  onClick={() => setMcpDialogOpen(true)}
+                  className="flex w-full items-center justify-between rounded-md px-2 py-1 text-[11px] text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-foreground group"
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    <Plug className="size-3 shrink-0 text-purple-500" />
+                    <span className="truncate">MCP Servers</span>
+                  </div>
+                  <Badge variant="outline" className="px-1 py-0 text-[9px] font-mono h-3.5">
+                    {mcpServers?.filter((s) => s.enabled).length ?? 0} active
+                  </Badge>
+                </button>
+              </div>
+            )}
+          </div>
 
           <Link
             to="/tools"
@@ -496,6 +660,9 @@ export function AppSidebar() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* MCP Servers Dialog */}
+      <MCPServersDialog open={mcpDialogOpen} onOpenChange={setMcpDialogOpen} />
 
       {/* Share Dialog */}
       <ShareDialog conversation={sharing} onOpenChange={(open) => { if (!open) setSharing(null); }} />

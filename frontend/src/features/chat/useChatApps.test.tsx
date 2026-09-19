@@ -51,6 +51,7 @@ const server = setupServer(
     }),
   ),
   http.get("*/api/tools", () => HttpResponse.json([])),
+  http.get("*/api/mcp/servers", () => HttpResponse.json({ servers: [] })),
 );
 
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
