@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 )
@@ -149,4 +150,103 @@ func TestDecodeBingTrackerURL(t *testing.T) {
 	if decodeBingTrackerURL(direct) != direct {
 		t.Errorf("plain url changed: %q", decodeBingTrackerURL(direct))
 	}
+}
+
+func TestWigoloSearchSuccess(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Errorf("expected POST, got %s", r.Method)
+		}
+		if r.URL.Path != "/v1/search" {
+			t.Errorf("expected /v1/search, got %s", r.URL.Path)
+		}
+		if r.Header.Get("Authorization") != "Bearer secret-token" {
+			t.Errorf("unexpected auth header: %s", r.Header.Get("Authorization"))
+		}
+		var req struct {
+			Query string `json:"query"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		if req.Query != "ai agents news" {
+			t.Errorf("unexpected query: %s", req.Query)
+		}
+
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"results": []map[string]string{
+				{
+					"title":   "AI Agent Breakthroughs",
+					"url":     "https://example.com/ai-agents",
+					"snippet": "New developments in multi-agent orchestration.",
+				},
+			},
+		})
+	}))
+	defer ts.Close()
+
+	s := New(Config{
+		Provider: "wigolo",
+		BaseURL:  ts.URL,
+		APIKey:   "secret-token",
+	})
+	results, err := s.Search(context.Background(), "ai agents news")
+	if err != nil {
+		t.Fatalf("search error: %v", err)
+	}
+	if len(results) != 1 || results[0].Title != "AI Agent Breakthroughs" {
+		t.Fatalf("unexpected results: %+v", results)
+	}
+	if results[0].URL != "https://example.com/ai-agents" {
+		t.Errorf("unexpected url: %s", results[0].URL)
+	}
+}
+
+func TestWigoloSearchEvidenceFallback(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"results": []any{},
+			"evidence": []map[string]string{
+				{
+					"title":   "Evidence Item",
+					"url":     "https://example.com/evidence",
+					"excerpt": "Evidence excerpt here.",
+				},
+			},
+		})
+	}))
+	defer ts.Close()
+
+	s := New(Config{
+		Provider: "wigolo",
+		BaseURL:  ts.URL,
+	})
+	results, err := s.Search(context.Background(), "fallback query")
+	if err != nil {
+		t.Fatalf("search error: %v", err)
+	}
+	if len(results) != 1 || results[0].Title != "Evidence Item" {
+		t.Fatalf("unexpected fallback results: %+v", results)
+	}
+	if results[0].Snippet != "Evidence excerpt here." {
+		t.Errorf("unexpected snippet: %s", results[0].Snippet)
+	}
+}
+
+func TestWigoloLive(t *testing.T) {
+	if os.Getenv("WIGOLO_LIVE") != "1" {
+		t.Skip("skipping live wigolo test; set WIGOLO_LIVE=1 to run")
+	}
+	s := New(Config{
+		Provider: "wigolo",
+		BaseURL:  "http://localhost:3333",
+	})
+	results, err := s.Search(context.Background(), "AI agents news")
+	if err != nil {
+		t.Fatalf("live search failed: %v", err)
+	}
+	if len(results) == 0 {
+		t.Fatal("expected at least 1 result")
+	}
+	t.Logf("Got %d live results, first title: %s", len(results), results[0].Title)
 }

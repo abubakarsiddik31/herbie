@@ -26,12 +26,16 @@ type ModelSpec struct {
 // model is the first entry. Adding a row here is all it takes to expose a
 // new model, provided the provider key is configured.
 var catalog = []ModelSpec{
-	{ID: "gemini-2.5-flash", Provider: "gemini", Label: "Gemini 2.5 Flash", InputPerM: 0.30, OutputPerM: 2.50},
-	{ID: "gemini-2.5-pro", Provider: "gemini", Label: "Gemini 2.5 Pro", InputPerM: 1.25, OutputPerM: 10.00},
+	{ID: "gemini-3.5-flash", Provider: "gemini", Label: "Gemini 3.5 Flash", InputPerM: 0.30, OutputPerM: 2.50},
+	{ID: "gemini-3.5-pro", Provider: "gemini", Label: "Gemini 3.5 Pro", InputPerM: 1.25, OutputPerM: 10.00},
+	{ID: "gemma-3-27b-it", Provider: "gemini", Label: "Gemma 3 27B", InputPerM: 0.20, OutputPerM: 1.50},
+	{ID: "gemma-3-12b-it", Provider: "gemini", Label: "Gemma 3 12B", InputPerM: 0.10, OutputPerM: 0.80},
 	{ID: "gpt-5", Provider: "openai", Label: "GPT-5", InputPerM: 1.25, OutputPerM: 10.00},
 	{ID: "gpt-4.1", Provider: "openai", Label: "GPT-4.1", InputPerM: 2.00, OutputPerM: 8.00},
 	{ID: "claude-sonnet-4-5", Provider: "anthropic", Label: "Claude Sonnet 4.5", InputPerM: 3.00, OutputPerM: 15.00},
 	{ID: "claude-haiku-4-5", Provider: "anthropic", Label: "Claude Haiku 4.5", InputPerM: 1.00, OutputPerM: 5.00},
+	{ID: "gemini-2.5-flash", Provider: "gemini", Label: "Gemini 2.5 Flash", InputPerM: 0.30, OutputPerM: 2.50},
+	{ID: "gemini-2.5-pro", Provider: "gemini", Label: "Gemini 2.5 Pro", InputPerM: 1.25, OutputPerM: 10.00},
 }
 
 // Catalog returns the full curated model list in dropdown order.

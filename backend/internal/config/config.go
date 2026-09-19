@@ -197,6 +197,10 @@ func Load() (Config, error) {
 	wsKey := os.Getenv("WEB_SEARCH_API_KEY")
 	tavilyKey := os.Getenv("TAVILY_API_KEY")
 	braveKey := os.Getenv("BRAVE_API_KEY")
+	wigoloToken := os.Getenv("WIGOLO_API_TOKEN")
+	wigoloURL := os.Getenv("WIGOLO_URL")
+	wigoloBin := env("WIGOLO_BIN", os.Getenv("WIGOLO_PATH"))
+
 	if tavilyKey != "" && wsKey == "" {
 		wsKey = tavilyKey
 		if wsProvider == "" {
@@ -207,14 +211,29 @@ func Load() (Config, error) {
 		if wsProvider == "" {
 			wsProvider = "brave"
 		}
+	} else if wigoloToken != "" && wsKey == "" {
+		wsKey = wigoloToken
 	}
+
 	if wsProvider == "" {
-		if wsKey != "" {
+		if wigoloURL != "" || wigoloBin != "" {
+			wsProvider = "wigolo"
+		} else if wsKey != "" {
 			wsProvider = "tavily"
 		} else {
 			wsProvider = "free"
 		}
 	}
+
+	wsBaseURL := os.Getenv("WEB_SEARCH_BASE_URL")
+	if wsBaseURL == "" && wsProvider == "wigolo" {
+		if wigoloURL != "" {
+			wsBaseURL = wigoloURL
+		} else {
+			wsBaseURL = "http://localhost:3333"
+		}
+	}
+
 	wsTimeout, err := envInt("WEB_SEARCH_TIMEOUT", 15)
 	if err != nil {
 		return Config{}, err
@@ -269,7 +288,8 @@ func Load() (Config, error) {
 		WebSearch: websearch.Config{
 			Provider: wsProvider,
 			APIKey:   wsKey,
-			BaseURL:  os.Getenv("WEB_SEARCH_BASE_URL"),
+			BaseURL:  wsBaseURL,
+			BinPath:  wigoloBin,
 			Timeout:  time.Duration(wsTimeout) * time.Second,
 		},
 		WebSearchRequireApproval: envBool("WEB_SEARCH_REQUIRE_APPROVAL", false),

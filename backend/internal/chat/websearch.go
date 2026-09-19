@@ -40,6 +40,10 @@ func WebSearchTool(searcher websearch.Searcher, requireApproval bool) tool.Tool[
 				return tool.Result{}, &model.ModelRetry{Err: fmt.Errorf(`provide a non-empty "query" string`)}
 			}
 			query := strings.TrimSpace(a.Query)
+			query = strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(query, "@web"), ":"))
+			if query == "" {
+				return tool.Result{}, &model.ModelRetry{Err: fmt.Errorf(`provide a non-empty "query" string`)}
+			}
 			if requireApproval && !tool.CallApproved(ctx) {
 				return tool.Result{}, &tool.Deferred{
 					Kind:   tool.DeferApproval,

@@ -8,8 +8,9 @@ export interface AttachedFile {
   content: string;
 }
 
-export const MAX_ATTACHED_FILES = 5;
+export const MAX_ATTACHED_FILES = 3;
 export const MAX_FILE_SIZE_BYTES = 10 << 20; // 10 MB
+export const MAX_ATTACHED_CHARS = 100_000; // 100K characters per document or total
 
 export const BINARY_DOC_EXTENSIONS = new Set(["pdf", "docx", "xlsx", "pptx"]);
 
@@ -35,6 +36,7 @@ export async function processAttachedFile(file: File): Promise<AttachedFile> {
 
   const ext = file.name.split(".").pop()?.toLowerCase() || "";
 
+  let content: string;
   if (BINARY_DOC_EXTENSIONS.has(ext)) {
     const formData = new FormData();
     formData.append("file", file);
@@ -42,16 +44,15 @@ export async function processAttachedFile(file: File): Promise<AttachedFile> {
       method: "POST",
       body: formData,
     });
-    return {
-      id: `${file.name}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-      name: file.name,
-      size: file.size,
-      type: file.type || ext,
-      content: res.text,
-    };
+    content = res.text;
+  } else {
+    content = await file.text();
   }
 
-  const content = await file.text();
+  if (content.length > MAX_ATTACHED_CHARS) {
+    throw new Error(`${file.name} exceeds 100K character limit (${content.length.toLocaleString()} chars). Please upload it to Projects or Documents for retrieval.`);
+  }
+
   return {
     id: `${file.name}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
     name: file.name,
@@ -77,4 +78,22 @@ export function formatPromptWithFiles(prompt: string, files: AttachedFile[]): st
   }
 
   return parts.join("\n\n");
+}
+
+export function extractFilesAndPrompt(content: string): {
+  filenames: string[];
+  userPrompt: string;
+} {
+  const fileRegex = /--- File: (.*?) ---\n```[\s\S]*?```\n*/g;
+  const filenames: string[] = [];
+  let match: RegExpExecArray | null;
+  while ((match = fileRegex.exec(content)) !== null) {
+    filenames.push(match[1]);
+  }
+
+  let userPrompt = content.replace(fileRegex, "").trim();
+  if (userPrompt === "Please analyze the attached file(s) above.") {
+    userPrompt = "";
+  }
+  return { filenames, userPrompt };
 }

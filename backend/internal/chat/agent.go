@@ -96,7 +96,12 @@ Citation discipline (hard rules): cite EVERY claim that comes from documents wit
 
 const webSearchGuidance = `
 
-You have a web_search tool to search the live web. Call it whenever the user asks about current events, breaking news, live data, or facts not present in your knowledge. Cite web sources with their titles and URLs e.g. [Title](URL) in your answer.`
+You have a web_search tool to search the live web. Call it whenever the user asks about current events, breaking news, live data, or facts not present in your knowledge. Formulate clean, concise search keywords (do not include mention tags like "@web" in your query).
+
+When answering based on web search results:
+- Provide comprehensive, explanatory, and detailed answers in markdown (use clear topic headings, structured bullet points, and explanatory paragraphs).
+- Dive into specific details, key developments, framework updates, real-world examples, and context found in the results rather than giving a brief 2-3 sentence summary.
+- Cite web sources with their titles and URLs e.g. [Title](URL) or citation numbers [N] directly in your answer.`
 
 // promptFor resolves the run's system prompt: the conversation's prompt,
 // else the built-in one, plus citation rules, retrieval guidance, or web search

@@ -24,9 +24,8 @@ func (s *Server) handleEditMessage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "bad_request", "content is required")
 		return
 	}
-	if len([]rune(req.Content)) > maxPromptChars {
-		writeError(w, http.StatusBadRequest, "bad_request", "message too long")
-		return
+	if runes := []rune(req.Content); len(runes) > maxPromptChars {
+		req.Content = string(runes[:maxPromptChars]) + "\n\n[input auto-compacted: truncated at 1,000,000 characters]"
 	}
 
 	ctx := r.Context()

@@ -1,7 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { formatPromptWithFiles, isSupportedDocOrCodeFile } from "./files";
+import {
+  extractFilesAndPrompt,
+  formatPromptWithFiles,
+  isSupportedDocOrCodeFile,
+  MAX_ATTACHED_FILES,
+  MAX_ATTACHED_CHARS,
+} from "./files";
 
 describe("files utility", () => {
+  it("enforces max attached files and characters constants", () => {
+    expect(MAX_ATTACHED_FILES).toBe(3);
+    expect(MAX_ATTACHED_CHARS).toBe(100_000);
+  });
   it("recognizes supported document and code files", () => {
     expect(isSupportedDocOrCodeFile(new File([], "app.py"))).toBe(true);
     expect(isSupportedDocOrCodeFile(new File([], "doc.pdf"))).toBe(true);
@@ -43,5 +53,23 @@ describe("files utility", () => {
     ];
     const formatted = formatPromptWithFiles("", files);
     expect(formatted).toContain("Please analyze the attached file(s) above.");
+  });
+
+  it("extracts filenames and clean user prompt from formatted content", () => {
+    const content = `--- File: sample.pdf ---
+\`\`\`pdf
+# Section 1
+Detailed extracted text across paragraphs...
+
+# Section 2
+More lines of extracted document text...
+\`\`\`
+
+Can you give me a summary of this paper?`;
+
+    const { filenames, userPrompt } = extractFilesAndPrompt(content);
+    expect(filenames).toEqual(["sample.pdf"]);
+    expect(userPrompt).toBe("Can you give me a summary of this paper?");
+    expect(userPrompt).not.toContain("Detailed extracted text");
   });
 });

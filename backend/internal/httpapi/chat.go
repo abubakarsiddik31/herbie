@@ -86,7 +86,7 @@ type ProfileStore interface {
 
 var _ ProfileStore = (*storage.Users)(nil)
 
-const maxPromptChars = 8000
+const maxPromptChars = 1_000_000
 
 func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 	userID, _ := userIDFrom(r.Context())
@@ -99,9 +99,8 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "bad_request", "content or images is required")
 		return
 	}
-	if len([]rune(req.Content)) > maxPromptChars {
-		writeError(w, http.StatusBadRequest, "bad_request", "message too long")
-		return
+	if runes := []rune(req.Content); len(runes) > maxPromptChars {
+		req.Content = string(runes[:maxPromptChars]) + "\n\n[input auto-compacted: truncated at 1,000,000 characters]"
 	}
 	parts, err := decodeImages(req.Images)
 	if err != nil {

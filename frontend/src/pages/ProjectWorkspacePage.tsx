@@ -50,9 +50,11 @@ import {
 import {
   type AttachedFile,
   MAX_ATTACHED_FILES,
+  MAX_ATTACHED_CHARS,
   isSupportedDocOrCodeFile,
   processAttachedFile,
   formatPromptWithFiles,
+  extractFilesAndPrompt,
 } from "@/lib/files";
 import { ALLOWED_IMAGE_TYPES, MAX_IMAGES_PER_MESSAGE, readImageFiles, type PendingImage } from "@/lib/images";
 
@@ -183,6 +185,11 @@ export function ProjectWorkspacePage() {
             break;
           }
           const attached = await processAttachedFile(df);
+          const currentChars = attachedFiles.reduce((acc, f) => acc + f.content.length, 0);
+          if (currentChars + attached.content.length > MAX_ATTACHED_CHARS) {
+            toast.error("Total attached files exceed 100K character limit. Upload to Projects or Documents for retrieval.");
+            break;
+          }
           setAttachedFiles((prev) => [...prev, attached]);
           toast.success(`Attached ${df.name}`);
         }
@@ -336,24 +343,29 @@ export function ProjectWorkspacePage() {
                     <div key={m.id} className={cn("flex", m.role === "user" ? "justify-end" : "group gap-3")}>
                       {m.role === "user" ? (
                         <div className="group flex max-w-[80%] flex-col items-end gap-1">
-                          {m.content.includes("--- File:") && (
-                            <div className="flex flex-wrap justify-end gap-1.5 mb-1">
-                              {m.content.split("\n\n").filter((b) => b.startsWith("--- File:")).map((b, idx) => {
-                                const fname = b.match(/--- File: (.*?) ---/)?.[1] || "Attached file";
-                                return (
-                                  <div key={idx} className="flex items-center gap-1.5 rounded-xl border border-border/80 bg-muted/50 px-2.5 py-1 text-xs">
-                                    <FileCode className="size-3.5 text-primary" />
-                                    <span className="font-mono text-[11px]">{fname}</span>
+                          {/* Attached files badge and clean prompt in user message */}
+                          {(() => {
+                            const { filenames, userPrompt } = extractFilesAndPrompt(m.content);
+                            return (
+                              <>
+                                {filenames.length > 0 && (
+                                  <div className="flex flex-wrap justify-end gap-1.5 mb-1">
+                                    {filenames.map((fname, idx) => (
+                                      <div key={idx} className="flex items-center gap-1.5 rounded-xl border border-border/80 bg-muted/50 px-2.5 py-1 text-xs">
+                                        <FileCode className="size-3.5 text-primary" />
+                                        <span className="font-mono text-[11px]">{fname}</span>
+                                      </div>
+                                    ))}
                                   </div>
-                                );
-                              })}
-                            </div>
-                          )}
-                          <div className="rounded-2xl rounded-br-md bg-primary px-4 py-2.5 whitespace-pre-wrap text-primary-foreground text-sm shadow-sm">
-                            {m.content.includes("--- File:")
-                              ? m.content.split("\n\n").filter((b) => !b.startsWith("--- File:")).join("\n\n") || "Attached file(s)"
-                              : m.content}
-                          </div>
+                                )}
+                                {(userPrompt || filenames.length > 0) && (
+                                  <div className="rounded-2xl rounded-br-md bg-primary px-4 py-2.5 whitespace-pre-wrap text-primary-foreground text-sm shadow-sm">
+                                    {userPrompt || (filenames.length === 1 ? `Attached ${filenames[0]}` : `Attached ${filenames.length} files`)}
+                                  </div>
+                                )}
+                              </>
+                            );
+                          })()}
                         </div>
                       ) : (
                         <>

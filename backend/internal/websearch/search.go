@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -26,9 +27,10 @@ type Searcher interface {
 }
 
 type Config struct {
-	Provider string // "tavily", "brave", or "free" (default)
+	Provider string // "wigolo", "tavily", "brave", or "free" (default)
 	APIKey   string
 	BaseURL  string // optional override for testing / proxy
+	BinPath  string // optional path to local wigolo CLI/dist
 	Timeout  time.Duration
 }
 
@@ -46,6 +48,18 @@ func New(cfg Config) Searcher {
 	}
 	client := &http.Client{Timeout: timeout}
 	provider := strings.ToLower(strings.TrimSpace(cfg.Provider))
+	if provider == "wigolo" {
+		base := cfg.BaseURL
+		if base == "" && cfg.BinPath == "" {
+			base = "http://localhost:3333"
+		}
+		return &wigoloSearcher{
+			baseURL: base,
+			binPath: cfg.BinPath,
+			apiKey:  cfg.APIKey,
+			client:  client,
+		}
+	}
 	if provider == "brave" && cfg.APIKey != "" {
 		base := cfg.BaseURL
 		if base == "" {
@@ -173,6 +187,173 @@ func (b *braveSearcher) Search(ctx context.Context, query string) ([]Result, err
 			URL:     r.URL,
 			Snippet: snippet,
 		}
+	}
+	return results, nil
+}
+
+type wigoloSearcher struct {
+	baseURL string
+	binPath string
+	apiKey  string
+	client  *http.Client
+}
+
+func (w *wigoloSearcher) Search(ctx context.Context, query string) ([]Result, error) {
+	if w.baseURL != "" {
+		results, err := w.searchHTTP(ctx, query)
+		if err == nil {
+			return results, nil
+		}
+		if w.binPath == "" {
+			return nil, err
+		}
+	}
+	if w.binPath != "" {
+		return w.searchCLI(ctx, query)
+	}
+	return nil, fmt.Errorf("wigolo search: neither baseURL nor binPath configured")
+}
+
+func (w *wigoloSearcher) searchHTTP(ctx context.Context, query string) ([]Result, error) {
+	reqURL := strings.TrimRight(w.baseURL, "/")
+	if !strings.HasSuffix(reqURL, "/v1/search") {
+		reqURL += "/v1/search"
+	}
+	payload, err := json.Marshal(map[string]any{
+		"query":                 query,
+		"max_results":           5,
+		"include_content":       true,
+		"max_content_chars":     3000,
+		"include_full_markdown": true,
+	})
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL, bytes.NewReader(payload))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	if w.apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+w.apiKey)
+	}
+
+	res, err := w.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("wigolo search: %w", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(res.Body, 1024))
+		return nil, fmt.Errorf("wigolo search failed (status %d): %s", res.StatusCode, string(body))
+	}
+
+	var resp struct {
+		Results []struct {
+			Title    string `json:"title"`
+			URL      string `json:"url"`
+			Snippet  string `json:"snippet"`
+			Content  string `json:"content"`
+			Markdown string `json:"markdown"`
+		} `json:"results"`
+		Evidence []struct {
+			Title          string `json:"title"`
+			URL            string `json:"url"`
+			SectionHeading string `json:"section_heading"`
+			Excerpt        string `json:"excerpt"`
+		} `json:"evidence"`
+	}
+	if err := json.NewDecoder(io.LimitReader(res.Body, 2<<20)).Decode(&resp); err != nil {
+		return nil, fmt.Errorf("decode wigolo response: %w", err)
+	}
+
+	results := make([]Result, 0, len(resp.Results))
+	for _, r := range resp.Results {
+		snip := r.Snippet
+		if r.Markdown != "" && len(r.Markdown) > len(snip) {
+			snip = r.Markdown
+		} else if r.Content != "" && len(r.Content) > len(snip) {
+			snip = r.Content
+		}
+		if len(snip) > 1500 {
+			snip = strings.TrimSpace(snip[:1500]) + "…"
+		}
+		results = append(results, Result{
+			Title:   r.Title,
+			URL:     r.URL,
+			Snippet: snip,
+		})
+	}
+	if len(results) == 0 && len(resp.Evidence) > 0 {
+		for _, ev := range resp.Evidence {
+			snip := ev.Excerpt
+			if len(snip) > 1500 {
+				snip = strings.TrimSpace(snip[:1500]) + "…"
+			}
+			results = append(results, Result{
+				Title:   ev.Title,
+				URL:     ev.URL,
+				Snippet: snip,
+			})
+		}
+	}
+	return results, nil
+}
+
+func (w *wigoloSearcher) searchCLI(ctx context.Context, query string) ([]Result, error) {
+	args := []string{"search", query, "--json", "--max-results=5"}
+	var cmd *exec.Cmd
+	if strings.HasSuffix(w.binPath, ".js") {
+		cmd = exec.CommandContext(ctx, "node", append([]string{w.binPath}, args...)...)
+	} else {
+		cmd = exec.CommandContext(ctx, w.binPath, args...)
+	}
+
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("wigolo cli error: %w", err)
+	}
+
+	var resp struct {
+		Results []struct {
+			Title    string `json:"title"`
+			URL      string `json:"url"`
+			Snippet  string `json:"snippet"`
+			Content  string `json:"content"`
+			Markdown string `json:"markdown"`
+		} `json:"results"`
+	}
+	dec := json.NewDecoder(bytes.NewReader(out))
+	for dec.More() {
+		var raw map[string]json.RawMessage
+		if err := dec.Decode(&raw); err != nil {
+			break
+		}
+		if rawResults, ok := raw["results"]; ok {
+			_ = json.Unmarshal(rawResults, &resp.Results)
+			if len(resp.Results) > 0 {
+				break
+			}
+		}
+	}
+
+	results := make([]Result, 0, len(resp.Results))
+	for _, r := range resp.Results {
+		snip := r.Snippet
+		if r.Markdown != "" && len(r.Markdown) > len(snip) {
+			snip = r.Markdown
+		} else if r.Content != "" && len(r.Content) > len(snip) {
+			snip = r.Content
+		}
+		if len(snip) > 1500 {
+			snip = strings.TrimSpace(snip[:1500]) + "…"
+		}
+		results = append(results, Result{
+			Title:   r.Title,
+			URL:     r.URL,
+			Snippet: snip,
+		})
 	}
 	return results, nil
 }

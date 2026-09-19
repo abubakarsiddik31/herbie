@@ -43,6 +43,7 @@ func TestLoadToolOverrides(t *testing.T) {
 }
 
 func TestLoadRequiresSecrets(t *testing.T) {
+	t.Setenv("APP_PORT", "8080")
 	t.Setenv("DATABASE_URL", "postgres://localhost/gc")
 	t.Setenv("JWT_SECRET", "short")
 	if _, err := Load(); err == nil {
@@ -268,5 +269,31 @@ func TestRAGBadCompactionFails(t *testing.T) {
 	t.Setenv("COMPACTION_THRESHOLD_TOKENS", "0")
 	if _, err := Load(); err == nil {
 		t.Fatal("want error for non-positive compaction threshold")
+	}
+}
+
+func TestWigoloConfig(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://localhost/gc")
+	t.Setenv("JWT_SECRET", "0123456789abcdef0123456789abcdef")
+	t.Setenv("GEMINI_API_KEY", "k")
+	t.Setenv("WIGOLO_URL", "http://wigolo:3333")
+	t.Setenv("WIGOLO_API_TOKEN", "test-token")
+	t.Setenv("WIGOLO_PATH", "/path/to/dist/index.js")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	if cfg.WebSearch.Provider != "wigolo" {
+		t.Errorf("Provider = %q, want %q", cfg.WebSearch.Provider, "wigolo")
+	}
+	if cfg.WebSearch.BaseURL != "http://wigolo:3333" {
+		t.Errorf("BaseURL = %q, want %q", cfg.WebSearch.BaseURL, "http://wigolo:3333")
+	}
+	if cfg.WebSearch.APIKey != "test-token" {
+		t.Errorf("APIKey = %q, want %q", cfg.WebSearch.APIKey, "test-token")
+	}
+	if cfg.WebSearch.BinPath != "/path/to/dist/index.js" {
+		t.Errorf("BinPath = %q, want %q", cfg.WebSearch.BinPath, "/path/to/dist/index.js")
 	}
 }
