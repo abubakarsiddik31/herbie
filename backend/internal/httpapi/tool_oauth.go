@@ -89,7 +89,10 @@ type toolProviderDTO struct {
 	Name           string   `json:"name"`
 	Configured     bool     `json:"configured"`
 	Connected      bool     `json:"connected"`
+	ConnectedVia   string   `json:"connectedVia,omitempty"` // "oauth" | "mcp" | "both"
 	CredentialName string   `json:"credentialName,omitempty"`
+	MCPServerID    string   `json:"mcpServerId,omitempty"`
+	MCPServerName  string   `json:"mcpServerName,omitempty"`
 	Scopes         []string `json:"scopes,omitempty"`
 	ConnectedAt    string   `json:"connectedAt,omitempty"`
 	ExpiresAt      *string  `json:"expiresAt,omitempty"`
@@ -125,6 +128,7 @@ func (s *Server) handleToolOAuthProviders(w http.ResponseWriter, r *http.Request
 			for _, c := range creds {
 				if c.Provider == p.ID || (c.Type == "oauth2" && strings.HasPrefix(c.Name, p.ID)) {
 					providers[i].Connected = true
+					providers[i].ConnectedVia = "oauth"
 					providers[i].CredentialName = c.Name
 					providers[i].ConnectedAt = c.UpdatedAt.UTC().Format(timeRFC3339)
 					if len(c.Scopes) > 0 {
@@ -136,6 +140,23 @@ func (s *Server) handleToolOAuthProviders(w http.ResponseWriter, r *http.Request
 					}
 					break
 				}
+			}
+		}
+	}
+
+	if s.deps.MCPServers != nil && userID != "" {
+		for i, p := range providers {
+			mcpSrv, err := s.deps.MCPServers.ByApp(r.Context(), p.ID, userID)
+			if err == nil && mcpSrv.ID != "" {
+				if providers[i].Connected {
+					providers[i].ConnectedVia = "both"
+				} else {
+					providers[i].Connected = true
+					providers[i].ConnectedVia = "mcp"
+					providers[i].ConnectedAt = mcpSrv.UpdatedAt.UTC().Format(timeRFC3339)
+				}
+				providers[i].MCPServerID = mcpSrv.ID
+				providers[i].MCPServerName = mcpSrv.Name
 			}
 		}
 	}
@@ -520,33 +541,43 @@ func (s *Server) handleToolOAuthDisconnect(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	if s.deps.Workflows == nil {
-		writeError(w, http.StatusNotFound, "not_found", "workflows not configured")
-		return
-	}
-
-	cred, err := s.deps.Workflows.GetCredentialByProvider(r.Context(), userID, provider)
-	if err != nil {
-		if errors.Is(err, storage.ErrNotFound) {
-			writeError(w, http.StatusNotFound, "not_found", "no connected credential found for "+provider)
-			return
+	disconnectedOAuth := false
+	if s.deps.Workflows != nil {
+		cred, err := s.deps.Workflows.GetCredentialByProvider(r.Context(), userID, provider)
+		if err == nil && cred.ID != "" {
+			_ = s.deps.Workflows.DeleteCredential(r.Context(), cred.ID, userID)
+			disconnectedOAuth = true
 		}
-		writeError(w, http.StatusInternalServerError, "internal", "could not find credential")
-		return
 	}
 
-	if err := s.deps.Workflows.DeleteCredential(r.Context(), cred.ID, userID); err != nil {
-		writeError(w, http.StatusInternalServerError, "internal", "could not delete credential")
+	disconnectedMCP := false
+	if s.deps.MCPServers != nil {
+		if err := s.deps.MCPServers.UnlinkApp(r.Context(), provider, userID); err == nil {
+			disconnectedMCP = true
+		}
+	}
+
+	if !disconnectedOAuth && !disconnectedMCP {
+		writeError(w, http.StatusNotFound, "not_found", "no connected credential or mcp server found for "+provider)
 		return
 	}
 
 	if s.deps.Audits != nil {
+		action := "oauth_disconnect"
+		summary := fmt.Sprintf("disconnected %s", provider)
+		if disconnectedOAuth && disconnectedMCP {
+			action = "app_disconnect"
+			summary = fmt.Sprintf("disconnected %s (oauth & mcp)", provider)
+		} else if disconnectedMCP {
+			action = "mcp_disconnect"
+			summary = fmt.Sprintf("disconnected %s (mcp)", provider)
+		}
 		_ = s.deps.Audits.RecordToolAudit(r.Context(), storage.ToolAuditLog{
 			UserID:       userID,
 			CallerType:   "manual",
 			ToolName:     provider,
-			Action:       "oauth_disconnect",
-			InputSummary: fmt.Sprintf("disconnected %s (%s)", cred.Name, provider),
+			Action:       action,
+			InputSummary: summary,
 			Status:       "success",
 			DurationMs:   0,
 			CreatedAt:    time.Now(),

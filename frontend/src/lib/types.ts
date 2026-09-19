@@ -156,7 +156,10 @@ export interface ToolOAuthProvider {
   name: string;
   configured: boolean;
   connected: boolean;
+  connectedVia?: "oauth" | "mcp" | "both";
   credentialName?: string;
+  mcpServerId?: string;
+  mcpServerName?: string;
   scopes?: string[];
   connectedAt?: string;
   expiresAt?: string | null;

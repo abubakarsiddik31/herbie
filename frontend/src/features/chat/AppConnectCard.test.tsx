@@ -9,6 +9,11 @@ import { AppConnectCard } from "./AppConnectCard";
 let startCalledWith: string | null = null;
 
 const server = setupServer(
+  http.get("*/api/mcp/servers", () =>
+    HttpResponse.json({
+      servers: [],
+    }),
+  ),
   http.get("*/api/tool-oauth/providers", () =>
     HttpResponse.json({
       providers: [

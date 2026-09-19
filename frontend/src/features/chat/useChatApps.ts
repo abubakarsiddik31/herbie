@@ -8,9 +8,12 @@ export interface ChatApp {
   name: string;
   mention: string;
   description: string;
-  type: "oauth" | "builtin" | "workflow" | "custom_tool";
+  type: "oauth" | "builtin" | "workflow" | "custom_tool" | "mcp";
   iconName: "calendar" | "github" | "slack" | "globe" | "workflow" | "wrench";
   connected: boolean;
+  connectedVia?: "oauth" | "mcp" | "both";
+  mcpServerId?: string;
+  mcpServerName?: string;
   configured: boolean;
   requiresConnection: boolean;
 }
@@ -31,9 +34,12 @@ export function useChatApps() {
       name: "Google Calendar",
       mention: "calendar",
       description: "Check schedule, view upcoming meetings, and create events",
-      type: "oauth",
+      type: gcal?.connectedVia === "mcp" ? "mcp" : "oauth",
       iconName: "calendar",
       connected: !!gcal?.connected,
+      connectedVia: gcal?.connectedVia,
+      mcpServerId: gcal?.mcpServerId,
+      mcpServerName: gcal?.mcpServerName,
       configured: gcal ? gcal.configured : true,
       requiresConnection: true,
     });
@@ -45,9 +51,12 @@ export function useChatApps() {
       name: "GitHub",
       mention: "github",
       description: "Search repositories, manage pull requests, and file issues",
-      type: "oauth",
+      type: gh?.connectedVia === "mcp" ? "mcp" : "oauth",
       iconName: "github",
       connected: !!gh?.connected,
+      connectedVia: gh?.connectedVia,
+      mcpServerId: gh?.mcpServerId,
+      mcpServerName: gh?.mcpServerName,
       configured: gh ? gh.configured : true,
       requiresConnection: true,
     });
@@ -59,9 +68,12 @@ export function useChatApps() {
       name: "Slack",
       mention: "slack",
       description: "Send notifications and broadcast updates to Slack channels",
-      type: "oauth",
+      type: slk?.connectedVia === "mcp" ? "mcp" : "oauth",
       iconName: "slack",
       connected: !!slk?.connected,
+      connectedVia: slk?.connectedVia,
+      mcpServerId: slk?.mcpServerId,
+      mcpServerName: slk?.mcpServerName,
       configured: slk ? slk.configured : true,
       requiresConnection: true,
     });
@@ -118,18 +130,21 @@ export function useChatApps() {
       }
     }
 
-    // 7. Enabled MCP Servers
+    // 7. General/Standalone Enabled MCP Servers
     if (mcpServers) {
       for (const s of mcpServers) {
-        if (s.enabled) {
+        if (s.enabled && !s.appId) {
           list.push({
             id: `mcp_${s.id}`,
             name: s.name,
             mention: s.name.toLowerCase().replace(/\s+/g, "_"),
             description: `Model Context Protocol server (${s.url})`,
-            type: "custom_tool",
+            type: "mcp",
             iconName: "workflow",
             connected: true,
+            connectedVia: "mcp",
+            mcpServerId: s.id,
+            mcpServerName: s.name,
             configured: true,
             requiresConnection: false,
           });
