@@ -558,7 +558,8 @@ func (s *Server) handleToolOAuthDisconnect(w http.ResponseWriter, r *http.Reques
 	}
 
 	if !disconnectedOAuth && !disconnectedMCP {
-		writeError(w, http.StatusNotFound, "not_found", "no connected credential or mcp server found for "+provider)
+		// Idempotent disconnect: already unlinked
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 		return
 	}
 
