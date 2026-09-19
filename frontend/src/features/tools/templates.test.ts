@@ -86,4 +86,15 @@ describe("tool templates", () => {
       expect(templateHost(t.tool.urlTemplate)).not.toContain("{{");
     }
   });
+
+  it("all templates require zero authentication or API keys", () => {
+    for (const t of TEMPLATES) {
+      for (const [key] of Object.entries(t.tool.headers)) {
+        expect(key.toLowerCase()).not.toContain("auth");
+        expect(key.toLowerCase()).not.toContain("token");
+        expect(key.toLowerCase()).not.toContain("key");
+        expect(key.toLowerCase()).not.toContain("secret");
+      }
+    }
+  });
 });
