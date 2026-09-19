@@ -13,6 +13,7 @@ interface SourcesPayload { sources: Source[] }
 // Model-facing tool names become human phrases in the run trace.
 const toolLabels: Record<string, string> = {
   search_documents: "searching documents",
+  list_documents: "listing documents",
 };
 
 function toolLabel(name?: string): string {
