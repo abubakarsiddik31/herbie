@@ -223,7 +223,9 @@ func (w *wigoloSearcher) searchHTTP(ctx context.Context, query string) ([]Result
 		"query":                 query,
 		"max_results":           5,
 		"include_content":       true,
-		"max_content_chars":     3000,
+		"max_tokens_out":        25000,
+		"content_max_chars":     100000,
+		"max_total_chars":       400000,
 		"include_full_markdown": true,
 	})
 	if err != nil {
@@ -276,8 +278,8 @@ func (w *wigoloSearcher) searchHTTP(ctx context.Context, query string) ([]Result
 		} else if r.Content != "" && len(r.Content) > len(snip) {
 			snip = r.Content
 		}
-		if len(snip) > 1500 {
-			snip = strings.TrimSpace(snip[:1500]) + "…"
+		if len(snip) > 80000 {
+			snip = strings.TrimSpace(snip[:80000]) + "…"
 		}
 		results = append(results, Result{
 			Title:   r.Title,
@@ -288,8 +290,8 @@ func (w *wigoloSearcher) searchHTTP(ctx context.Context, query string) ([]Result
 	if len(results) == 0 && len(resp.Evidence) > 0 {
 		for _, ev := range resp.Evidence {
 			snip := ev.Excerpt
-			if len(snip) > 1500 {
-				snip = strings.TrimSpace(snip[:1500]) + "…"
+			if len(snip) > 80000 {
+				snip = strings.TrimSpace(snip[:80000]) + "…"
 			}
 			results = append(results, Result{
 				Title:   ev.Title,

@@ -64,7 +64,7 @@ func main() {
 		Anthropic: cfg.AnthropicAPIKey, AnthropicBaseURL: cfg.AnthropicBaseURL,
 	}
 	registry := chat.NewModelRegistry(modelKeys)
-	agent, err := chat.New(registry, golem.UsageLimit{Requests: 12, TotalTokens: 100_000}, chat.ToolEnv{
+	agent, err := chat.New(registry, golem.UsageLimit{Requests: 25, TotalTokens: 300_000}, chat.ToolEnv{
 		HTTPTimeout:       cfg.ToolHTTPTimeout,
 		HTTPMaxBytes:      cfg.ToolHTTPMaxBytes,
 		ResultMaxBytes:    cfg.ToolResultMaxBytes,

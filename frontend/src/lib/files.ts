@@ -10,7 +10,7 @@ export interface AttachedFile {
 
 export const MAX_ATTACHED_FILES = 3;
 export const MAX_FILE_SIZE_BYTES = 10 << 20; // 10 MB
-export const MAX_ATTACHED_CHARS = 100_000; // 100K characters per document or total
+export const MAX_ATTACHED_CHARS = 400_000; // ~100K tokens (4 chars per token)
 
 export const BINARY_DOC_EXTENSIONS = new Set(["pdf", "docx", "xlsx", "pptx"]);
 
@@ -50,7 +50,7 @@ export async function processAttachedFile(file: File): Promise<AttachedFile> {
   }
 
   if (content.length > MAX_ATTACHED_CHARS) {
-    throw new Error(`${file.name} exceeds 100K character limit (${content.length.toLocaleString()} chars). Please upload it to Projects or Documents for retrieval.`);
+    throw new Error(`${file.name} exceeds 100K token limit (~${Math.round(content.length / 4).toLocaleString()} tokens). Please upload it to Projects or Documents for retrieval.`);
   }
 
   return {

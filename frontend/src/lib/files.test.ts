@@ -10,7 +10,7 @@ import {
 describe("files utility", () => {
   it("enforces max attached files and characters constants", () => {
     expect(MAX_ATTACHED_FILES).toBe(3);
-    expect(MAX_ATTACHED_CHARS).toBe(100_000);
+    expect(MAX_ATTACHED_CHARS).toBe(400_000);
   });
   it("recognizes supported document and code files", () => {
     expect(isSupportedDocOrCodeFile(new File([], "app.py"))).toBe(true);

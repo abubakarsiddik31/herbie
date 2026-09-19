@@ -2,6 +2,7 @@ package chat
 
 import (
 	"fmt"
+	"os"
 	"strconv"
 	"sync"
 
@@ -94,23 +95,34 @@ func (r *ModelRegistry) Resolve(spec RunSpec) (model.StreamingModel, error) {
 // productionFactory constructs the golem provider client for the spec.
 // Temperature is already provider-clamped by Resolve.
 func (r *ModelRegistry) productionFactory(provider, modelName string, temperature *float64) (model.StreamingModel, error) {
+	maxOutputTokens := 16384
+	if envMax := os.Getenv("CHAT_MAX_OUTPUT_TOKENS"); envMax != "" {
+		if v, err := strconv.Atoi(envMax); err == nil && v >= 10000 {
+			maxOutputTokens = v
+		}
+	}
+
 	switch provider {
 	case "gemini":
-		cfg := golemgemini.Config{APIKey: r.keys.Gemini, Model: modelName, BaseURL: r.keys.GeminiBaseURL}
+		cfg := golemgemini.Config{APIKey: r.keys.Gemini, Model: modelName, BaseURL: r.keys.GeminiBaseURL, MaxTokens: maxOutputTokens}
 		if r.keys.GeminiBaseURL == "" {
 			cfg.BaseURL = "https://generativelanguage.googleapis.com"
 		}
 		cfg.Temperature = temperature
 		return golemgemini.New(cfg)
 	case "openai":
-		cfg := golemopenai.Config{APIKey: r.keys.OpenAI, Model: modelName, BaseURL: r.keys.OpenAIBaseURL}
+		cfg := golemopenai.Config{APIKey: r.keys.OpenAI, Model: modelName, BaseURL: r.keys.OpenAIBaseURL, MaxTokens: maxOutputTokens}
 		if r.keys.OpenAIBaseURL == "" {
 			cfg.BaseURL = "https://api.openai.com/v1"
 		}
 		cfg.Temperature = temperature
 		return golemopenai.New(cfg)
 	case "anthropic":
-		cfg := golemanthropic.Config{APIKey: r.keys.Anthropic, Model: modelName, MaxTokens: 4096}
+		anthropicMax := maxOutputTokens
+		if anthropicMax > 8192 {
+			anthropicMax = 8192
+		}
+		cfg := golemanthropic.Config{APIKey: r.keys.Anthropic, Model: modelName, MaxTokens: anthropicMax}
 		if r.keys.AnthropicBaseURL != "" {
 			cfg.BaseURL = r.keys.AnthropicBaseURL
 		}
