@@ -45,7 +45,7 @@ var searchSchema = json.RawMessage(`{
 func SearchTool() tool.Tool[Deps] {
 	return tool.Tool[Deps]{
 		Name:        SearchToolName,
-		Description: "Search the user's uploaded documents for passages relevant to a query. Results are hybrid-retrieved, expanded with surrounding context, and relevance-ranked. Call again with a refined query or narrower documentIds if needed (up to 2-3 queries) — synthesize once evidence is found.",
+		Description: "Search the user's uploaded documents for passages relevant to a query. Results are hybrid-retrieved, expanded with surrounding context, and relevance-ranked. Perform at most 1-2 focused queries, then synthesize your answer immediately.",
 		Schema:      searchSchema,
 		Timeout:     30 * time.Second,
 		MaxRetries:  tool.RetryLimit(1),

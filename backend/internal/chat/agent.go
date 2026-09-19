@@ -107,7 +107,13 @@ const retrievalGuidance = `
 You have retrieval tools over the user's uploaded files:
 - list_documents: lists all uploaded files with their document IDs, filenames, chunk counts, sizes, and statuses. Use this when you need an overview of available documents or want to find specific document IDs.
 - search_documents: searches for passages relevant to a query across all files or filtered by documentIds.
-Drive retrieval yourself: start by listing documents or formulating a focused query; if results look thin or off-topic, call again with a refined query or narrow documentIds (limit to 1-3 searches total). Once relevant evidence is found, immediately synthesize your answer. Never attribute claims to uploaded documents if they were not in the search results.
+
+Retrieval budget & stop discipline:
+- Limit retrieval to 1 or at most 2 focused searches total (call again with a refined query or narrow documentIds only if initial results are completely off-topic).
+- Do NOT perform multi-round exploratory searches trying to crawl through entire tables of contents, individual chapters, or sub-topics.
+- Once you obtain initial relevant passages, STOP calling search tools immediately and synthesize your final answer using the retrieved context.
+- Never attribute claims to uploaded documents if they were not in the search results.
+
 Citation discipline (hard rules): cite EVERY claim that comes from documents with its bracket number, e.g. [1]; cite ONLY bracket numbers shown in tool results — numbers are cumulative across calls ([1], [2], [3]...); never invent numbers not present in results. If the question specifically asks about the user's uploaded documents and the evidence does not support an answer, say what is missing instead of guessing; for general knowledge questions or external tools, answer normally using that information.`
 
 const webSearchGuidance = `

@@ -165,7 +165,16 @@ func TestExecuteBuiltinTool_CodeRunner(t *testing.T) {
 	if err != nil {
 		t.Fatalf("code_runner string error: %v", err)
 	}
-	if !strings.Contains(out, "executed in sandbox") {
+	if !strings.Contains(out, "executed in sandbox") || !strings.Contains(out, "Calculation error:") {
 		t.Fatalf("unexpected string result: %s", out)
+	}
+
+	// 4. Print function and scientific notation
+	out, err = ExecuteBuiltinTool(ctx, nil, "code_runner", json.RawMessage(`{"code":"print(((5 / 124323) * 723239423) / 5.972e24)"}`), nil)
+	if err != nil {
+		t.Fatalf("code_runner print/scientific error: %v", err)
+	}
+	if !strings.Contains(out, "Result: 4.87058") {
+		t.Fatalf("unexpected print/scientific result: %s", out)
 	}
 }

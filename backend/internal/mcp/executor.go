@@ -317,14 +317,23 @@ func ExecuteBuiltinTool(
 	case "code_runner":
 		var p struct {
 			Expression string `json:"expression"`
+			Code       string `json:"code"`
 		}
-		if err := json.Unmarshal(args, &p); err != nil || strings.TrimSpace(p.Expression) == "" {
+		if err := json.Unmarshal(args, &p); err != nil {
+			return "", fmt.Errorf("invalid arguments: %w", err)
+		}
+		expr := strings.TrimSpace(p.Expression)
+		if expr == "" {
+			expr = strings.TrimSpace(p.Code)
+		}
+		if expr == "" {
 			return "", fmt.Errorf("expression is required")
 		}
-		if res, err := EvalMathExpression(p.Expression); err == nil {
+		if res, err := EvalMathExpression(expr); err == nil {
 			return fmt.Sprintf("Result: %g\nStatus: executed in sandbox.", res), nil
+		} else {
+			return fmt.Sprintf("Calculation error: %v\nStatus: executed in sandbox.", err), nil
 		}
-		return fmt.Sprintf("Evaluated expression: %s\nStatus: executed in sandbox.", p.Expression), nil
 
 	default:
 		return "", fmt.Errorf("unsupported builtin mcp tool: %s", toolName)
@@ -420,6 +429,33 @@ func evalMathNode(n ast.Node) (float64, error) {
 			args[i] = val
 		}
 		switch fnName {
+		case "print":
+			if len(args) != 1 {
+				return 0, fmt.Errorf("print requires 1 argument")
+			}
+			return args[0], nil
+		case "min":
+			if len(args) == 0 {
+				return 0, fmt.Errorf("min requires at least 1 argument")
+			}
+			m := args[0]
+			for _, a := range args[1:] {
+				if a < m {
+					m = a
+				}
+			}
+			return m, nil
+		case "max":
+			if len(args) == 0 {
+				return 0, fmt.Errorf("max requires at least 1 argument")
+			}
+			m := args[0]
+			for _, a := range args[1:] {
+				if a > m {
+					m = a
+				}
+			}
+			return m, nil
 		case "sqrt":
 			if len(args) != 1 {
 				return 0, fmt.Errorf("sqrt requires 1 argument")
