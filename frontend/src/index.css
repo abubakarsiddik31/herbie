@@ -217,3 +217,48 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* ==========================================================================
+   HARVEY / HERBIE AVATAR PROCESSING ANIMATIONS
+   ========================================================================== */
+@keyframes harvey-jump {
+  0%, 100% {
+    transform: translateY(0) scale(1, 1);
+  }
+  16% {
+    transform: translateY(1.5px) scale(1.08, 0.92);
+  }
+  38% {
+    transform: translateY(-8px) scale(0.92, 1.08);
+  }
+  55% {
+    transform: translateY(-9px) scale(1, 1);
+  }
+  72% {
+    transform: translateY(0) scale(1.06, 0.94);
+  }
+  86% {
+    transform: translateY(-2px) scale(0.98, 1.02);
+  }
+}
+
+@keyframes harvey-shadow {
+  0%, 100% {
+    transform: scaleX(1);
+    opacity: 0.35;
+  }
+  50% {
+    transform: scaleX(0.5);
+    opacity: 0.12;
+  }
+}
+
+.animate-harvey-jump {
+  animation: harvey-jump 0.85s cubic-bezier(0.34, 1.56, 0.64, 1) infinite;
+  transform-origin: 18px 29px;
+}
+
+.animate-harvey-shadow {
+  animation: harvey-shadow 0.85s cubic-bezier(0.34, 1.56, 0.64, 1) infinite;
+  transform-origin: 18px 33.5px;
+}

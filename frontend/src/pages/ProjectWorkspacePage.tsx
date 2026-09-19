@@ -5,14 +5,18 @@ import { toast } from "sonner";
 import {
   ArrowLeft,
   ArrowUp,
+  Check,
   CheckCircle2,
+  ChevronDown,
   Eye,
   FileCode,
   FileText,
   FolderGit2,
   Loader2,
+  MessageSquare,
   Mic,
   Paperclip,
+  Plus,
   Sidebar,
   SlidersHorizontal,
   Square,
@@ -21,7 +25,7 @@ import {
   X,
 } from "lucide-react";
 import { ApiError, apiFetch } from "@/lib/api";
-import { cn } from "@/lib/utils";
+import { cn, cleanConversationTitle } from "@/lib/utils";
 import type { ChatMessage, Conversation } from "@/lib/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -33,9 +37,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
-import { BrandMark } from "@/components/BrandMark";
+import { HarveyAvatar } from "@/components/HarveyAvatar";
 import { RunLoader } from "@/components/ai/RunLoader";
 import { StreamingText } from "@/components/ai/StreamingText";
 import { ThinkingTrace } from "@/components/ai/ThinkingTrace";
@@ -285,6 +296,17 @@ export function ProjectWorkspacePage() {
     onFinal: (t) => setInput((p) => (p ? `${p} ${t}` : t)),
   });
 
+  function handleStartNewChat() {
+    setSelectedConvId(null);
+    seededRef.current = null;
+    reset();
+    setInput("");
+    setSendError(null);
+    searchParams.set("c", "new");
+    setSearchParams(searchParams, { replace: true });
+    setTimeout(() => textareaRef.current?.focus(), 50);
+  }
+
   const project = projectData?.project;
   const projectFiles = projectData?.files ?? [];
 
@@ -322,24 +344,92 @@ export function ProjectWorkspacePage() {
             }}
             aria-label="Toggle sidebar"
             title="Toggle sidebar (⌘B)"
-            className="text-muted-foreground hover:text-foreground"
+            className="text-muted-foreground hover:text-foreground shrink-0"
           >
             <Sidebar className="size-4" />
           </Button>
 
-          <Button variant="ghost" size="icon-xs" asChild className="text-muted-foreground hover:text-foreground">
+          <Button variant="ghost" size="icon-xs" asChild className="text-muted-foreground hover:text-foreground shrink-0">
             <Link to="/projects" title="Back to projects list">
               <ArrowLeft className="size-4" />
             </Link>
           </Button>
 
-          <div className="flex items-center gap-2 min-w-0">
+          <div className="flex items-center gap-1.5 min-w-0">
             <FolderGit2 className="size-4 text-primary shrink-0" />
-            <h1 className="text-sm font-semibold tracking-tight truncate">{project.name}</h1>
+            <h1 className="text-sm font-semibold tracking-tight truncate shrink-0">{project.name}</h1>
+
+            <span className="text-muted-foreground/40 font-light shrink-0">/</span>
+
+            {/* Conversation Switcher Dropdown */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  className="flex items-center gap-1.5 max-w-[160px] sm:max-w-[240px] md:max-w-[320px] rounded-md px-2 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+                >
+                  <MessageSquare className="size-3 text-muted-foreground shrink-0" />
+                  <span className="truncate font-medium">
+                    {selectedConvId
+                      ? cleanConversationTitle(projectData?.conversations.find((c) => c.id === selectedConvId)?.title || "Chat")
+                      : "New chat"}
+                  </span>
+                  <ChevronDown className="size-3 text-muted-foreground/60 shrink-0 ml-0.5" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-72 max-h-80 overflow-y-auto">
+                <DropdownMenuItem
+                  onClick={handleStartNewChat}
+                  className="gap-2 text-emerald-600 dark:text-emerald-400 font-medium cursor-pointer"
+                >
+                  <Plus className="size-3.5" />
+                  <span>New chat in this project</span>
+                </DropdownMenuItem>
+
+                {projectData && projectData.conversations.length > 0 && <DropdownMenuSeparator />}
+
+                {projectData?.conversations.map((c) => {
+                  const isSelected = c.id === selectedConvId;
+                  return (
+                    <DropdownMenuItem
+                      key={c.id}
+                      onClick={() => {
+                        setSelectedConvId(c.id);
+                        searchParams.set("c", c.id);
+                        setSearchParams(searchParams, { replace: true });
+                      }}
+                      className="flex items-center justify-between gap-2 cursor-pointer"
+                    >
+                      <div className="flex items-center gap-2 min-w-0 flex-1">
+                        {isSelected ? (
+                          <Check className="size-3.5 text-emerald-600 shrink-0" />
+                        ) : (
+                          <MessageSquare className="size-3.5 text-muted-foreground shrink-0" />
+                        )}
+                        <span className={cn("truncate text-xs", isSelected && "font-medium text-foreground")}>
+                          {cleanConversationTitle(c.title)}
+                        </span>
+                      </div>
+                    </DropdownMenuItem>
+                  );
+                })}
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </div>
 
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1.5 shrink-0">
+          {/* Prominent New Chat button */}
+          <Button
+            size="sm"
+            variant="default"
+            onClick={handleStartNewChat}
+            className="text-xs h-8 gap-1.5 font-medium bg-emerald-600 hover:bg-emerald-700 text-white dark:bg-emerald-600 dark:hover:bg-emerald-500 shadow-2xs rounded-lg"
+          >
+            <Plus className="size-3.5" />
+            <span className="hidden sm:inline">New chat</span>
+          </Button>
+
           <Button
             variant={filesOpen ? "secondary" : "ghost"}
             size="sm"
@@ -443,11 +533,11 @@ export function ProjectWorkspacePage() {
                         </div>
                       ) : (
                         <>
-                          <BrandMark className="mt-0.5 size-7 shrink-0" />
+                          <HarveyAvatar isProcessing={m.streaming} className="mt-0.5 size-7.5 shrink-0" />
                           <div className="min-w-0 flex-1 space-y-1 pt-0.5">
                             {m.streaming && trace.length > 0 && <ThinkingTrace rows={trace} />}
                             {m.streaming && m.content === "" ? (
-                              <RunLoader />
+                              <RunLoader trace={trace} />
                             ) : (
                               <StreamingText
                                 content={m.content}

@@ -57,7 +57,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { BrandMark } from "@/components/BrandMark";
+import { HarveyAvatar } from "@/components/HarveyAvatar";
 import { RunLoader } from "@/components/ai/RunLoader";
 import { StreamingText } from "@/components/ai/StreamingText";
 import { ThinkingTrace } from "@/components/ai/ThinkingTrace";
@@ -678,7 +678,7 @@ export function ChatPage() {
           {messages.length === 0 && !detailLoading ? (
             <div className="flex min-h-[55vh] flex-col items-center justify-center gap-6 text-center">
               <div className="space-y-2">
-                <BrandMark className="mx-auto size-12 rounded-2xl shadow-xs" />
+                <HarveyAvatar className="mx-auto size-14 drop-shadow-sm" />
                 <h2 className="text-2xl font-semibold tracking-tight text-foreground">
                   What's on your mind today?
                 </h2>
@@ -828,11 +828,11 @@ export function ChatPage() {
                       )
                     ) : (
                       <>
-                        <BrandMark className="mt-0.5 size-7 shrink-0" />
+                        <HarveyAvatar isProcessing={m.streaming} className="mt-0.5 size-7.5 shrink-0" />
                         <div className="min-w-0 flex-1 space-y-1 pt-0.5">
                           {m.streaming && trace.length > 0 && <ThinkingTrace rows={trace} />}
                           {m.streaming && m.content === "" ? (
-                            <RunLoader />
+                            <RunLoader trace={trace} />
                           ) : (
                             <StreamingText
                               content={m.content}

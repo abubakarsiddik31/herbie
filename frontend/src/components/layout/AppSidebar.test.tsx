@@ -127,4 +127,34 @@ describe("AppSidebar", () => {
     expect(await screen.findByRole("heading", { name: "Delete conversation?" })).toBeInTheDocument();
     expect(screen.getByText(/and all of its messages will be permanently removed/)).toBeInTheDocument();
   });
+
+  it("renders Apps & MCP navigation item with neutral icon and aligned count badge", async () => {
+    const user = userEvent.setup();
+    renderSidebar();
+
+    // Verify Apps & MCP button exists
+    const appsBtn = await screen.findByRole("button", { name: /Apps & MCP/i });
+    expect(appsBtn).toBeInTheDocument();
+
+    // Verify the icon inside does not have purple styling
+    const plugIcon = appsBtn.querySelector("svg");
+    expect(plugIcon).toBeInTheDocument();
+    expect(plugIcon?.className).not.toContain("text-purple-500");
+
+    // Default count is 1 for built-in web search
+    expect(screen.getByText("Apps & MCP")).toBeInTheDocument();
+    expect(appsBtn.textContent).toContain("1");
+
+    // Apps & MCP is expanded by default -> Web Search is visible
+    expect(await screen.findByText("Web Search")).toBeInTheDocument();
+    expect(screen.getByText("Add & Manage Apps")).toBeInTheDocument();
+
+    // Clicking appsBtn collapses it
+    await user.click(appsBtn);
+    expect(screen.queryByText("Web Search")).not.toBeInTheDocument();
+
+    // Clicking again expands it
+    await user.click(appsBtn);
+    expect(await screen.findByText("Web Search")).toBeInTheDocument();
+  });
 });

@@ -5,6 +5,7 @@ import type { SharedThread } from "@/lib/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { BrandMark } from "@/components/BrandMark";
+import { HarveyAvatar } from "@/components/HarveyAvatar";
 import { StreamingText } from "@/components/ai/StreamingText";
 
 export function SharedPage() {
@@ -77,7 +78,7 @@ export function SharedPage() {
             </div>
           ) : (
             <div key={m.id} className="flex gap-2.5">
-              <BrandMark className="mt-0.5 size-7 shrink-0" />
+              <HarveyAvatar className="mt-0.5 size-7.5 shrink-0" />
               <div className="min-w-0 flex-1 space-y-1 pt-0.5">
                 <StreamingText
                   content={m.content}

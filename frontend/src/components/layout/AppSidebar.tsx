@@ -118,7 +118,7 @@ function SidebarProject({ project }: { project: Project }) {
           onClick={() => open({ conv: "new" })}
           aria-label={`New chat in ${project.name}`}
           title="New chat in this project"
-          className="hidden shrink-0 p-1.5 pr-2 outline-none group-hover:flex"
+          className="flex shrink-0 p-1.5 pr-2 outline-none text-muted-foreground/70 hover:text-foreground opacity-60 hover:opacity-100 transition-opacity"
         >
           <Plus className="size-3" />
         </button>
@@ -126,6 +126,15 @@ function SidebarProject({ project }: { project: Project }) {
 
       {expanded && (
         <div className="ml-4 pl-2 border-l border-sidebar-border/60 py-1 space-y-0.5 animate-in fade-in duration-150">
+          {/* Direct New Chat button inside the expanded project */}
+          <button
+            type="button"
+            onClick={() => open({ conv: "new" })}
+            className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-[11px] font-medium text-emerald-600 dark:text-emerald-400 hover:bg-sidebar-accent/50 transition-colors"
+          >
+            <Plus className="size-3 shrink-0" />
+            <span>New chat</span>
+          </button>
           {isLoading && (
             <div className="space-y-1.5 px-1 py-1">
               <Skeleton className="h-5 w-4/5 rounded-md" />
@@ -242,9 +251,16 @@ export function AppSidebar() {
   const chatMatch = location.pathname.match(/^\/chat\/([^/]+)$/);
   const selectedId = chatMatch ? chatMatch[1] : null;
 
+  const projectMatch = location.pathname.match(/^\/projects\/([^/]+)$/);
+  const activeProjectId = projectMatch ? projectMatch[1] : null;
+
   function startNewChat() {
     setMobileOpen(false);
-    navigate("/chat");
+    if (activeProjectId) {
+      navigate(`/projects/${activeProjectId}?c=new`);
+    } else {
+      navigate("/chat");
+    }
   }
 
   function selectConversation(id: string) {
@@ -363,7 +379,7 @@ export function AppSidebar() {
           >
             <span className="flex items-center gap-2">
               <Plus className="size-4" />
-              <span>New chat</span>
+              <span>{activeProjectId ? "New project chat" : "New chat"}</span>
             </span>
             <kbd className="font-mono text-[10px] bg-brand-foreground/20 px-1 py-0.5 rounded text-brand-foreground">
               ⌘O
@@ -431,51 +447,36 @@ export function AppSidebar() {
 
           {/* Apps & MCP in the same area as Projects and Workflows */}
           <div className="space-y-0.5">
-            <div
+            <button
+              type="button"
+              onClick={() => setAppsExpanded(!appsExpanded)}
               className={cn(
-                "flex items-center justify-between rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors group",
+                "flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors",
                 appsExpanded
                   ? "bg-sidebar-accent/60 text-sidebar-accent-foreground font-semibold"
                   : "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
               )}
             >
-              <button
-                type="button"
-                onClick={() => setAppsExpanded(!appsExpanded)}
-                className="flex items-center gap-2.5 flex-1 text-left"
-              >
-                <Plug className="size-3.5 shrink-0 text-purple-500" />
-                <span className="flex-1">Apps & MCP</span>
+              <span className="flex items-center gap-2.5">
+                <Plug className="size-3.5 shrink-0" />
+                <span>Apps & MCP</span>
                 <ChevronDown
                   className={cn(
                     "size-3 text-muted-foreground/70 transition-transform duration-200",
                     appsExpanded && "rotate-180"
                   )}
                 />
-              </button>
-              <div className="flex items-center gap-1">
-                <Badge variant="secondary" className="px-1.5 py-0 text-[10px] font-mono h-4">
-                  {(gcalConnected ? 1 : 0) +
-                    (ghConnected ? 1 : 0) +
-                    (slackConnected ? 1 : 0) +
-                    1 +
-                    (webFetchConnected ? 1 : 0) +
-                    (codeRunnerConnected ? 1 : 0) +
-                    (mcpServers?.filter((s) => s.enabled && !s.appId).length ?? 0)}
-                </Badge>
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    openSettings("tools");
-                  }}
-                  className="p-0.5 rounded text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100 transition-opacity"
-                  title="Manage Apps & Integrations"
-                >
-                  <Plus className="size-3" />
-                </button>
-              </div>
-            </div>
+              </span>
+              <Badge variant="secondary" className="px-1.5 py-0 text-[10px] font-mono h-4 shrink-0">
+                {(gcalConnected ? 1 : 0) +
+                  (ghConnected ? 1 : 0) +
+                  (slackConnected ? 1 : 0) +
+                  1 +
+                  (webFetchConnected ? 1 : 0) +
+                  (codeRunnerConnected ? 1 : 0) +
+                  (mcpServers?.filter((s) => s.enabled && !s.appId).length ?? 0)}
+              </Badge>
+            </button>
 
             {appsExpanded && (
               <div className="ml-3 pl-2.5 border-l border-sidebar-border/60 py-1 space-y-0.5 animate-in fade-in duration-150">
@@ -609,7 +610,7 @@ export function AppSidebar() {
                     className="flex w-full items-center justify-between rounded-md px-2 py-1 text-[11px] text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-foreground group"
                   >
                     <div className="flex items-center gap-2 min-w-0">
-                      <Plug className="size-3 shrink-0 text-purple-500" />
+                      <Plug className="size-3 shrink-0 text-muted-foreground" />
                       <span className="truncate">{srv.name}</span>
                     </div>
                     <div className="flex items-center gap-1.5 shrink-0">
@@ -631,11 +632,11 @@ export function AppSidebar() {
                   className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-[11px] text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-foreground group pt-1.5 border-t border-sidebar-border/40 mt-1"
                 >
                   <div className="flex items-center gap-2 min-w-0">
-                    <Plus className="size-3 shrink-0 text-purple-500" />
+                    <Plus className="size-3 shrink-0 text-muted-foreground" />
                     <span className="truncate font-medium text-foreground">Add & Manage Apps</span>
                   </div>
-                  <Badge variant="outline" className="px-1.5 py-0 text-[9px] font-mono h-4 border-purple-500/30 text-purple-600 dark:text-purple-400">
-                    Settings
+                  <Badge variant="outline" className="px-1.5 py-0 text-[9px] font-mono h-4 text-muted-foreground">
+                    Manage
                   </Badge>
                 </button>
               </div>
