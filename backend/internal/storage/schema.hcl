@@ -758,6 +758,11 @@ table "workflows" {
     null    = false
     default = ""
   }
+  column "tool_require_approval" {
+    type    = boolean
+    null    = false
+    default = true
+  }
   column "is_active" {
     type    = boolean
     null    = false
@@ -894,6 +899,20 @@ table "workflow_credentials" {
     type = text
     null = false
   }
+  column "provider" {
+    type    = text
+    null    = false
+    default = ""
+  }
+  column "scopes" {
+    type    = sql("text[]")
+    null    = false
+    default = sql("'{}'::text[]")
+  }
+  column "expires_at" {
+    type = timestamptz
+    null = true
+  }
   column "data" {
     type    = jsonb
     null    = false
@@ -922,4 +941,76 @@ table "workflow_credentials" {
     columns = [column.user_id, column.name]
   }
 }
+
+table "tool_audit_logs" {
+  schema = schema.public
+  column "id" {
+    type    = uuid
+    null    = false
+    default = sql("gen_random_uuid()")
+  }
+  column "user_id" {
+    type = uuid
+    null = false
+  }
+  column "caller_type" {
+    type = text
+    null = false
+  }
+  column "caller_id" {
+    type    = text
+    null    = false
+    default = ""
+  }
+  column "tool_name" {
+    type = text
+    null = false
+  }
+  column "action" {
+    type    = text
+    null    = false
+    default = "execute"
+  }
+  column "input_summary" {
+    type    = text
+    null    = false
+    default = ""
+  }
+  column "output_summary" {
+    type    = text
+    null    = false
+    default = ""
+  }
+  column "status" {
+    type    = text
+    null    = false
+    default = "success"
+  }
+  column "error" {
+    type = text
+    null = true
+  }
+  column "duration_ms" {
+    type    = bigint
+    null    = false
+    default = 0
+  }
+  column "created_at" {
+    type    = timestamptz
+    null    = false
+    default = sql("now()")
+  }
+  primary_key {
+    columns = [column.id]
+  }
+  foreign_key "tool_audit_logs_user_id_fkey" {
+    columns     = [column.user_id]
+    ref_columns = [table.users.column.id]
+    on_delete   = CASCADE
+  }
+  index "idx_tool_audit_logs_user" {
+    columns = [column.user_id, column.created_at]
+  }
+}
+
 

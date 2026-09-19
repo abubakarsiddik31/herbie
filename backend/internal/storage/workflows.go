@@ -14,35 +14,37 @@ import (
 )
 
 type Workflow struct {
-	ID              string          `json:"id"`
-	UserID          string          `json:"userId"`
-	Name            string          `json:"name"`
-	Description     string          `json:"description"`
-	TriggerType     string          `json:"triggerType"`
-	WebhookSlug     *string         `json:"webhookSlug"`
-	WebhookSecret   string          `json:"webhookSecret"`
-	Nodes           json.RawMessage `json:"nodes"`
-	Edges           json.RawMessage `json:"edges"`
-	ExposeAsTool    bool            `json:"exposeAsTool"`
-	ToolName        string          `json:"toolName"`
-	ToolDescription string          `json:"toolDescription"`
-	IsActive        bool            `json:"isActive"`
-	CreatedAt       time.Time       `json:"createdAt"`
-	UpdatedAt       time.Time       `json:"updatedAt"`
+	ID                  string          `json:"id"`
+	UserID              string          `json:"userId"`
+	Name                string          `json:"name"`
+	Description         string          `json:"description"`
+	TriggerType         string          `json:"triggerType"`
+	WebhookSlug         *string         `json:"webhookSlug"`
+	WebhookSecret       string          `json:"webhookSecret"`
+	Nodes               json.RawMessage `json:"nodes"`
+	Edges               json.RawMessage `json:"edges"`
+	ExposeAsTool        bool            `json:"exposeAsTool"`
+	ToolName            string          `json:"toolName"`
+	ToolDescription     string          `json:"toolDescription"`
+	ToolRequireApproval bool            `json:"toolRequireApproval"`
+	IsActive            bool            `json:"isActive"`
+	CreatedAt           time.Time       `json:"createdAt"`
+	UpdatedAt           time.Time       `json:"updatedAt"`
 }
 
 type WorkflowPatch struct {
-	Name            *string
-	Description     *string
-	TriggerType     *string
-	WebhookSlug     *string
-	WebhookSecret   *string
-	Nodes           *json.RawMessage
-	Edges           *json.RawMessage
-	ExposeAsTool    *bool
-	ToolName        *string
-	ToolDescription *string
-	IsActive        *bool
+	Name                *string
+	Description         *string
+	TriggerType         *string
+	WebhookSlug         *string
+	WebhookSecret       *string
+	Nodes               *json.RawMessage
+	Edges               *json.RawMessage
+	ExposeAsTool        *bool
+	ToolName            *string
+	ToolDescription     *string
+	ToolRequireApproval *bool
+	IsActive            *bool
 }
 
 type WorkflowRun struct {
@@ -64,7 +66,10 @@ type WorkflowCredential struct {
 	ID        string          `json:"id"`
 	UserID    string          `json:"userId"`
 	Name      string          `json:"name"`
-	Type      string          `json:"type"` // bearer_token, api_key, basic_auth, custom_header
+	Type      string          `json:"type"` // bearer_token, api_key, basic_auth, custom_header, oauth2
+	Provider  string          `json:"provider"`
+	Scopes    []string        `json:"scopes"`
+	ExpiresAt *time.Time      `json:"expiresAt,omitempty"`
 	Data      json.RawMessage `json:"data"`
 	CreatedAt time.Time       `json:"createdAt"`
 	UpdatedAt time.Time       `json:"updatedAt"`
@@ -79,13 +84,13 @@ func NewWorkflows(pool *pgxpool.Pool) *Workflows {
 }
 
 const workflowColumns = `id, user_id::text, name, description, trigger_type, webhook_slug, webhook_secret,
-	nodes, edges, expose_as_tool, tool_name, tool_description, is_active, created_at, updated_at`
+	nodes, edges, expose_as_tool, tool_name, tool_description, tool_require_approval, is_active, created_at, updated_at`
 
 func scanWorkflow(row pgx.Row) (Workflow, error) {
 	var w Workflow
 	err := row.Scan(
 		&w.ID, &w.UserID, &w.Name, &w.Description, &w.TriggerType, &w.WebhookSlug, &w.WebhookSecret,
-		&w.Nodes, &w.Edges, &w.ExposeAsTool, &w.ToolName, &w.ToolDescription, &w.IsActive,
+		&w.Nodes, &w.Edges, &w.ExposeAsTool, &w.ToolName, &w.ToolDescription, &w.ToolRequireApproval, &w.IsActive,
 		&w.CreatedAt, &w.UpdatedAt,
 	)
 	return w, err
@@ -109,11 +114,11 @@ func (s *Workflows) Create(ctx context.Context, w Workflow) (Workflow, error) {
 	}
 	row := s.pool.QueryRow(ctx,
 		`INSERT INTO workflows (id, user_id, name, description, trigger_type, webhook_slug, webhook_secret,
-		 nodes, edges, expose_as_tool, tool_name, tool_description, is_active)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+		 nodes, edges, expose_as_tool, tool_name, tool_description, tool_require_approval, is_active)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
 		 RETURNING `+workflowColumns,
 		w.ID, w.UserID, w.Name, w.Description, w.TriggerType, w.WebhookSlug, w.WebhookSecret,
-		w.Nodes, w.Edges, w.ExposeAsTool, w.ToolName, w.ToolDescription, w.IsActive,
+		w.Nodes, w.Edges, w.ExposeAsTool, w.ToolName, w.ToolDescription, w.ToolRequireApproval, w.IsActive,
 	)
 	out, err := scanWorkflow(row)
 	if err != nil {
@@ -245,6 +250,10 @@ func (s *Workflows) Update(ctx context.Context, id, userID string, patch Workflo
 	if patch.ToolDescription != nil {
 		args = append(args, *patch.ToolDescription)
 		sets = append(sets, fmt.Sprintf("tool_description = $%d", len(args)))
+	}
+	if patch.ToolRequireApproval != nil {
+		args = append(args, *patch.ToolRequireApproval)
+		sets = append(sets, fmt.Sprintf("tool_require_approval = $%d", len(args)))
 	}
 	if patch.IsActive != nil {
 		args = append(args, *patch.IsActive)
@@ -387,11 +396,11 @@ func (s *Workflows) UpdateRun(ctx context.Context, r WorkflowRun) error {
 
 // WorkflowCredentials store methods
 
-const workflowCredentialColumns = `id, user_id::text, name, type, data, created_at, updated_at`
+const workflowCredentialColumns = `id, user_id::text, name, type, provider, scopes, expires_at, data, created_at, updated_at`
 
 func scanWorkflowCredential(row pgx.Row) (WorkflowCredential, error) {
 	var c WorkflowCredential
-	err := row.Scan(&c.ID, &c.UserID, &c.Name, &c.Type, &c.Data, &c.CreatedAt, &c.UpdatedAt)
+	err := row.Scan(&c.ID, &c.UserID, &c.Name, &c.Type, &c.Provider, &c.Scopes, &c.ExpiresAt, &c.Data, &c.CreatedAt, &c.UpdatedAt)
 	return c, err
 }
 
@@ -402,11 +411,14 @@ func (s *Workflows) CreateCredential(ctx context.Context, c WorkflowCredential) 
 	if len(c.Data) == 0 {
 		c.Data = json.RawMessage("{}")
 	}
+	if c.Scopes == nil {
+		c.Scopes = []string{}
+	}
 	row := s.pool.QueryRow(ctx,
-		`INSERT INTO workflow_credentials (id, user_id, name, type, data)
-		 VALUES ($1, $2, $3, $4, $5)
+		`INSERT INTO workflow_credentials (id, user_id, name, type, provider, scopes, expires_at, data)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		 RETURNING `+workflowCredentialColumns,
-		c.ID, c.UserID, c.Name, c.Type, c.Data,
+		c.ID, c.UserID, c.Name, c.Type, c.Provider, c.Scopes, c.ExpiresAt, c.Data,
 	)
 	out, err := scanWorkflowCredential(row)
 	if err != nil {
@@ -433,6 +445,21 @@ func (s *Workflows) GetCredential(ctx context.Context, id, userID string) (Workf
 	return out, nil
 }
 
+func (s *Workflows) GetCredentialByProvider(ctx context.Context, userID, provider string) (WorkflowCredential, error) {
+	row := s.pool.QueryRow(ctx,
+		`SELECT `+workflowCredentialColumns+` FROM workflow_credentials WHERE user_id = $1 AND provider = $2 ORDER BY updated_at DESC LIMIT 1`,
+		userID, provider,
+	)
+	out, err := scanWorkflowCredential(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return WorkflowCredential{}, ErrNotFound
+	}
+	if err != nil {
+		return WorkflowCredential{}, fmt.Errorf("get workflow credential by provider: %w", err)
+	}
+	return out, nil
+}
+
 func (s *Workflows) ListCredentials(ctx context.Context, userID string) ([]WorkflowCredential, error) {
 	rows, err := s.pool.Query(ctx,
 		`SELECT `+workflowCredentialColumns+` FROM workflow_credentials WHERE user_id = $1 ORDER BY name`,
@@ -455,12 +482,15 @@ func (s *Workflows) ListCredentials(ctx context.Context, userID string) ([]Workf
 }
 
 func (s *Workflows) UpdateCredential(ctx context.Context, c WorkflowCredential) (WorkflowCredential, error) {
+	if c.Scopes == nil {
+		c.Scopes = []string{}
+	}
 	row := s.pool.QueryRow(ctx,
 		`UPDATE workflow_credentials
-		 SET name = $3, type = $4, data = $5, updated_at = now()
+		 SET name = $3, type = $4, provider = $5, scopes = $6, expires_at = $7, data = $8, updated_at = now()
 		 WHERE id = $1 AND user_id = $2
 		 RETURNING `+workflowCredentialColumns,
-		c.ID, c.UserID, c.Name, c.Type, c.Data,
+		c.ID, c.UserID, c.Name, c.Type, c.Provider, c.Scopes, c.ExpiresAt, c.Data,
 	)
 	out, err := scanWorkflowCredential(row)
 	if errors.Is(err, pgx.ErrNoRows) {

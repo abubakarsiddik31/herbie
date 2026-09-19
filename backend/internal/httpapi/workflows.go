@@ -35,6 +35,7 @@ type WorkflowStore interface {
 
 	CreateCredential(ctx context.Context, c storage.WorkflowCredential) (storage.WorkflowCredential, error)
 	GetCredential(ctx context.Context, id, userID string) (storage.WorkflowCredential, error)
+	GetCredentialByProvider(ctx context.Context, userID, provider string) (storage.WorkflowCredential, error)
 	ListCredentials(ctx context.Context, userID string) ([]storage.WorkflowCredential, error)
 	UpdateCredential(ctx context.Context, c storage.WorkflowCredential) (storage.WorkflowCredential, error)
 	DeleteCredential(ctx context.Context, id, userID string) error
@@ -43,38 +44,40 @@ type WorkflowStore interface {
 var _ WorkflowStore = (*storage.Workflows)(nil)
 
 type workflowDTO struct {
-	ID              string          `json:"id"`
-	Name            string          `json:"name"`
-	Description     string          `json:"description"`
-	TriggerType     string          `json:"triggerType"`
-	WebhookSlug     *string         `json:"webhookSlug"`
-	WebhookSecret   string          `json:"webhookSecret,omitempty"`
-	Nodes           json.RawMessage `json:"nodes"`
-	Edges           json.RawMessage `json:"edges"`
-	ExposeAsTool    bool            `json:"exposeAsTool"`
-	ToolName        string          `json:"toolName"`
-	ToolDescription string          `json:"toolDescription"`
-	IsActive        bool            `json:"isActive"`
-	CreatedAt       string          `json:"createdAt"`
-	UpdatedAt       string          `json:"updatedAt"`
+	ID                  string          `json:"id"`
+	Name                string          `json:"name"`
+	Description         string          `json:"description"`
+	TriggerType         string          `json:"triggerType"`
+	WebhookSlug         *string         `json:"webhookSlug"`
+	WebhookSecret       string          `json:"webhookSecret,omitempty"`
+	Nodes               json.RawMessage `json:"nodes"`
+	Edges               json.RawMessage `json:"edges"`
+	ExposeAsTool        bool            `json:"exposeAsTool"`
+	ToolName            string          `json:"toolName"`
+	ToolDescription     string          `json:"toolDescription"`
+	ToolRequireApproval bool            `json:"toolRequireApproval"`
+	IsActive            bool            `json:"isActive"`
+	CreatedAt           string          `json:"createdAt"`
+	UpdatedAt           string          `json:"updatedAt"`
 }
 
 func toWorkflowDTO(w storage.Workflow) workflowDTO {
 	return workflowDTO{
-		ID:              w.ID,
-		Name:            w.Name,
-		Description:     w.Description,
-		TriggerType:     w.TriggerType,
-		WebhookSlug:     w.WebhookSlug,
-		WebhookSecret:   w.WebhookSecret,
-		Nodes:           w.Nodes,
-		Edges:           w.Edges,
-		ExposeAsTool:    w.ExposeAsTool,
-		ToolName:        w.ToolName,
-		ToolDescription: w.ToolDescription,
-		IsActive:        w.IsActive,
-		CreatedAt:       w.CreatedAt.UTC().Format(timeRFC3339),
-		UpdatedAt:       w.UpdatedAt.UTC().Format(timeRFC3339),
+		ID:                  w.ID,
+		Name:                w.Name,
+		Description:         w.Description,
+		TriggerType:         w.TriggerType,
+		WebhookSlug:         w.WebhookSlug,
+		WebhookSecret:       w.WebhookSecret,
+		Nodes:               w.Nodes,
+		Edges:               w.Edges,
+		ExposeAsTool:        w.ExposeAsTool,
+		ToolName:            w.ToolName,
+		ToolDescription:     w.ToolDescription,
+		ToolRequireApproval: w.ToolRequireApproval,
+		IsActive:            w.IsActive,
+		CreatedAt:           w.CreatedAt.UTC().Format(timeRFC3339),
+		UpdatedAt:           w.UpdatedAt.UTC().Format(timeRFC3339),
 	}
 }
 
@@ -117,26 +120,67 @@ type credentialDTO struct {
 	ID        string            `json:"id"`
 	Name      string            `json:"name"`
 	Type      string            `json:"type"`
+	Provider  string            `json:"provider,omitempty"`
+	Scopes    []string          `json:"scopes,omitempty"`
+	ExpiresAt *string           `json:"expiresAt,omitempty"`
 	Data      map[string]string `json:"data"` // masked
 	CreatedAt string            `json:"createdAt"`
 	UpdatedAt string            `json:"updatedAt"`
 }
 
-func toCredentialDTO(c storage.WorkflowCredential) credentialDTO {
+func (s *Server) toCredentialDTO(c storage.WorkflowCredential) credentialDTO {
+	raw := c.Data
+	if s.deps.Vault != nil {
+		if dec, err := s.deps.Vault.Decrypt(c.Data); err == nil {
+			raw = dec
+		}
+	}
 	data := map[string]string{}
-	_ = json.Unmarshal(c.Data, &data)
+	_ = json.Unmarshal(raw, &data)
 	masked := make(map[string]string, len(data))
 	for k := range data {
 		masked[k] = headerMask
+	}
+	var expStr *string
+	if c.ExpiresAt != nil {
+		formatted := c.ExpiresAt.UTC().Format(timeRFC3339)
+		expStr = &formatted
 	}
 	return credentialDTO{
 		ID:        c.ID,
 		Name:      c.Name,
 		Type:      c.Type,
+		Provider:  c.Provider,
+		Scopes:    c.Scopes,
+		ExpiresAt: expStr,
 		Data:      masked,
 		CreatedAt: c.CreatedAt.UTC().Format(timeRFC3339),
 		UpdatedAt: c.UpdatedAt.UTC().Format(timeRFC3339),
 	}
+}
+
+func (s *Server) resolveWorkflowCredentials(ctx context.Context, userID string) map[string]map[string]any {
+	if s.deps.Workflows == nil {
+		return nil
+	}
+	credList, err := s.deps.Workflows.ListCredentials(ctx, userID)
+	if err != nil {
+		return nil
+	}
+	res := make(map[string]map[string]any, len(credList))
+	for _, c := range credList {
+		raw := c.Data
+		if s.deps.Vault != nil {
+			if dec, err := s.deps.Vault.Decrypt(c.Data); err == nil {
+				raw = dec
+			}
+		}
+		var d map[string]any
+		if err := json.Unmarshal(raw, &d); err == nil {
+			res[c.Name] = d
+		}
+	}
+	return res
 }
 
 // Handler implementations
@@ -166,17 +210,18 @@ func (s *Server) handleCreateWorkflow(w http.ResponseWriter, r *http.Request) {
 	}
 	userID, _ := userIDFrom(r.Context())
 	var req struct {
-		Name            string          `json:"name"`
-		Description     string          `json:"description"`
-		TriggerType     string          `json:"triggerType"`
-		WebhookSlug     *string         `json:"webhookSlug"`
-		WebhookSecret   string          `json:"webhookSecret"`
-		Nodes           json.RawMessage `json:"nodes"`
-		Edges           json.RawMessage `json:"edges"`
-		ExposeAsTool    bool            `json:"exposeAsTool"`
-		ToolName        string          `json:"toolName"`
-		ToolDescription string          `json:"toolDescription"`
-		IsActive        bool            `json:"isActive"`
+		Name                string          `json:"name"`
+		Description         string          `json:"description"`
+		TriggerType         string          `json:"triggerType"`
+		WebhookSlug         *string         `json:"webhookSlug"`
+		WebhookSecret       string          `json:"webhookSecret"`
+		Nodes               json.RawMessage `json:"nodes"`
+		Edges               json.RawMessage `json:"edges"`
+		ExposeAsTool        bool            `json:"exposeAsTool"`
+		ToolName            string          `json:"toolName"`
+		ToolDescription     string          `json:"toolDescription"`
+		ToolRequireApproval *bool           `json:"toolRequireApproval"`
+		IsActive            bool            `json:"isActive"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_json", "malformed request body")
@@ -190,19 +235,25 @@ func (s *Server) handleCreateWorkflow(w http.ResponseWriter, r *http.Request) {
 		req.WebhookSlug = nil
 	}
 
+	requireApproval := true
+	if req.ToolRequireApproval != nil {
+		requireApproval = *req.ToolRequireApproval
+	}
+
 	created, err := s.deps.Workflows.Create(r.Context(), storage.Workflow{
-		UserID:          userID,
-		Name:            req.Name,
-		Description:     req.Description,
-		TriggerType:     req.TriggerType,
-		WebhookSlug:     req.WebhookSlug,
-		WebhookSecret:   req.WebhookSecret,
-		Nodes:           req.Nodes,
-		Edges:           req.Edges,
-		ExposeAsTool:    req.ExposeAsTool,
-		ToolName:        req.ToolName,
-		ToolDescription: req.ToolDescription,
-		IsActive:        req.IsActive,
+		UserID:              userID,
+		Name:                req.Name,
+		Description:         req.Description,
+		TriggerType:         req.TriggerType,
+		WebhookSlug:         req.WebhookSlug,
+		WebhookSecret:       req.WebhookSecret,
+		Nodes:               req.Nodes,
+		Edges:               req.Edges,
+		ExposeAsTool:        req.ExposeAsTool,
+		ToolName:            req.ToolName,
+		ToolDescription:     req.ToolDescription,
+		ToolRequireApproval: requireApproval,
+		IsActive:            req.IsActive,
 	})
 	if err != nil {
 		if errors.Is(err, storage.ErrDuplicate) {
@@ -243,17 +294,18 @@ func (s *Server) handlePatchWorkflow(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
 	var req struct {
-		Name            *string          `json:"name"`
-		Description     *string          `json:"description"`
-		TriggerType     *string          `json:"triggerType"`
-		WebhookSlug     *string          `json:"webhookSlug"`
-		WebhookSecret   *string          `json:"webhookSecret"`
-		Nodes           *json.RawMessage `json:"nodes"`
-		Edges           *json.RawMessage `json:"edges"`
-		ExposeAsTool    *bool            `json:"exposeAsTool"`
-		ToolName        *string          `json:"toolName"`
-		ToolDescription *string          `json:"toolDescription"`
-		IsActive        *bool            `json:"isActive"`
+		Name                *string          `json:"name"`
+		Description         *string          `json:"description"`
+		TriggerType         *string          `json:"triggerType"`
+		WebhookSlug         *string          `json:"webhookSlug"`
+		WebhookSecret       *string          `json:"webhookSecret"`
+		Nodes               *json.RawMessage `json:"nodes"`
+		Edges               *json.RawMessage `json:"edges"`
+		ExposeAsTool        *bool            `json:"exposeAsTool"`
+		ToolName            *string          `json:"toolName"`
+		ToolDescription     *string          `json:"toolDescription"`
+		ToolRequireApproval *bool            `json:"toolRequireApproval"`
+		IsActive            *bool            `json:"isActive"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_json", "malformed request body")
@@ -261,17 +313,18 @@ func (s *Server) handlePatchWorkflow(w http.ResponseWriter, r *http.Request) {
 	}
 
 	updated, err := s.deps.Workflows.Update(r.Context(), id, userID, storage.WorkflowPatch{
-		Name:            req.Name,
-		Description:     req.Description,
-		TriggerType:     req.TriggerType,
-		WebhookSlug:     req.WebhookSlug,
-		WebhookSecret:   req.WebhookSecret,
-		Nodes:           req.Nodes,
-		Edges:           req.Edges,
-		ExposeAsTool:    req.ExposeAsTool,
-		ToolName:        req.ToolName,
-		ToolDescription: req.ToolDescription,
-		IsActive:        req.IsActive,
+		Name:                req.Name,
+		Description:         req.Description,
+		TriggerType:         req.TriggerType,
+		WebhookSlug:         req.WebhookSlug,
+		WebhookSecret:       req.WebhookSecret,
+		Nodes:               req.Nodes,
+		Edges:               req.Edges,
+		ExposeAsTool:        req.ExposeAsTool,
+		ToolName:            req.ToolName,
+		ToolDescription:     req.ToolDescription,
+		ToolRequireApproval: req.ToolRequireApproval,
+		IsActive:            req.IsActive,
 	})
 	if err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
@@ -340,17 +393,12 @@ func (s *Server) handleRunWorkflow(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Fetch user credentials
-	credList, _ := s.deps.Workflows.ListCredentials(r.Context(), userID)
-	credentialsMap := make(map[string]map[string]any, len(credList))
-	for _, c := range credList {
-		var d map[string]any
-		_ = json.Unmarshal(c.Data, &d)
-		credentialsMap[c.Name] = d
-	}
+	credentialsMap := s.resolveWorkflowCredentials(r.Context(), userID)
 
-	// Build execution environment
+	// Build execution environment with safe HTTP client
+	safeClient := workflow.NewSafeHTTPClient(s.deps.Cfg.ToolAllowPrivateHosts, 30*time.Second)
 	env := &workflow.ExecutionEnvironment{
-		HTTPClient:        http.DefaultClient,
+		HTTPClient:        safeClient,
 		AllowPrivateHosts: s.deps.Cfg.ToolAllowPrivateHosts,
 		UserID:            userID,
 		ModelResolver: func(modelName string) (model.StreamingModel, error) {
@@ -456,6 +504,21 @@ func (s *Server) handleRunWorkflow(w http.ResponseWriter, r *http.Request) {
 		DurationMs:  res.DurationMs,
 	})
 
+	if s.deps.Audits != nil {
+		_ = s.deps.Audits.RecordToolAudit(r.Context(), storage.ToolAuditLog{
+			UserID:       userID,
+			CallerType:   "workflow",
+			CallerID:     wf.ID,
+			ToolName:     wf.Name,
+			Action:       "run",
+			InputSummary: fmt.Sprintf("%v", req.Input),
+			Status:       res.Status,
+			Error:        errStr,
+			DurationMs:   res.DurationMs,
+			CreatedAt:    time.Now(),
+		})
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"run": toWorkflowRunDTO(storage.WorkflowRun{
 			ID:            runRecord.ID,
@@ -534,7 +597,7 @@ func (s *Server) handleListWorkflowCredentials(w http.ResponseWriter, r *http.Re
 	}
 	dtos := make([]credentialDTO, len(list))
 	for i, c := range list {
-		dtos[i] = toCredentialDTO(c)
+		dtos[i] = s.toCredentialDTO(c)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"credentials": dtos})
 }
@@ -560,11 +623,17 @@ func (s *Server) handleCreateWorkflowCredential(w http.ResponseWriter, r *http.R
 	}
 
 	dataBytes, _ := json.Marshal(req.Data)
+	var storedData json.RawMessage = dataBytes
+	if s.deps.Vault != nil {
+		if enc, err := s.deps.Vault.Encrypt(dataBytes); err == nil {
+			storedData = enc
+		}
+	}
 	created, err := s.deps.Workflows.CreateCredential(r.Context(), storage.WorkflowCredential{
 		UserID: userID,
 		Name:   req.Name,
 		Type:   req.Type,
-		Data:   dataBytes,
+		Data:   storedData,
 	})
 	if err != nil {
 		if errors.Is(err, storage.ErrDuplicate) {
@@ -574,7 +643,7 @@ func (s *Server) handleCreateWorkflowCredential(w http.ResponseWriter, r *http.R
 		writeError(w, http.StatusInternalServerError, "internal", "could not create credential")
 		return
 	}
-	writeJSON(w, http.StatusCreated, toCredentialDTO(created))
+	writeJSON(w, http.StatusCreated, s.toCredentialDTO(created))
 }
 
 func (s *Server) handleDeleteWorkflowCredential(w http.ResponseWriter, r *http.Request) {
@@ -670,16 +739,11 @@ func (s *Server) handlePublicWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Fetch credentials
-	credList, _ := s.deps.Workflows.ListCredentials(r.Context(), wf.UserID)
-	credentialsMap := make(map[string]map[string]any, len(credList))
-	for _, c := range credList {
-		var d map[string]any
-		_ = json.Unmarshal(c.Data, &d)
-		credentialsMap[c.Name] = d
-	}
+	credentialsMap := s.resolveWorkflowCredentials(r.Context(), wf.UserID)
 
+	safeClient := workflow.NewSafeHTTPClient(s.deps.Cfg.ToolAllowPrivateHosts, 30*time.Second)
 	env := &workflow.ExecutionEnvironment{
-		HTTPClient:        http.DefaultClient,
+		HTTPClient:        safeClient,
 		AllowPrivateHosts: s.deps.Cfg.ToolAllowPrivateHosts,
 		UserID:            wf.UserID,
 		ModelResolver: func(modelName string) (model.StreamingModel, error) {
@@ -791,6 +855,22 @@ func (s *Server) workflowTools(ctx context.Context, userID string) ([]tool.Tool[
 			}`),
 			Timeout: 60 * time.Second,
 			Exec: func(ctx context.Context, _ chat.Deps, args json.RawMessage) (tool.Result, error) {
+				if flow.ToolRequireApproval && !tool.CallApproved(ctx) {
+					if s.deps.Audits != nil {
+						_ = s.deps.Audits.RecordToolAudit(ctx, storage.ToolAuditLog{
+							UserID:       flow.UserID,
+							CallerType:   "chat_agent",
+							CallerID:     flow.ID,
+							ToolName:     toolName,
+							Action:       "approval_requested",
+							InputSummary: string(args),
+							Status:       "approval_pending",
+							DurationMs:   0,
+						})
+					}
+					return tool.Result{}, &tool.Deferred{Kind: tool.DeferApproval, Reason: "Workflow execution requires user approval"}
+				}
+
 				nodes, edges, perr := workflow.ParseWorkflowGraph(flow.Nodes, flow.Edges)
 				if perr != nil {
 					return tool.Text("Workflow error: " + perr.Error()), nil
@@ -798,16 +878,11 @@ func (s *Server) workflowTools(ctx context.Context, userID string) ([]tool.Tool[
 				var parsedArgs any
 				_ = json.Unmarshal(args, &parsedArgs)
 
-				credList, _ := s.deps.Workflows.ListCredentials(ctx, flow.UserID)
-				credentialsMap := make(map[string]map[string]any, len(credList))
-				for _, c := range credList {
-					var d map[string]any
-					_ = json.Unmarshal(c.Data, &d)
-					credentialsMap[c.Name] = d
-				}
+				credentialsMap := s.resolveWorkflowCredentials(ctx, flow.UserID)
 
+				safeClient := workflow.NewSafeHTTPClient(s.deps.Cfg.ToolAllowPrivateHosts, 30*time.Second)
 				env := &workflow.ExecutionEnvironment{
-					HTTPClient:        http.DefaultClient,
+					HTTPClient:        safeClient,
 					AllowPrivateHosts: s.deps.Cfg.ToolAllowPrivateHosts,
 					UserID:            flow.UserID,
 					ModelResolver: func(modelName string) (model.StreamingModel, error) {
@@ -824,6 +899,31 @@ func (s *Server) workflowTools(ctx context.Context, userID string) ([]tool.Tool[
 					Credentials:   credentialsMap,
 					Env:           env,
 				})
+
+				status := "success"
+				var errStr *string
+				if rerr != nil {
+					status = "failed"
+					s := rerr.Error()
+					errStr = &s
+				} else if runRes.Status == "failed" {
+					status = "failed"
+					errStr = &runRes.Error
+				}
+				if s.deps.Audits != nil {
+					_ = s.deps.Audits.RecordToolAudit(ctx, storage.ToolAuditLog{
+						UserID:       flow.UserID,
+						CallerType:   "chat_agent",
+						CallerID:     flow.ID,
+						ToolName:     toolName,
+						Action:       "execute",
+						InputSummary: string(args),
+						Status:       status,
+						Error:        errStr,
+						DurationMs:   runRes.DurationMs,
+					})
+				}
+
 				if rerr != nil {
 					return tool.Text("Workflow error: " + rerr.Error()), nil
 				}

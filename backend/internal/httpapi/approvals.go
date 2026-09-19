@@ -5,6 +5,7 @@ import (
 	"errors"
 	"math"
 	"net/http"
+	"time"
 
 	"github.com/abubakarsiddik31/golem"
 	"github.com/abubakarsiddik31/golem-chatbot/internal/chat"
@@ -71,6 +72,26 @@ func (s *Server) handleApprovals(w http.ResponseWriter, r *http.Request) {
 		}
 		seen[d.CallID] = true
 		resolutions[d.CallID] = golem.Approval{Approved: d.Approved, Reason: d.Reason}
+		if s.deps.Audits != nil {
+			action := "approval_granted"
+			decisionStatus := "approved"
+			if !d.Approved {
+				action = "approval_rejected"
+				decisionStatus = "rejected"
+			}
+			call := pendingByID[d.CallID]
+			_ = s.deps.Audits.RecordToolAudit(ctx, storage.ToolAuditLog{
+				UserID:       userID,
+				CallerType:   "chat_agent",
+				CallerID:     convID,
+				ToolName:     call.ToolName,
+				Action:       action,
+				InputSummary: string(call.Args),
+				Status:       decisionStatus,
+				DurationMs:   0,
+				CreatedAt:    time.Now(),
+			})
+		}
 	}
 	if len(seen) != len(pendingByID) {
 		writeError(w, http.StatusBadRequest, "validation_error", "every pending call needs a decision")
