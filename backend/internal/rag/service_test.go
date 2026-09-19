@@ -358,4 +358,22 @@ func TestObjectKey(t *testing.T) {
 	if len(ObjectKey("u1", "d1", long)) > 9100 {
 		t.Fatal("long filename not bounded")
 	}
+
+	// Project-scoped key has folder layer: u1/projects/p1/d1/filename
+	projKey := ProjectObjectKey("u1", "p1", "d1", "notes.md")
+	if projKey != "u1/projects/p1/d1/notes.md" {
+		t.Fatalf("unexpected project key: %q", projKey)
+	}
+	if parsedProj := ParsedObjectKey(projKey); parsedProj != "u1/projects/p1/d1/parsed.md" {
+		t.Fatalf("unexpected parsed project key: %q", parsedProj)
+	}
+
+	// Document-scoped key has folder layer: u1/documents/d1/filename
+	docKey := DocumentObjectKey("u1", "d1", "notes.md")
+	if docKey != "u1/documents/d1/notes.md" {
+		t.Fatalf("unexpected doc key: %q", docKey)
+	}
+	if parsedDoc := ParsedObjectKey(docKey); parsedDoc != "u1/documents/d1/parsed.md" {
+		t.Fatalf("unexpected parsed doc key: %q", parsedDoc)
+	}
 }
