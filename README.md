@@ -1,229 +1,268 @@
+<div align="center">
+
 # Herbie
 
-> **The free, flexible open-source AI platform.**  
-> Built as an open alternative to ChatGPT Plus and Claude Pro for developers and power users who want complete flexibility, multi-model choice, visual automation workflows, custom tools, and self-hosted RAG without vendor lock-in.
+**The free, self-hosted open alternative to ChatGPT Plus and Claude Pro.**  
+Built for developers and power users who want multi-model freedom, visual workflow automation, 1-click MCP apps, custom API tools, and production-grade RAG without vendor lock-in.
 
-Powered under the hood by [golem](https://github.com/abubakarsiddik31/golem) (a high-performance Go agent framework) with a fast React 19 + TypeScript SPA frontend.
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Go Version](https://img.shields.io/badge/Go-1.23%2B-00ADD8?logo=go&logoColor=white)](https://go.dev/)
+[![React Version](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)](https://react.dev/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-v4-06B6D4?logo=tailwindcss&logoColor=white)](https://tailwindcss.com/)
+[![Docker Compose](https://img.shields.io/badge/Docker_Compose-Ready-2496ED?logo=docker&logoColor=white)](deploy/docker-compose.yml)
 
-### Why Herbie?
-- 🌐 **Multi-Model Freedom**: Chat with Gemini, OpenAI, Claude, or local proxies — switch models per-conversation without losing context.
-- 📁 **Project Workspaces**: Claude-style scoped projects with attached files, persistent guidelines, and isolated RAG knowledge.
-- ⚡ **Visual Workflows**: Node-based automation canvas (n8n-style via `@xyflow/react`) — execute triggers, HTTP requests, LLMs, and expose workflows directly as native agent tools!
-- 🛠️ **Custom API Tools & Web Search**: Register any HTTP API with JSON parameters and optional human-in-the-loop approval cards, plus built-in Brave/Tavily web search.
-- 📚 **Production RAG**: Document uploads (PDF, DOCX, MD, TXT), chunking, Weaviate vector embeddings, listwise LLM reranking, and exact inline citations `[n]`.
-- 📊 **Exact Cost & Token Metering**: Real-time per-run token counters, daily spend ledgers, and exact USD cost calculations down to $0.00001.
-- 🎙️ **Multimodal & Voice**: Image attachments (up to 4 images) and speech-to-text dictation via browser Web Speech API.
+[Quickstart](#quickstart) • [Features](#features) • [Architecture](#architecture) • [Workflows](#visual-workflow-automation) • [Production RAG](#production-rag) • [Tools & Search](#tools--built-in-web-search) • [Contributing](CONTRIBUTING.md)
+
+</div>
+
+---
+
+## Why Herbie?
+
+SaaS AI subscriptions lock you into a single provider, hide token costs, silo your documents, and limit your automation abilities. **Herbie** gives you back full control with an interface that matches the polish of commercial chat apps while running entirely on your infrastructure.
+
+Under the hood, Herbie pairs a high-concurrency Go backend powered by [golem](https://github.com/abubakarsiddik31/golem) with an instant React 19 + TypeScript frontend.
+
+```text
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                                   HERBIE                                     │
+├──────────────────────────────────────────────────────────────────────────────┤
+│  ⚡ Multi-Model Chat     │  📁 Scoped Projects     │  ⚡ Visual Workflows     │
+│  Gemini · OpenAI · Claude│  Custom prompt + docs   │  n8n-style canvas nodes │
+├──────────────────────────┼─────────────────────────┼─────────────────────────┤
+│  🔌 Curated MCP Apps     │  🛠️ Custom API Tools    │  📚 Production RAG       │
+│  Model Context Protocol  │  Human-in-the-loop      │  Weaviate · Re-ranking  │
+├──────────────────────────┼─────────────────────────┼─────────────────────────┤
+│  📊 Micro-USD Metering   │  🎙️ Multimodal & Voice  │  🔒 Privacy & Security  │
+│  Sub-cent spend ledger   │  Images + Web Speech    │  In-memory JWT + Rotate │
+└──────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Features
+
+### 🌐 Multi-Model Freedom
+- **Per-Conversation Model Selection**: Chat with **Google Gemini** (Gemini 2.5 Flash, 3.5 Flash), **OpenAI** (GPT-4o, GPT-4o-mini), **Anthropic** (Claude 3.5 Sonnet), or custom **local proxy endpoints** (Ollama, vLLM, LiteLLM).
+- **Independent Context & Settings**: Customize system instructions, temperature, and model parameters on any conversation thread at any time.
+- **Deep Thread History**: URL-addressable threads (`/chat/:id`), message editing with downstream history truncation, response regeneration, and single-click markdown export.
+
+### 📁 Claude-Style Project Workspaces
+- Organize conversations, documents, and reference materials into isolated project spaces.
+- Set workspace-level instructions and pin relevant project files that automatically feed the agent's context window.
+
+### ⚡ Visual Workflow Automation (Canvas Nodes)
+- Node-based automation canvas powered by `@xyflow/react` on `/workflows`.
+- **Triggers**: Manual execution, test payloads, or unique incoming Webhook URLs (`/api/webhooks/:slug` with optional secret verification).
+- **Core Nodes**: Universal HTTP requests (GET/POST/PUT/DELETE with Basic, Bearer, or API-key auth), Golem custom tools bridge, Slack, Discord, and GitHub issue/comment actions.
+- **AI Transformations**: Prompt catalog models with templating and structured JSON outputs.
+- **Agent Tool Bridge**: Flip **"Expose as Agent Tool"** on any workflow so the main chat assistant can autonomously run your workflow as a native tool during conversation!
+
+### 🔌 1-Click MCP (Model Context Protocol) Apps
+- Connect external capabilities seamlessly via standard Model Context Protocol.
+- Built-in curated catalog to link and unlink integrations with single-click OAuth popup authorization.
+- Deduplicated tool namespaces with active status indicators directly in the chat sidebar.
+
+### 🛠️ Custom Tools & Built-in Web Search
+- **API Tool Builder**: Register any HTTP endpoint with JSON parameters, static headers, and path/query parameter binding. Includes a gallery of 18 pre-built templates (Weather, GitHub, Hacker News, Wikipedia, Crypto rates, etc.).
+- **Human-in-the-Loop Safety**: Enable *"Ask before running"* to pause agent execution and prompt you with an interactive Approve/Deny card before making external requests.
+- **Built-in Web Search**: First-class web search support powered by **Wigolo** (local-first, keyless on-device engine), **Tavily**, or **Brave Search** with verified markdown citations.
+- **SSRF Hardening**: Strict DNS-level validation blocks loopback, private RFC-1918, and link-local destinations.
+
+### 📚 Production RAG (Retrieval-Augmented Generation)
+- **Multi-Format Extraction**: Ingest PDF, DOCX, Markdown, and TXT files (up to 20 MB).
+- **Hybrid Vector + Keyword Search**: Dense vectors in Weaviate (`gemini-embedding-001`, 768 dims) combined with BM25 keyword matching.
+- **Listwise LLM Re-Ranking**: Filters candidate chunks with listwise re-ranking before injecting into the prompt context.
+- **Strict Bracket Citations**: Verified `[n] (Doc § Heading, p.N)` citations referencing only chunks actually retrieved, paired with interactive source cards.
+- **Hot History Compaction**: Threads exceeding token thresholds automatically compress older turns without losing context.
+
+### 📊 Exact Token & Spend Metering
+- Real-time token counters on every assistant response.
+- Micro-USD spend ledger calculating prompt, completion, embedding, and re-ranking costs down to **$0.00001**.
+- Usage dashboard featuring 30-day burn charts, per-model consumption tables, and document storage metrics.
+
+### 🎙️ Multimodal Vision & Client-Side Voice
+- Attach up to 4 images (PNG, JPEG, WebP, GIF, ≤ 4 MB each) per prompt for vision-capable models.
+- Hands-free dictation using the browser's native Web Speech API (speech processing stays completely local to your browser).
+
+### 🔒 Enterprise Security Core
+- **In-Memory JWT**: Short-lived (15 min) HS256 access tokens stored only in frontend memory to prevent XSS credential exfiltration.
+- **HttpOnly Rotating Refresh**: 30-day opaque refresh cookies (`SameSite=Lax`, path `/api/auth`) with automatic single-use rotation and family reuse revocation.
+- **Silent Refresh on Reload**: Seamless session restoration on browser refresh without leaking tokens to `localStorage`.
+
+---
 
 ## Architecture
 
 ```text
-┌────────────┐   REST /api/* + SSE    ┌──────────────────────────────────┐
-│ React SPA  │◄──────────────────────►│ Go backend (stdlib net/http)     │
-│ Vite + TS  │  SSE over fetch (JWT)  │  golem agent → Gemini/OpenAI/    │
-└────────────┘                        │  Anthropic (server-configured)   │
-                                      └──────┬───────┬───────┬──────┘
-                                         Postgres  Weaviate* MinIO*
-                                             └─── provider APIs
-  * Phase 2c (RAG) — composed behind the `rag` docker profile, dormant until then
+┌──────────────────────────────────────────────────────────────────────────┐
+│                         Browser (React 19 SPA)                           │
+│     Vite · Tailwind CSS v4 · Zustand (In-Memory Auth) · @xyflow/react     │
+└─────────────────────────────────┬────────────────────────────────────────┘
+                                  │ REST /api/* + Server-Sent Events (SSE)
+                                  ▼
+┌──────────────────────────────────────────────────────────────────────────┐
+│                         Herbie Go Backend                                │
+│       net/http · Golem Agent Engine · Vault Encryption · SafeHTTP SSRF    │
+└──────────────┬──────────────────┬──────────────────┬─────────────────────┘
+               │                  │                  │
+               ▼                  ▼                  ▼
+      ┌────────────────┐  ┌──────────────┐  ┌──────────────────┐
+      │   PostgreSQL   │  │   Weaviate   │  │      MinIO       │
+      │ Users, History │  │ Vector Store │  │ Original Uploads │
+      │  Usage Ledger  │  │ Hybrid Index │  │  Object Storage  │
+      └────────────────┘  └──────────────┘  └──────────────────┘
+               │
+               ▼
+┌──────────────────────────────────────────────────────────────────────────┐
+│                    External Providers & APIs                             │
+│       Gemini · OpenAI · Claude · Tavily · Brave · Custom Webhooks        │
+└──────────────────────────────────────────────────────────────────────────┘
 ```
 
-## Models, settings, and multimodal chat
-
-The model is a **per-conversation setting**, not a server constant. The server
-advertises a curated catalog (`backend/internal/chat/catalog.go`) filtered by
-which provider keys are configured in the environment — `GEMINI_API_KEY`,
-optional `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` (base URLs overridable for
-proxies). Every conversation carries its own model, temperature (or provider
-default), and system prompt; the composer's settings dialog edits them, and a
-model registry resolves each run to a cached provider client. Per-model rates
-price the usage ledger, so the dashboard's per-model table stays exact across
-providers.
-
-Chat is multimodal: attach up to 4 images (PNG/JPEG/WebP/GIF, ≤ 4 MB each) per
-message and any catalog model answers over them via golem's image parts;
-attachments persist with the message and replay in history. The composer also
-dictates via the browser's Web Speech API (Chrome/Edge/Safari) — speech never
-leaves the browser.
-
-Threads behave the way you expect: conversation selection lives in the URL
-(`/chat/<id>`), user messages can be edited and resent (truncating what
-followed), the last answer can be regenerated, code blocks and messages have
-copy buttons, and every answer shows its tokens, cost, and model.
+---
 
 ## Quickstart
 
+### Prerequisites
+- [Docker & Docker Compose](https://docs.docker.com/get-docker/)
+- [Go 1.23+](https://go.dev/dl/)
+- [Node.js 20+](https://nodejs.org/) & `npm`
+
+### 1. Clone & Configure
 ```bash
-cp .env.example .env   # fill in GEMINI_API_KEY
-make up                # Postgres via docker compose
-make backend           # go run ./cmd/server  (default :8080)
-make frontend          # vite dev server      (default :5173)
+git clone https://github.com/abubakarsiddik31/herbie.git
+cd herbie
+
+cp .env.example .env
 ```
 
-Then open http://localhost:5173 and register an account.
-
-## Social login
-
-Google and GitHub sign-in are optional and off unless configured — the login
-UI only shows providers with both a client ID and secret set:
-
-```bash
-OAUTH_GOOGLE_CLIENT_ID=…      # Google Cloud console → Credentials → OAuth client
-OAUTH_GOOGLE_CLIENT_SECRET=…
-OAUTH_GITHUB_CLIENT_ID=…      # GitHub Settings → Developer settings → OAuth Apps
-OAUTH_GITHUB_CLIENT_SECRET=…
-# OAUTH_REDIRECT_BASE=https://chat.example.com  # defaults to http://localhost:$APP_PORT
+Open `.env` and add your model provider key (at minimum, a free Google Gemini key):
+```env
+GEMINI_API_KEY=your_gemini_api_key_here
 ```
 
-Register each provider's callback URL (`<base>/api/auth/oauth/<google|github>/callback`)
-in its console. The flow is authorization-code + PKCE with a sealed `state`
-cookie; verified provider emails link to an existing password account or
-provision a passwordless one. The callback hands the SPA a single-use code
-(`POST /api/auth/oauth/consume`) — tokens never travel in the URL. With
-nothing configured, `GET /api/auth/providers` returns an empty list and auth
-stays email+password only.
-
-Note: the compose Postgres is mapped to host port **5433** (not 5432), so it can coexist with a local Postgres — `DATABASE_URL` in `.env` already points at 5433.
-
-## Cost model
-
-Chat token counts are exact — taken from golem's per-run `Usage` — and prices are computed from rate-card env vars, overridable in `.env`: `CHAT_INPUT_USD_PER_MTOK` / `CHAT_OUTPUT_USD_PER_MTOK` (defaults **$0.30 / $2.50 per 1M tokens**, Gemini 2.5 Flash class). Costs are stored rounded to 5 decimal places; the dashboard shows 4. Embedding costs (RAG) land in the same ledger as exact `embedding` rows, priced by `EMBEDDING_INPUT_USD_PER_MTOK` (default **$0.15 per 1M tokens**).
-
-## Development
-
+### 2. Start Core Infrastructure
+Start PostgreSQL (mapped to port 5433 to avoid conflicts with existing local instances):
 ```bash
-make check       # backend: go fmt, build, vet, test (fully offline — golem testmodel fakes)
-make fe-check    # frontend: oxlint, tsc -b, vitest (alias for the line below)
-cd frontend && npm run check
-scripts/smoke.sh # end-to-end smoke against a running stack: register → conversation → streamed reply
+make up
 ```
 
-The smoke script uses `BASE` (default `http://localhost:8080`) and `EMAIL` (default `smoke@test.dev`); a repeat run falls back to login when the email is already registered.
+### 3. Run the Stack
 
-## Attribution
-
-The AI-state components in `frontend/src/components/ai/` (streaming text, thinking trace, run loader) are adapted from [beautifului.dev](https://www.beautifului.dev/) (TurboProduct, MIT) with modifications for golem's run-event model.
-
-## Custom tools (Phase 2a)
-
-Each user can register HTTP API tools from the **Tools** page; the chat agent
-advertises and executes them on every message. The page ships a gallery of 18
-prebuilt templates (weather, GitHub, Hacker News, Wikipedia, RSS, FX/crypto
-rates, and more — free, keyless, read-only APIs) that prefill the editor; a
-vitest suite validates every template against the same authoring rules the
-backend enforces. A tool is a name, a model-facing
-description, a method + URL template (`{{param}}` path placeholders, query
-params appended, optional JSON body template), typed params
-(`string`/`number`/`boolean`, `path`/`query`), and static headers (secrets are
-stored server-side, masked as `••••` in the API, and never sent to the model).
-`Ask before running` gates a tool behind golem's deferred-tools flow: the chat
-pauses, an approval card appears, and Approve/Deny resumes the run.
-
-### Built-in web search
-
-In addition to custom tools, the server bundles a built-in `web_search` tool powered by **Wigolo** (local-first/Docker container, keyless multi-engine search with ML reranking), **Tavily**, or **Brave Search**.
-
-- **Wigolo (Default for local & Docker)**: Packaged in `deploy/docker-compose.yml`. Runs a local HTTP daemon with on-device caching, requiring zero external API keys:
-  ```env
-  WEB_SEARCH_PROVIDER=wigolo
-  WIGOLO_URL=http://localhost:3333   # or http://wigolo:3333 in docker compose
-  ```
-- **Tavily / Brave Search**: Set `TAVILY_API_KEY=...` or `BRAVE_API_KEY=...` in `.env`.
-
-When configured, the model can search the public web for real-time facts and recent developments; searches trigger an approval card by default (`WEB_SEARCH_REQUIRE_APPROVAL=true`), and the answer cites web sources with markdown links. When unset, web search remains disabled.
-
-Execution is guarded and graceful: DNS-level SSRF block of loopback/private/
-link-local hosts (`TOOL_ALLOW_PRIVATE_HOSTS=true` disables the guard for
-dev), request timeout and size caps (`TOOL_HTTP_TIMEOUT`, `TOOL_HTTP_MAX_BYTES`,
-`TOOL_RESULT_MAX_BYTES`), and errors returned to the model as text results so a
-dead API degrades to a graceful answer instead of failing the run.
-
-Tool lifecycle persists every run message (tool calls included) so history
-replay and resume work across turns; provider-synthesized call IDs (Gemini's
-`call-1`, …) are rewritten to conversation-unique IDs at persistence time
-because they otherwise collide across runs. Schema migrations are generated
-with [Atlas](https://atlasgo.io) from `backend/internal/storage/schema.hcl`
-(the schema source of truth) into the goose-format files goose applies at
-startup:
-
+**Terminal 1 — Backend:**
 ```bash
-/opt/homebrew/bin/atlas migrate diff <name> \
-  --dir file://backend/internal/storage/migrations --dir-format goose \
-  --to file://backend/internal/storage/schema.hcl \
-  --dev-url "docker://postgres/16/dev?search_path=public"
+make backend
+# Running at http://localhost:8080
 ```
 
-## Visual Workflows (n8n-style Automation)
+**Terminal 2 — Frontend:**
+```bash
+make frontend
+# Running at http://localhost:5173
+```
 
-Create and execute multi-step automation flows using an interactive node-based canvas powered by `@xyflow/react` on the **Workflows** page (`/workflows`):
+Open [http://localhost:5173](http://localhost:5173) in your browser and create your account.
 
-- **Triggers**: Manual run / test payloads, unique public Webhook URLs (`/api/webhooks/:slug` with optional secret verification), or direct chat agent invocation.
-- **External Tools & Connectors**: Universal HTTP Request node (GET/POST/PUT/DELETE with Bearer, Basic, API Key auth and body templates), Golem Custom Tools bridge, GitHub (create issues/comments), Slack, and Discord.
-- **AI & LLM Nodes**: Prompt catalog models (Gemini, OpenAI, Anthropic) with prompt templates, system instructions, and structured JSON output extraction.
-- **Logic & Control Flow**: Conditional branching (If/Else evaluation with True/False path routing), field mapping transforms (`code_transform`), and execution delays.
-- **Agent Tool Bridge**: Toggle `Expose as Agent Tool` on any workflow to allow the main conversational chat assistant to autonomously execute the workflow as a native tool during chat!
-- **Tracing & History**: Inspect past execution runs, durations, node-by-node status, inputs, and outputs.
+---
 
-## RAG (Phase 2c)
+## Optional Integrations
 
-The agent owns retrieval — there is no fixed pipeline. On every turn it
-formulates its own queries, calls `search_documents` (optionally scoped with
-`documentIds` taken from earlier results), refines with narrower queries when
-results look thin, and answers only from tool evidence.
+### Social Login (Google & GitHub)
+Add your OAuth client credentials in `.env`:
+```env
+OAUTH_GOOGLE_CLIENT_ID=your_google_client_id
+OAUTH_GOOGLE_CLIENT_SECRET=your_google_client_secret
 
-Upload documents (txt, md, pdf, docx — 20 MB cap) on the **Documents** page; they are stored in MinIO, extracted into headed sections, chunked (~512 tokens / ~2000 chars with ~64-token overlap, recursive headings → paragraphs → sentences, carrying heading + page metadata via `CHUNK_TARGET_TOKENS` / `CHUNK_OVERLAP_TOKENS`), and embedded with **golem v0.7.6's embeddings port** (`gemini-embedding-001`, 768 dims) into Weaviate.
+OAUTH_GITHUB_CLIENT_ID=your_github_client_id
+OAUTH_GITHUB_CLIENT_SECRET=your_github_client_secret
+```
+Callback URLs to register in Google/GitHub developer consoles:
+- Google: `http://localhost:8080/api/auth/oauth/google/callback`
+- GitHub: `http://localhost:8080/api/auth/oauth/github/callback`
 
-Each retrieval call runs: query embedding → hybrid over-retrieve (`RETRIEVAL_ALPHA` default 0.5, `fusionType: rankedFusion`, `RETRIEVE_MULT`×k capped at `RERANK_MAX_CANDIDATES`) → neighbor-window expansion (`EXPAND_BEFORE`/`EXPAND_AFTER`, default 1/1; the core chunk stays the citation unit) → listwise LLM rerank (`RERANK_MODEL` default `gemini-2.5-flash`, `RERANK_ENABLED=false` disables) → top-k with `[n] (Title § Heading, p.N)` citations, numbers restarting at 1 on every call.
-
-Citation discipline is hard: every claim drawn from documents carries its
-bracket number, only bracket numbers shown in a tool result are cited, and
-missing evidence is admitted instead of guessed. The Sources card mirrors the
-tool receipt (title, heading, page, snippet).
-
-Long threads compact: histories over `COMPACTION_THRESHOLD_TOKENS` (default
-40000) keep the last `COMPACTION_KEEP_RECENT` (10) turns verbatim while older
-turns compress into the run instructions via `COMPACTION_MODEL` (summary cap
-`COMPACTION_SUMMARY_TOKENS`). Compaction is ephemeral — history rows and role
-alternation are untouched.
-
-**Enable it** — the infra ships dormant behind the compose `rag` profile:
-
+### Enable Production RAG
+Spin up Weaviate and MinIO via the `rag` Docker profile:
 ```bash
 docker compose -f deploy/docker-compose.yml --profile rag up -d
-# then set in .env:
+```
+Then set in `.env`:
+```env
 RAG_ENABLED=true
 ```
 
-| Env var | Default | Purpose |
-|---|---|---|
-| `RAG_ENABLED` | `false` | Master switch; requires `GEMINI_API_KEY` |
-| `WEAVIATE_URL` | `http://localhost:8081` | Vector store (compose maps host **8081** — the backend owns 8080) |
-| `MINIO_ENDPOINT` | `localhost:9000` | Object store for originals |
-| `MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY` | `golem` / `golem1234` | MinIO creds |
-| `DOCUMENTS_BUCKET` | `golem-chatbot-documents` | Bucket (created by compose init) |
-| `EMBEDDING_MODEL` | `gemini-embedding-001` | Embedding model |
-| `EMBEDDING_DIMS` | `768` | Vector width |
-| `EMBEDDING_BATCH` | `96` | Texts per embed call |
-| `EMBEDDING_INPUT_USD_PER_MTOK` | `0.15` | Ledger rate |
-| `MAX_UPLOAD_BYTES` | `20971520` | Upload cap (20 MB) |
-| `RETRIEVAL_ALPHA` | `0.5` | Hybrid BM25/vector blend (0..1) |
-| `RETRIEVE_MULT` | `4` | Over-retrieve ×k (capped below) |
-| `RERANK_MAX_CANDIDATES` | `40` | Candidate cap |
-| `RERANK_ENABLED` | `true` | `false` keeps hybrid order, no rerank spend |
-| `RERANK_MODEL` | `gemini-2.5-flash` | Listwise rerank model |
-| `CHUNK_TARGET_TOKENS` | `512` | Chunk budget |
-| `CHUNK_OVERLAP_TOKENS` | `64` | Word-safe overlap |
-| `EXPAND_BEFORE` / `EXPAND_AFTER` | `1` / `1` | Neighbor-window size |
-| `COMPACTION_ENABLED` | `true` | Summarize hot histories |
-| `COMPACTION_MODEL` | `gemini-2.5-flash` | Summarizer model |
-| `COMPACTION_THRESHOLD_TOKENS` | `40000` | History estimate trigger |
-| `COMPACTION_KEEP_RECENT` | `10` | Verbatim recent turns |
-| `COMPACTION_SUMMARY_TOKENS` | `800` | Summary cap |
+### Web Search Providers
+Configure your preferred search engine in `.env`:
+```env
+# Option A: Built-in local Wigolo container (zero API keys needed)
+WEB_SEARCH_PROVIDER=wigolo
+WIGOLO_URL=http://localhost:3333
 
-Metering: query embeddings land as exact `kind=embedding` rows, rerank
-generations as `kind=rerank`, compactions as `kind=compaction` — rerank and
-compaction priced from the catalog (unknown models fall back to defaults); the
-usage page breaks spend down per document.
+# Option B: Tavily API
+WEB_SEARCH_PROVIDER=tavily
+TAVILY_API_KEY=tvly-your_key_here
 
-API: `GET /api/documents`, `POST /api/documents` (multipart `file`), `DELETE /api/documents/{id}`; all 503 with `rag_disabled` when the stack is off. Ingestion is idempotent per document (stale vectors are deleted before re-upsert); a failed ingest keeps the row (`status=failed`) and the original object.
+# Option C: Brave Search API
+WEB_SEARCH_PROVIDER=brave
+BRAVE_API_KEY=BSA-your_key_here
+```
 
-Retrieval quality is covered by a live golden-query eval: `BASE=http://localhost:8080 ./scripts/rag-eval.sh` uploads three fixture docs (`backend/internal/rag/testdata/eval/`, one topic each with a unique canary sentence), asks one question per doc, and passes only if every answer top-cites the expected document and carries a matching `[n]` bracket citation.
+---
+
+## Testing & Quality Gates
+
+Herbie enforces strict quality gates across both backend and frontend.
+
+```bash
+# Run backend tests & checks (offline with mock fixtures)
+make check
+
+# Run frontend lint, typecheck, and unit test suite
+make fe-check
+
+# Run end-to-end smoke test against a live instance
+scripts/smoke.sh
+```
+
+---
+
+## Project Structure
+
+```text
+├── backend/
+│   ├── cmd/server/             # HTTP server entrypoint
+│   └── internal/
+│       ├── auth/               # Password hashing, JWT maker, refresh rotation
+│       ├── chat/               # Golem agent orchestration & catalog
+│       ├── httpapi/            # REST API handlers, middleware, SSE streams
+│       ├── mcp/                # Model Context Protocol client & catalog
+│       ├── rag/                # Chunker, vector embeddings, reranker
+│       ├── storage/            # PostgreSQL migrations & repositories
+│       ├── vault/              # AES-GCM credential encryption
+│       ├── websearch/          # Wigolo, Tavily, Brave search adapters
+│       └── workflow/           # Visual canvas workflow evaluation engine
+├── frontend/
+│   ├── src/
+│   │   ├── components/         # UI primitives, layout, sidebar, CodeBlock
+│   │   ├── features/           # Auth, chat, documents, MCP, workflows
+│   │   ├── pages/              # Chat, Projects, Workflows, Tools, Usage
+│   │   ├── stores/             # Zustand in-memory auth & session store
+│   │   └── lib/                # API client, types, utils, SSE parser
+├── deploy/
+│   └── docker-compose.yml      # PostgreSQL, Weaviate, MinIO, Wigolo
+├── Makefile                    # Standard developer tasks
+└── Dockerfile                  # Multi-stage production container build
+```
+
+---
+
+## Contributing
+
+We welcome contributions from the open-source community! Please review our [Contributing Guide](CONTRIBUTING.md) and [Code of Conduct](CODE_OF_CONDUCT.md) before submitting pull requests.
+
+---
+
+## License
+
+Herbie is open-source software licensed under the [MIT License](LICENSE).
