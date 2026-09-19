@@ -1,5 +1,4 @@
 import { cleanup, render, screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -47,6 +46,12 @@ const mockDetail = {
       role: "assistant",
       content: "Hello! Ready to work on Autonomous Agent Project.",
       createdAt: new Date().toISOString(),
+      usage: {
+        inputTokens: 120,
+        outputTokens: 450,
+        costUsd: 0.00075,
+        model: "gemini-3.5-flash",
+      },
     },
   ],
 };
@@ -82,25 +87,40 @@ function renderProjectWorkspace(initialPath = "/projects/proj-1") {
   );
 }
 
-describe("ProjectWorkspacePage - New Chat UX", () => {
-  it("renders workspace header with conversation switcher and New chat action", async () => {
-    const user = userEvent.setup();
+describe("ProjectWorkspacePage - Clean Header & New Chat Deep Link", () => {
+  it("renders workspace header with conversation switcher and no redundant header new chat button", async () => {
     renderProjectWorkspace();
 
     // Project name is in header
     expect(await screen.findByText("Autonomous Agent Project")).toBeInTheDocument();
 
-    // Prominent "New chat" button in header
-    const newChatBtn = screen.getByRole("button", { name: /New chat/i });
-    expect(newChatBtn).toBeInTheDocument();
-
     // Conversation switcher displays current active conversation title
     expect(await screen.findByText("Initial Planning Discussion")).toBeInTheDocument();
 
-    // Clicking New chat switches to clean workspace state for fresh conversation
-    await user.click(newChatBtn);
+    // No redundant prominent "New chat" button in workspace header
+    expect(screen.queryByRole("button", { name: /^New chat$/i })).not.toBeInTheDocument();
+  });
+
+  it("renders clean workspace state for fresh conversation when loaded with ?c=new", async () => {
+    renderProjectWorkspace("/projects/proj-1?c=new");
+
+    // Project name is in header
+    expect(await screen.findByText("Autonomous Agent Project")).toBeInTheDocument();
 
     // Empty state should be visible for the new chat
     expect(await screen.findByText("Autonomous Agent Project Workspace")).toBeInTheDocument();
+  });
+
+  it("renders assistant message with usage tokens, cost, and model metadata", async () => {
+    renderProjectWorkspace();
+
+    expect(await screen.findByText("Hello! Ready to work on Autonomous Agent Project.")).toBeInTheDocument();
+
+    // Verify token usage, cost, and model are displayed
+    expect(screen.getByText(/120 in \/ 450 out · \$0\.00075 · gemini-3\.5-flash/)).toBeInTheDocument();
+
+    // Verify Copy and Delete action buttons are present
+    expect(screen.getByRole("button", { name: "Copy message" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Delete message" })).toBeInTheDocument();
   });
 });

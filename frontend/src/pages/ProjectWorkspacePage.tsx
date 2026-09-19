@@ -8,6 +8,7 @@ import {
   Check,
   CheckCircle2,
   ChevronDown,
+  Copy,
   Eye,
   FileCode,
   FileText,
@@ -17,6 +18,8 @@ import {
   Mic,
   Paperclip,
   Plus,
+  RefreshCw,
+  ShieldCheck,
   Sidebar,
   SlidersHorizontal,
   Square,
@@ -25,7 +28,7 @@ import {
   X,
 } from "lucide-react";
 import { ApiError, apiFetch } from "@/lib/api";
-import { cn, cleanConversationTitle } from "@/lib/utils";
+import { cn, cleanConversationTitle, fmtTokens } from "@/lib/utils";
 import type { ChatMessage, Conversation } from "@/lib/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -53,6 +56,9 @@ import { ThinkingTrace } from "@/components/ai/ThinkingTrace";
 import { useSidebar } from "@/components/layout/SidebarContext";
 import { useChat } from "@/features/chat/useChat";
 import { useVoiceInput } from "@/features/chat/useVoiceInput";
+import { useDeleteMessage } from "@/features/chat/useConversations";
+import { AppConnectCard } from "@/features/chat/AppConnectCard";
+import { extractAppConnectProviders } from "@/features/chat/useChatApps";
 import { ParsedFileViewerDialog } from "@/features/documents/ParsedFileViewerDialog";
 import {
   useProject,
@@ -69,6 +75,29 @@ import {
   extractFilesAndPrompt,
 } from "@/lib/files";
 import { ALLOWED_IMAGE_TYPES, MAX_IMAGES_PER_MESSAGE, readImageFiles, type PendingImage } from "@/lib/images";
+
+function CopyMessageButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type="button"
+      aria-label="Copy message"
+      title="Copy"
+      onClick={async () => {
+        try {
+          await navigator.clipboard.writeText(text);
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1500);
+        } catch {
+          /* clipboard unavailable */
+        }
+      }}
+      className="rounded-md p-1 text-muted-foreground/60 transition-colors hover:text-foreground"
+    >
+      {copied ? <Check className="size-3.5 text-emerald-600" /> : <Copy className="size-3.5" />}
+    </button>
+  );
+}
 
 interface ConversationDetail {
   conversation: Conversation;
@@ -127,9 +156,49 @@ export function ProjectWorkspacePage() {
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const seededRef = useRef<string | null>(null);
 
-  const { messages, setMessages, status, send, stop, reset, trace, pending } = useChat(() => {
+  const { messages, setMessages, status, send, regenerate, resolve, stop, reset, trace, pending } = useChat(() => {
     void queryClient.invalidateQueries({ queryKey: ["project", projectId] });
   });
+  const deleteMessage = useDeleteMessage(selectedConvId);
+  const [pendingMessageDelete, setPendingMessageDelete] = useState<string | null>(null);
+
+  function regenerateLast() {
+    if (!selectedConvId || status === "running" || pending.length > 0) return;
+    setSendError(null);
+    regenerate(selectedConvId).catch((err) =>
+      setSendError(err instanceof ApiError ? err.message : "Failed to regenerate answer"),
+    );
+  }
+
+  function confirmDeleteMessage() {
+    if (!pendingMessageDelete || !selectedConvId) return;
+    const id = pendingMessageDelete;
+    deleteMessage.mutate(id, {
+      onSuccess: () => {
+        setMessages((prev) => {
+          const idx = prev.findIndex((m) => m.id === id);
+          if (idx === -1) return prev;
+          return prev.slice(0, idx);
+        });
+        setPendingMessageDelete(null);
+        toast.success("Message deleted");
+      },
+      onError: (err) =>
+        toast.error(err instanceof ApiError ? err.message : "Failed to delete message"),
+    });
+  }
+
+  function decide(approved: boolean) {
+    if (!selectedConvId || pending.length === 0) return;
+    const decisions = pending.map((p) => ({
+      callId: p.callId,
+      approved,
+      reason: approved ? undefined : "user denied",
+    }));
+    resolve(selectedConvId, decisions).catch((err) =>
+      setSendError(err instanceof ApiError ? err.message : "Failed to resolve approvals"),
+    );
+  }
 
   // Switching projects must drop the previous project's selection and chat
   // state, otherwise the detail query would fetch another project's chat.
@@ -142,9 +211,17 @@ export function ProjectWorkspacePage() {
   // Sidebar navigation drives the selection: a conversation id selects it,
   // "new" starts a fresh chat (first send creates the conversation).
   useEffect(() => {
-    if (convParam === "new") setSelectedConvId(null);
-    else if (convParam) setSelectedConvId(convParam);
-  }, [convParam]);
+    if (convParam === "new") {
+      setSelectedConvId(null);
+      seededRef.current = null;
+      reset();
+      setInput("");
+      setSendError(null);
+      setTimeout(() => textareaRef.current?.focus(), 50);
+    } else if (convParam) {
+      setSelectedConvId(convParam);
+    }
+  }, [convParam, reset]);
 
   // Pick first conversation if available, or create one — but never override
   // an explicit ?c= target.
@@ -388,48 +465,41 @@ export function ProjectWorkspacePage() {
 
                 {projectData && projectData.conversations.length > 0 && <DropdownMenuSeparator />}
 
-                {projectData?.conversations.map((c) => {
-                  const isSelected = c.id === selectedConvId;
-                  return (
-                    <DropdownMenuItem
-                      key={c.id}
-                      onClick={() => {
-                        setSelectedConvId(c.id);
-                        searchParams.set("c", c.id);
-                        setSearchParams(searchParams, { replace: true });
-                      }}
-                      className="flex items-center justify-between gap-2 cursor-pointer"
-                    >
-                      <div className="flex items-center gap-2 min-w-0 flex-1">
-                        {isSelected ? (
-                          <Check className="size-3.5 text-emerald-600 shrink-0" />
-                        ) : (
-                          <MessageSquare className="size-3.5 text-muted-foreground shrink-0" />
-                        )}
-                        <span className={cn("truncate text-xs", isSelected && "font-medium text-foreground")}>
-                          {cleanConversationTitle(c.title)}
-                        </span>
-                      </div>
-                    </DropdownMenuItem>
-                  );
-                })}
+                {(!projectData || projectData.conversations.length === 0) ? (
+                  <div className="px-2 py-1.5 text-xs text-muted-foreground">No conversations yet</div>
+                ) : (
+                  projectData.conversations.map((c) => {
+                    const isSelected = c.id === selectedConvId;
+                    return (
+                      <DropdownMenuItem
+                        key={c.id}
+                        onClick={() => {
+                          setSelectedConvId(c.id);
+                          searchParams.set("c", c.id);
+                          setSearchParams(searchParams, { replace: true });
+                        }}
+                        className="flex items-center justify-between gap-2 cursor-pointer"
+                      >
+                        <div className="flex items-center gap-2 min-w-0 flex-1">
+                          {isSelected ? (
+                            <Check className="size-3.5 text-emerald-600 shrink-0" />
+                          ) : (
+                            <MessageSquare className="size-3.5 text-muted-foreground shrink-0" />
+                          )}
+                          <span className={cn("truncate text-xs", isSelected && "font-medium text-foreground")}>
+                            {cleanConversationTitle(c.title)}
+                          </span>
+                        </div>
+                      </DropdownMenuItem>
+                    );
+                  })
+                )}
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
         </div>
 
         <div className="flex items-center gap-1.5 shrink-0">
-          {/* Prominent New Chat button */}
-          <Button
-            size="sm"
-            variant="default"
-            onClick={handleStartNewChat}
-            className="text-xs h-8 gap-1.5 font-medium bg-emerald-600 hover:bg-emerald-700 text-white dark:bg-emerald-600 dark:hover:bg-emerald-500 shadow-2xs rounded-lg"
-          >
-            <Plus className="size-3.5" />
-            <span className="hidden sm:inline">New chat</span>
-          </Button>
-
           <Button
             variant={filesOpen ? "secondary" : "ghost"}
             size="sm"
@@ -482,86 +552,183 @@ export function ProjectWorkspacePage() {
                 </div>
               ) : (
                 <div className="space-y-5">
-                  {messages.map((m) => (
-                    <div key={m.id} className={cn("flex", m.role === "user" ? "justify-end" : "group gap-3")}>
-                      {m.role === "user" ? (
-                        <div className="group flex max-w-[80%] flex-col items-end gap-1">
-                          {/* Attached files badge and clean prompt in user message */}
-                          {(() => {
-                            const { filenames, files, userPrompt } = extractFilesAndPrompt(m.content);
-                            return (
-                              <>
-                                {files.length > 0 ? (
-                                  <div className="flex flex-wrap justify-end gap-1.5 mb-1">
-                                    {files.map((file, idx) => (
-                                      <button
-                                        key={idx}
-                                        type="button"
-                                        onClick={() =>
-                                          setViewingFile({
-                                            title: file.name,
-                                            content: file.content,
-                                          })
-                                        }
-                                        className="group/file flex items-center gap-1.5 rounded-xl border border-border/80 bg-muted/50 hover:bg-muted px-2.5 py-1 text-xs transition-colors cursor-pointer"
-                                        title="Click to view parsed file"
-                                      >
-                                        <FileCode className="size-3.5 text-primary" />
-                                        <span className="font-mono text-[11px] font-medium">{file.name}</span>
-                                        <Eye className="size-3 text-muted-foreground opacity-60 group-hover/file:opacity-100 group-hover/file:text-primary transition-opacity" />
-                                      </button>
-                                    ))}
+                  {messages.map((m, index) => {
+                    const isLast = index === messages.length - 1;
+                    const blockInteraction = status === "running" || pending.length > 0;
+                    return (
+                      <div key={m.id} className={cn("group flex", m.role === "user" ? "justify-end" : "gap-3")}>
+                        {m.role === "user" ? (
+                          <div className="group/user flex max-w-[80%] flex-col items-end gap-1">
+                            {/* Attached files badge and clean prompt in user message */}
+                            {(() => {
+                              const { filenames, files, userPrompt } = extractFilesAndPrompt(m.content);
+                              return (
+                                <>
+                                  {files.length > 0 ? (
+                                    <div className="flex flex-wrap justify-end gap-1.5 mb-1">
+                                      {files.map((file, idx) => (
+                                        <button
+                                          key={idx}
+                                          type="button"
+                                          onClick={() =>
+                                            setViewingFile({
+                                              title: file.name,
+                                              content: file.content,
+                                            })
+                                          }
+                                          className="group/file flex items-center gap-1.5 rounded-xl border border-border/80 bg-muted/50 hover:bg-muted px-2.5 py-1 text-xs transition-colors cursor-pointer"
+                                          title="Click to view parsed file"
+                                        >
+                                          <FileCode className="size-3.5 text-primary" />
+                                          <span className="font-mono text-[11px] font-medium">{file.name}</span>
+                                          <Eye className="size-3 text-muted-foreground opacity-60 group-hover/file:opacity-100 group-hover/file:text-primary transition-opacity" />
+                                        </button>
+                                      ))}
+                                    </div>
+                                  ) : filenames.length > 0 ? (
+                                    <div className="flex flex-wrap justify-end gap-1.5 mb-1">
+                                      {filenames.map((fname, idx) => (
+                                        <div key={idx} className="flex items-center gap-1.5 rounded-xl border border-border/80 bg-muted/50 px-2.5 py-1 text-xs">
+                                          <FileCode className="size-3.5 text-primary" />
+                                          <span className="font-mono text-[11px]">{fname}</span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  ) : null}
+                                  {(userPrompt || filenames.length > 0) && (
+                                    <div className="rounded-2xl rounded-br-md bg-primary px-4 py-2.5 whitespace-pre-wrap text-primary-foreground text-sm shadow-sm">
+                                      {userPrompt || (filenames.length === 1 ? `Attached ${filenames[0]}` : `Attached ${filenames.length} files`)}
+                                    </div>
+                                  )}
+                                  <div className="flex items-center gap-1.5 opacity-0 transition-opacity group-hover/user:opacity-100 focus-within:opacity-100">
+                                    <CopyMessageButton text={userPrompt || filenames.join(", ")} />
+                                    <button
+                                      type="button"
+                                      aria-label="Delete message"
+                                      title="Delete message and everything after it"
+                                      disabled={blockInteraction}
+                                      onClick={() => setPendingMessageDelete(m.id)}
+                                      className="rounded-md p-1 text-muted-foreground/60 transition-colors hover:text-destructive disabled:cursor-not-allowed"
+                                    >
+                                      <Trash2 className="size-3.5" />
+                                    </button>
                                   </div>
-                                ) : filenames.length > 0 ? (
-                                  <div className="flex flex-wrap justify-end gap-1.5 mb-1">
-                                    {filenames.map((fname, idx) => (
-                                      <div key={idx} className="flex items-center gap-1.5 rounded-xl border border-border/80 bg-muted/50 px-2.5 py-1 text-xs">
-                                        <FileCode className="size-3.5 text-primary" />
-                                        <span className="font-mono text-[11px]">{fname}</span>
-                                      </div>
-                                    ))}
-                                  </div>
-                                ) : null}
-                                {(userPrompt || filenames.length > 0) && (
-                                  <div className="rounded-2xl rounded-br-md bg-primary px-4 py-2.5 whitespace-pre-wrap text-primary-foreground text-sm shadow-sm">
-                                    {userPrompt || (filenames.length === 1 ? `Attached ${filenames[0]}` : `Attached ${filenames.length} files`)}
-                                  </div>
-                                )}
-                              </>
-                            );
-                          })()}
-                        </div>
-                      ) : (
-                        <>
-                          <HarveyAvatar isProcessing={m.streaming} className="mt-0.5 size-7.5 shrink-0" />
-                          <div className="min-w-0 flex-1 space-y-1 pt-0.5">
-                            {m.streaming && trace.length > 0 && <ThinkingTrace rows={trace} />}
-                            {m.streaming && m.content === "" ? (
-                              <RunLoader trace={trace} />
-                            ) : (
-                              <StreamingText
-                                content={m.content}
-                                streaming={m.streaming}
-                                citations={
-                                  m.sources && m.sources.length > 0
-                                    ? {
-                                        sources: m.sources,
-                                        // Citation click opens the project's indexed source.
-                                        onCite: (n) => {
-                                          const s = m.sources?.[n - 1];
-                                          if (s) setViewingFile({ title: s.title, documentId: s.documentId });
-                                        },
-                                      }
-                                    : undefined
-                                }
-                              />
-                            )}
-                            {m.error && <p className="text-destructive text-sm">{m.error}</p>}
+                                </>
+                              );
+                            })()}
                           </div>
-                        </>
-                      )}
+                        ) : (
+                          <>
+                            <HarveyAvatar isProcessing={m.streaming} className="mt-0.5 size-7.5 shrink-0" />
+                            <div className="min-w-0 flex-1 space-y-1 pt-0.5">
+                              {m.streaming && trace.length > 0 && <ThinkingTrace rows={trace} />}
+                              {m.streaming && m.content === "" ? (
+                                <RunLoader trace={trace} />
+                              ) : (
+                                <StreamingText
+                                  content={m.content}
+                                  streaming={m.streaming}
+                                  citations={
+                                    m.sources && m.sources.length > 0
+                                      ? {
+                                          sources: m.sources,
+                                          // Citation click opens the project's indexed source.
+                                          onCite: (n) => {
+                                            const s = m.sources?.[n - 1];
+                                            if (s) setViewingFile({ title: s.title, documentId: s.documentId });
+                                          },
+                                        }
+                                      : undefined
+                                  }
+                                />
+                              )}
+                              {!m.streaming && (() => {
+                                const connectProviders = extractAppConnectProviders(m.content);
+                                if (connectProviders.length === 0) return null;
+                                return (
+                                  <div className="space-y-2 pt-1">
+                                    {connectProviders.map((p) => (
+                                      <AppConnectCard key={p} providerId={p} returnTo={window.location.pathname} />
+                                    ))}
+                                  </div>
+                                );
+                              })()}
+                              {m.error && <p className="text-destructive text-sm">{m.error}</p>}
+                              {m.truncated && (
+                                <Badge variant="outline" className="text-muted-foreground text-xs">stopped early</Badge>
+                              )}
+                              {!m.streaming && !m.error && (
+                                <div className="flex items-center gap-1.5 pt-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+                                  <CopyMessageButton text={m.content} />
+                                  <button
+                                    type="button"
+                                    aria-label="Delete message"
+                                    title="Delete message and everything after it"
+                                    disabled={blockInteraction}
+                                    onClick={() => setPendingMessageDelete(m.id)}
+                                    className="rounded-md p-1 text-muted-foreground/60 transition-colors hover:text-destructive disabled:cursor-not-allowed"
+                                  >
+                                    <Trash2 className="size-3.5" />
+                                  </button>
+                                  {isLast && (
+                                    <button
+                                      type="button"
+                                      aria-label="Regenerate answer"
+                                      title="Regenerate"
+                                      disabled={blockInteraction}
+                                      onClick={regenerateLast}
+                                      className="rounded-md p-1 text-muted-foreground/60 transition-colors hover:text-foreground disabled:cursor-not-allowed"
+                                    >
+                                      <RefreshCw className="size-3.5" />
+                                    </button>
+                                  )}
+                                  {m.usage && (
+                                    <p className="text-[11px] text-muted-foreground/60">
+                                      {fmtTokens(m.usage.inputTokens)} in / {fmtTokens(m.usage.outputTokens)} out · $
+                                      {m.usage.costUsd.toFixed(5)}
+                                      {m.usage.model ? ` · ${m.usage.model}` : ""}
+                                    </p>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    );
+                  })}
+
+                  {pending.length > 0 && (
+                    <div className="overflow-hidden rounded-xl border border-amber-500/40 bg-amber-500/5">
+                      <div className="flex items-center gap-2 border-b border-amber-500/20 px-4 py-3">
+                        <ShieldCheck className="size-4 shrink-0 text-amber-600 dark:text-amber-400" />
+                        <p className="text-sm font-medium">
+                          The agent wants to run {pending.length === 1 ? "a tool" : `${pending.length} tools`}
+                        </p>
+                      </div>
+                      <div className="space-y-2 p-3">
+                        {pending.map((p) => (
+                          <div key={p.callId} className="rounded-lg border bg-background/70 px-3 py-2.5">
+                            <div className="flex items-center gap-2">
+                              <Badge variant="outline" className="font-mono text-xs">{p.toolName}</Badge>
+                              <span className="truncate font-mono text-xs text-muted-foreground">
+                                {JSON.stringify(p.args)}
+                              </span>
+                            </div>
+                            {p.reason && <p className="mt-1 text-xs text-muted-foreground">{p.reason}</p>}
+                          </div>
+                        ))}
+                      </div>
+                      <div className="flex gap-2 px-3 pb-3">
+                        <Button size="sm" onClick={() => decide(true)} disabled={status === "running"}>
+                          Approve
+                        </Button>
+                        <Button size="sm" variant="outline" onClick={() => decide(false)} disabled={status === "running"}>
+                          Deny
+                        </Button>
+                      </div>
                     </div>
-                  ))}
+                  )}
                 </div>
               )}
               <div ref={bottomRef} />
@@ -847,6 +1014,31 @@ export function ProjectWorkspacePage() {
           <DialogFooter>
             <Button size="sm" onClick={() => setInstructionsOpen(false)}>
               Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Message Confirmation Dialog */}
+      <Dialog
+        open={pendingMessageDelete !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingMessageDelete(null);
+        }}
+      >
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Delete message?</DialogTitle>
+            <DialogDescription>
+              This message and every message after it will be permanently removed from this conversation.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button variant="ghost" onClick={() => setPendingMessageDelete(null)}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={confirmDeleteMessage} disabled={deleteMessage.isPending}>
+              {deleteMessage.isPending ? "Deleting…" : "Delete"}
             </Button>
           </DialogFooter>
         </DialogContent>

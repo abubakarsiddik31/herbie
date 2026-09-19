@@ -71,6 +71,10 @@ function getKindBadgeClass(kind: string): string {
       return "border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400";
     case "compaction":
       return "border-purple-500/30 bg-purple-500/10 text-purple-600 dark:text-purple-400";
+    case "web_search":
+      return "border-sky-500/30 bg-sky-500/10 text-sky-600 dark:text-sky-400";
+    case "document_search":
+      return "border-teal-500/30 bg-teal-500/10 text-teal-600 dark:text-teal-400";
     default:
       return "border-border bg-muted/60 text-muted-foreground";
   }
@@ -86,6 +90,10 @@ function getKindBarColor(kind: string): string {
       return "#f59e0b";
     case "compaction":
       return "#a855f7";
+    case "web_search":
+      return "#0284c7";
+    case "document_search":
+      return "#0d9488";
     default:
       return "#6b7280";
   }
@@ -142,14 +150,15 @@ export function UsagePage() {
 
   // Aggregate metrics
   const totals = useMemo(() => {
-    if (!data) return { cost: 0, inputTokens: 0, outputTokens: 0, totalTokens: 0, requests: 0, avgPerReq: 0 };
+    if (!data) return { cost: 0, inputTokens: 0, outputTokens: 0, totalTokens: 0, requests: 0, avgPerReq: 0, searchQueries: 0 };
     const cost = data.totals.reduce((a, t) => a + t.costUsd, 0);
     const inputTokens = data.totals.reduce((a, t) => a + t.inputTokens, 0);
     const outputTokens = data.totals.reduce((a, t) => a + t.outputTokens, 0);
     const requests = data.totals.reduce((a, t) => a + t.requests, 0);
     const totalTokens = inputTokens + outputTokens;
     const avgPerReq = requests > 0 ? cost / requests : 0;
-    return { cost, inputTokens, outputTokens, totalTokens, requests, avgPerReq };
+    const searchQueries = data.searches?.totalQueries ?? 0;
+    return { cost, inputTokens, outputTokens, totalTokens, requests, avgPerReq, searchQueries };
   }, [data]);
 
   // Breakdown by kind (category)
@@ -194,7 +203,7 @@ export function UsagePage() {
     );
   }, [data, tableFilter]);
 
-  const hasUsage = data && (data.totals.length > 0 || data.daily.length > 0);
+  const hasUsage = data && (data.totals.length > 0 || data.daily.length > 0 || (data.searches && data.searches.totalQueries > 0));
 
   return (
     <div className="flex h-full flex-col bg-background">
@@ -310,7 +319,7 @@ export function UsagePage() {
           {data && (
             <>
               {/* Top Metrics Cards */}
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
                 <StatCard
                   label="Total Spend"
                   value={money(totals.cost)}
@@ -328,6 +337,13 @@ export function UsagePage() {
                   value={totals.requests.toLocaleString()}
                   subtext="Model & tool generation turns"
                   icon={<Activity className="size-4" />}
+                />
+                <StatCard
+                  label="AI Search Queries"
+                  value={totals.searchQueries.toLocaleString()}
+                  subtext={`${data?.searches?.webQueries ?? 0} web / ${data?.searches?.docQueries ?? 0} doc`}
+                  icon={<Search className="size-4" />}
+                  badge={totals.searchQueries > 0 ? `${totals.searchQueries} queries` : undefined}
                 />
                 <StatCard
                   label="Avg. Cost / Request"
@@ -688,6 +704,149 @@ export function UsagePage() {
                         })}
                       </CardContent>
                     </Card>
+
+                    {/* AI Search Queries Analysis */}
+                    {data.searches && (
+                      <Card className="border border-border/80 bg-card/60 shadow-xs">
+                        <CardHeader className="pb-3 border-b border-border/40">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <Globe className="size-4 text-sky-500" />
+                              <CardTitle className="text-sm font-semibold tracking-tight">
+                                AI Search Analysis
+                              </CardTitle>
+                            </div>
+                            <Badge variant="secondary" className="font-mono text-[10px]">
+                              {data.searches.totalQueries} {data.searches.totalQueries === 1 ? "query" : "queries"}
+                            </Badge>
+                          </div>
+                          <CardDescription className="text-xs">
+                            Queries executed by AI on your behalf
+                          </CardDescription>
+                        </CardHeader>
+                        <CardContent className="pt-4 space-y-4">
+                          {data.searches.totalQueries === 0 ? (
+                            <p className="text-xs text-muted-foreground">No search queries conducted in this period.</p>
+                          ) : (
+                            <>
+                              {/* Web vs Doc Query Distribution */}
+                              <div className="space-y-1.5">
+                                <div className="flex items-center justify-between text-xs">
+                                  <span className="font-medium text-foreground">Query Types</span>
+                                  <span className="font-mono text-[11px] text-muted-foreground">
+                                    {data.searches.webQueries} web / {data.searches.docQueries} doc
+                                  </span>
+                                </div>
+                                <div className="flex h-2 w-full overflow-hidden rounded-full bg-muted">
+                                  <div
+                                    className="bg-sky-500 transition-all"
+                                    style={{
+                                      width: `${data.searches.totalQueries > 0 ? (data.searches.webQueries / data.searches.totalQueries) * 100 : 50}%`,
+                                    }}
+                                    title="Web Search queries"
+                                  />
+                                  <div
+                                    className="bg-teal-500 transition-all"
+                                    style={{
+                                      width: `${data.searches.totalQueries > 0 ? (data.searches.docQueries / data.searches.totalQueries) * 100 : 50}%`,
+                                    }}
+                                    title="Document Search queries"
+                                  />
+                                </div>
+                              </div>
+
+                              {/* Engine / Provider Breakdown */}
+                              {data.searches.byProvider && data.searches.byProvider.length > 0 && (
+                                <div className="space-y-2 pt-1 border-t border-border/30">
+                                  <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+                                    Search Engines & Adapters
+                                  </span>
+                                  <div className="flex flex-wrap gap-1.5">
+                                    {data.searches.byProvider.map((p) => (
+                                      <div
+                                        key={p.provider}
+                                        className="flex items-center gap-1.5 rounded-md border border-border/60 bg-muted/40 px-2 py-1 text-xs"
+                                      >
+                                        <span className="font-mono text-[11px] text-foreground font-medium">{p.provider || "default"}</span>
+                                        <Badge variant="secondary" className="px-1 py-0 text-[9px] font-mono h-3.5">
+                                          {p.count}
+                                        </Badge>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* Recent Search Queries */}
+                              {data.searches.recent && data.searches.recent.length > 0 && (
+                                <div className="space-y-2 pt-1 border-t border-border/30">
+                                  <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+                                    Recent AI Search Queries
+                                  </span>
+                                  <div className="max-h-56 overflow-y-auto space-y-1.5 pr-1">
+                                    {data.searches.recent.map((q) => (
+                                      <div
+                                        key={q.id}
+                                        className="rounded-lg border border-border/40 bg-muted/20 p-2 text-xs space-y-1 hover:bg-muted/40 transition-colors"
+                                      >
+                                        <div className="flex items-center justify-between gap-1.5">
+                                          <Badge
+                                            variant="outline"
+                                            className={cn(
+                                              "text-[9px] font-mono px-1.5 py-0 h-4 shrink-0",
+                                              q.kind === "web_search"
+                                                ? "border-sky-500/30 bg-sky-500/10 text-sky-600 dark:text-sky-400"
+                                                : "border-teal-500/30 bg-teal-500/10 text-teal-600 dark:text-teal-400"
+                                            )}
+                                          >
+                                            {q.kind === "web_search" ? "Web" : "Doc"}
+                                          </Badge>
+                                          <span className="text-[10px] text-muted-foreground font-mono truncate">
+                                            {q.provider}
+                                          </span>
+                                          <span className="text-[10px] text-muted-foreground/70 ml-auto shrink-0">
+                                            {formatChartDay(q.createdAt?.split("T")[0])}
+                                          </span>
+                                        </div>
+                                        <p className="font-mono text-[11px] text-foreground font-medium break-words">
+                                          "{q.query}"
+                                        </p>
+                                        <div className="text-[10px] text-muted-foreground flex items-center justify-between pt-0.5">
+                                          <span>{q.resultsCount} {q.resultsCount === 1 ? "result" : "results"} found</span>
+                                          {q.durationMs ? <span>{q.durationMs}ms</span> : null}
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* Top recurring queries */}
+                              {data.searches.topQueries && data.searches.topQueries.length > 0 && (
+                                <div className="space-y-1.5 pt-1 border-t border-border/30">
+                                  <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+                                    Frequent Queries
+                                  </span>
+                                  <div className="flex flex-wrap gap-1">
+                                    {data.searches.topQueries.map((tq) => (
+                                      <Badge
+                                        key={tq.query}
+                                        variant="secondary"
+                                        className="text-[10px] font-mono font-normal max-w-full truncate"
+                                        title={`${tq.query} (${tq.count}x)`}
+                                      >
+                                        <span className="truncate">{tq.query}</span>
+                                        <span className="ml-1 text-muted-foreground font-semibold">×{tq.count}</span>
+                                      </Badge>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                            </>
+                          )}
+                        </CardContent>
+                      </Card>
+                    )}
 
                     {/* Document Embeddings Knowledge Base */}
                     {data.documents && data.documents.length > 0 && (
