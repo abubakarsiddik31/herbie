@@ -52,6 +52,13 @@ func TestExtractPlain(t *testing.T) {
 	if _, err := ExtractText("text/markdown", strings.NewReader("x")); err != nil {
 		t.Fatalf("markdown must ride the plain path: %v", err)
 	}
+	withNull, err := ExtractText("text/plain", strings.NewReader("hello\x00world"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if withNull != "helloworld" {
+		t.Fatalf("expected null byte removed, got: %q", withNull)
+	}
 }
 
 func TestExtractDocx(t *testing.T) {

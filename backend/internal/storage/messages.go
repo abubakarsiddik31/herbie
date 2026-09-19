@@ -35,6 +35,10 @@ func (m *Messages) Add(ctx context.Context, msg Message) error {
 	if len(msg.Sources) == 0 {
 		msg.Sources = []byte("[]")
 	}
+	msg.Content = SanitizeText(msg.Content)
+	msg.Model = SanitizeText(msg.Model)
+	msg.Data = SanitizeJSONBytes(msg.Data)
+	msg.Sources = SanitizeJSONBytes(msg.Sources)
 	_, err := m.pool.Exec(ctx,
 		`INSERT INTO messages
 		 (conversation_id, user_id, role, content, data, sources, input_tokens, output_tokens, requests, cost_micro_usd, truncated, model)
@@ -99,6 +103,8 @@ func (m *Messages) ByID(ctx context.Context, msgID, userID string) (Message, err
 // UpdateContent rewrites one message's text and stored payload (the row's
 // images, if any, are preserved by the caller passing merged data).
 func (m *Messages) UpdateContent(ctx context.Context, msgID, userID, content string, data []byte) error {
+	content = SanitizeText(content)
+	data = SanitizeJSONBytes(data)
 	tag, err := m.pool.Exec(ctx,
 		`UPDATE messages SET content = $3, data = $4 WHERE id = $1 AND user_id = $2`,
 		msgID, userID, content, data)

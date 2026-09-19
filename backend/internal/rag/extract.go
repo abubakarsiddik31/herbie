@@ -51,22 +51,39 @@ func ExtractSectionsWithFilename(mime, filename string, r io.Reader) ([]Section,
 	}
 
 	format := resolveFormat(buf, filename, mime)
+	var secs []Section
 	switch format {
 	case docextract.FormatPDF:
-		return pdfSections(buf)
+		secs, err = pdfSections(buf)
 	case docextract.FormatDocx, docextract.FormatXlsx, docextract.FormatPptx, docextract.FormatCSV, docextract.FormatTSV:
 		doc, err := docextract.ExtractBytes(context.Background(), buf, filenameForFormat(filename, format), docextract.Options{})
 		if err != nil {
 			return nil, fmt.Errorf("extract %s: %w", format, err)
 		}
-		return markdownSections(doc.Content), nil
+		secs = markdownSections(doc.Content)
 	case docextract.FormatMarkdown:
-		return markdownSections(string(buf)), nil
+		secs = markdownSections(string(buf))
 	case docextract.FormatText:
-		return []Section{{Text: string(buf)}}, nil
+		secs = []Section{{Text: string(buf)}}
 	default:
 		return nil, fmt.Errorf("unsupported mime %q", mime)
 	}
+	if err != nil {
+		return nil, err
+	}
+	for i := range secs {
+		secs[i].Text = cleanExtractedText(secs[i].Text)
+		secs[i].Heading = cleanExtractedText(secs[i].Heading)
+	}
+	return secs, nil
+}
+
+func cleanExtractedText(s string) string {
+	if s == "" {
+		return ""
+	}
+	s = strings.ReplaceAll(s, "\x00", "")
+	return strings.ToValidUTF8(s, "")
 }
 
 // ExtractText pulls plain or structured markdown text out of an uploaded document.
@@ -91,15 +108,15 @@ func ExtractTextWithFilename(mime, filename string, r io.Reader) (string, error)
 		if err != nil {
 			return "", fmt.Errorf("open pdf: %w", err)
 		}
-		return strings.TrimSpace(pdfDoc.Markdown), nil
+		return cleanExtractedText(strings.TrimSpace(pdfDoc.Markdown)), nil
 	case docextract.FormatDocx, docextract.FormatXlsx, docextract.FormatPptx, docextract.FormatCSV, docextract.FormatTSV, docextract.FormatMarkdown:
 		doc, err := docextract.ExtractBytes(context.Background(), buf, filenameForFormat(filename, format), docextract.Options{})
 		if err != nil {
 			return "", fmt.Errorf("extract %s: %w", format, err)
 		}
-		return strings.TrimSpace(doc.Content), nil
+		return cleanExtractedText(strings.TrimSpace(doc.Content)), nil
 	case docextract.FormatText:
-		return string(buf), nil
+		return cleanExtractedText(string(buf)), nil
 	default:
 		return "", fmt.Errorf("unsupported mime %q", mime)
 	}

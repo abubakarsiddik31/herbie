@@ -76,4 +76,11 @@ Can you give me a summary of this paper?`;
     expect(userPrompt).toBe("Can you give me a summary of this paper?");
     expect(userPrompt).not.toContain("Detailed extracted text");
   });
+
+  it("strips null bytes when processing text files", async () => {
+    const { processAttachedFile } = await import("./files");
+    const file = new File(["hello\0world\0!"], "test.txt", { type: "text/plain" });
+    const processed = await processAttachedFile(file);
+    expect(processed.content).toBe("helloworld!");
+  });
 });

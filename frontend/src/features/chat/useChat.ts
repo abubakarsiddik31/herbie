@@ -141,10 +141,11 @@ export function useChat(onDone?: () => void) {
   }, [consumeStream, streamPOST]);
 
   const send = useCallback(async (content: string, conversationId: string, images?: { mediaType: string; data: string }[]) => {
+    const cleanContent = content.replace(/\0/g, "");
     const controller = new AbortController();
     abortRef.current = controller;
     const userMsg: ChatMessage = {
-      id: crypto.randomUUID(), role: "user", content, truncated: false, createdAt: new Date().toISOString(),
+      id: crypto.randomUUID(), role: "user", content: cleanContent, truncated: false, createdAt: new Date().toISOString(),
       images: images?.map((img) => ({ mediaType: img.mediaType, dataUrl: `data:${img.mediaType};base64,${img.data}` })),
     };
     const assistantId = crypto.randomUUID();
@@ -155,20 +156,21 @@ export function useChat(onDone?: () => void) {
     setTrace([]);
     setPending([]);
     setStatus("running");
-    await start(`/api/conversations/${conversationId}/messages`, images?.length ? { content, images } : { content }, controller, assistantId);
+    await start(`/api/conversations/${conversationId}/messages`, images?.length ? { content: cleanContent, images } : { content: cleanContent }, controller, assistantId);
   }, [start]);
 
   // edit rewrites one user message and re-runs the conversation from it:
   // the local thread truncates to the edited message, then a fresh
   // assistant placeholder streams the new answer.
   const edit = useCallback(async (conversationId: string, msgId: string, content: string) => {
+    const cleanContent = content.replace(/\0/g, "");
     const controller = new AbortController();
     abortRef.current = controller;
     const assistantId = crypto.randomUUID();
     setMessages((m) => {
       const idx = m.findIndex((msg) => msg.id === msgId);
       if (idx < 0) return m;
-      const kept = m.slice(0, idx + 1).map((msg) => msg.id === msgId ? { ...msg, content } : msg);
+      const kept = m.slice(0, idx + 1).map((msg) => msg.id === msgId ? { ...msg, content: cleanContent } : msg);
       return [
         ...kept,
         { id: assistantId, role: "assistant", content: "", truncated: false, createdAt: new Date().toISOString(), streaming: true },
@@ -177,7 +179,7 @@ export function useChat(onDone?: () => void) {
     setTrace([]);
     setPending([]);
     setStatus("running");
-    await start(`/api/conversations/${conversationId}/messages/${msgId}/edit`, { content }, controller, assistantId);
+    await start(`/api/conversations/${conversationId}/messages/${msgId}/edit`, { content: cleanContent }, controller, assistantId);
   }, [start]);
 
   // regenerate replaces the last assistant answer: trailing non-user

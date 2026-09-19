@@ -40,7 +40,7 @@ import {
   formatPromptWithFiles,
   extractFilesAndPrompt,
 } from "@/lib/files";
-import { cn, fmtTokens } from "@/lib/utils";
+import { cn, fmtTokens, cleanConversationTitle } from "@/lib/utils";
 import type { ChatMessage, Conversation, ConversationSettings } from "@/lib/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -622,7 +622,7 @@ export function ChatPage() {
           <span className="hidden sm:inline text-muted-foreground/30">|</span>
 
           <h1 className="min-w-0 truncate text-xs font-medium text-muted-foreground">
-            {activeConversation?.title || (selectedId ? "Conversation" : "New chat")}
+            {activeConversation ? cleanConversationTitle(activeConversation.title) : (selectedId ? "Conversation" : "New chat")}
           </h1>
         </div>
 

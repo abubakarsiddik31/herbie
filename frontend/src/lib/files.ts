@@ -49,6 +49,8 @@ export async function processAttachedFile(file: File): Promise<AttachedFile> {
     content = await file.text();
   }
 
+  content = content.replace(/\0/g, "");
+
   if (content.length > MAX_ATTACHED_CHARS) {
     throw new Error(`${file.name} exceeds 100K token limit (~${Math.round(content.length / 4).toLocaleString()} tokens). Please upload it to Projects or Documents for retrieval.`);
   }

@@ -10,6 +10,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { cleanConversationTitle } from "@/lib/utils";
 import { useShareConversation, useShareState, useUnshareConversation } from "./useShare";
 
 interface Props {
@@ -68,7 +69,7 @@ export function ShareDialog({ conversation, onOpenChange }: Props) {
     <Dialog open={conversation !== null} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Share{conversation ? ` “${conversation.title || "Untitled"}”` : ""}</DialogTitle>
+          <DialogTitle>Share{conversation ? ` “${cleanConversationTitle(conversation.title)}”` : ""}</DialogTitle>
           <DialogDescription>Anyone with the link can read this conversation.</DialogDescription>
         </DialogHeader>
         {link !== null ? (

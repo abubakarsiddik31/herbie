@@ -470,3 +470,61 @@ func TestUserMessage(t *testing.T) {
 		}
 	}
 }
+
+func TestDeriveConversationTitle(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		want    string
+	}{
+		{
+			name:    "file with custom prompt uses prompt",
+			content: "--- File: financial_report_2026.pdf ---\n```pdf\n[binary content]\n```\n\nPlease summarize the key highlights and revenue risks.",
+			want:    "Please summarize the key highlights and revenue",
+		},
+		{
+			name:    "file with default prompt uses filename",
+			content: "--- File: financial_report_2026.pdf ---\n```pdf\n[binary content]\n```\n\nPlease analyze the attached file(s) above.",
+			want:    "financial_report_2026.pdf",
+		},
+		{
+			name:    "multiple files with default prompt",
+			content: "--- File: notes.txt ---\n```txt\nhello\n```\n\n--- File: data.csv ---\n```csv\na,b\n```\n\nPlease analyze the attached file(s) above.",
+			want:    "notes.txt, data.csv",
+		},
+		{
+			name:    "three or more files with default prompt",
+			content: "--- File: a.py ---\n```py\n```\n\n--- File: b.py ---\n```py\n```\n\n--- File: c.py ---\n```py\n```\n\nPlease analyze the attached file(s) above.",
+			want:    "a.py + 2 files",
+		},
+		{
+			name:    "file without any prompt text at all",
+			content: "--- File: invoice_1042.pdf ---\n```pdf\n[content]\n```",
+			want:    "invoice_1042.pdf",
+		},
+		{
+			name:    "regular text message",
+			content: "How does the Go memory allocator work under load?",
+			want:    "How does the Go memory allocator work under load",
+		},
+		{
+			name:    "regular text with markdown headers",
+			content: "### System Architecture Blueprint\n\nDetails here...",
+			want:    "System Architecture Blueprint Details here...",
+		},
+		{
+			name:    "empty content",
+			content: "   ",
+			want:    "New conversation",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := deriveConversationTitle(tt.content)
+			if got != tt.want {
+				t.Errorf("deriveConversationTitle() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}

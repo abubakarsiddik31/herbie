@@ -5,12 +5,14 @@ import { toast } from "sonner";
 import {
   Calendar,
   ChevronDown,
+  FileText,
   FolderGit2,
   Gauge,
   GitBranch,
   Globe,
   LogOut,
   MessageSquare,
+  MoreHorizontal,
   PanelLeftClose,
   Pencil,
   Plug,
@@ -26,7 +28,7 @@ import {
 } from "lucide-react";
 import { ApiError, apiFetch } from "@/lib/api";
 import { useDebouncedValue } from "@/lib/useDebouncedValue";
-import { cn } from "@/lib/utils";
+import { cn, cleanConversationTitle, isFileTitle } from "@/lib/utils";
 import type { Conversation } from "@/lib/types";
 import { useAuth } from "@/stores/auth";
 import { Badge } from "@/components/ui/badge";
@@ -39,6 +41,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -128,23 +137,31 @@ function SidebarProject({ project }: { project: Project }) {
               {detail.conversations.length === 0 ? (
                 <p className="px-2 py-0.5 text-[11px] text-muted-foreground/60">No chats yet</p>
               ) : (
-                detail.conversations.map((c) => (
-                  <button
-                    key={c.id}
-                    type="button"
-                    onClick={() => open({ conv: c.id })}
-                    title={c.title || "Untitled"}
-                    className={cn(
-                      "flex w-full items-center gap-2 rounded-md px-2 py-1 text-[11px] transition-colors",
-                      activeConv === c.id
-                        ? "bg-sidebar-accent/60 text-sidebar-accent-foreground font-medium"
-                        : "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
-                    )}
-                  >
-                    <MessageSquare className="size-3 shrink-0 opacity-70" />
-                    <span className="min-w-0 flex-1 truncate text-left">{c.title || "Untitled"}</span>
-                  </button>
-                ))
+                detail.conversations.map((c) => {
+                  const title = cleanConversationTitle(c.title);
+                  const isFile = isFileTitle(c.title);
+                  return (
+                    <button
+                      key={c.id}
+                      type="button"
+                      onClick={() => open({ conv: c.id })}
+                      title={title}
+                      className={cn(
+                        "flex w-full items-center gap-2 rounded-md px-2 py-1 text-[11px] transition-colors",
+                        activeConv === c.id
+                          ? "bg-sidebar-accent/60 text-sidebar-accent-foreground font-medium"
+                          : "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
+                      )}
+                    >
+                      {isFile ? (
+                        <FileText className="size-3 shrink-0 text-primary/70" />
+                      ) : (
+                        <MessageSquare className="size-3 shrink-0 opacity-70" />
+                      )}
+                      <span className="min-w-0 flex-1 truncate text-left">{title}</span>
+                    </button>
+                  );
+                })
               )}
             </>
           )}
@@ -237,7 +254,7 @@ export function AppSidebar() {
 
   function openRename(c: Conversation) {
     setRenaming(c);
-    setRenameTitle(c.title || "");
+    setRenameTitle(cleanConversationTitle(c.title));
   }
 
   function confirmRename() {
@@ -721,6 +738,8 @@ export function AppSidebar() {
                 </p>
                 {group.items.map((c) => {
                   const isSelected = c.id === selectedId;
+                  const displayTitle = cleanConversationTitle(c.title);
+                  const isFile = isFileTitle(c.title);
                   return (
                     <div
                       key={c.id}
@@ -734,46 +753,75 @@ export function AppSidebar() {
                       <button
                         type="button"
                         onClick={() => selectConversation(c.id)}
-                        title={c.title || "Untitled"}
-                        className="min-w-0 flex-1 truncate text-left outline-none py-1"
+                        title={displayTitle}
+                        className="flex items-center gap-2 min-w-0 flex-1 truncate text-left outline-none py-1 pr-7"
                       >
-                        {c.title || "Untitled"}
+                        {isFile ? (
+                          <FileText className="size-3.5 shrink-0 text-primary/70 group-hover:text-primary transition-colors" />
+                        ) : (
+                          <MessageSquare className="size-3.5 shrink-0 opacity-60 group-hover:opacity-100 transition-opacity" />
+                        )}
+                        <span className="truncate">{displayTitle}</span>
                       </button>
-                      <div className="hidden shrink-0 items-center gap-0.5 group-hover:flex group-focus-within:flex pl-1">
-                        <Button
-                          variant="ghost"
-                          size="icon-xs"
-                          aria-label={`Rename ${c.title || "conversation"}`}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            openRename(c);
-                          }}
-                        >
-                          <Pencil className="size-3" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon-xs"
-                          aria-label={`Share ${c.title || "conversation"}`}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setSharing(c);
-                          }}
-                        >
-                          <Share2 className="size-3" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon-xs"
-                          aria-label={`Delete ${c.title || "conversation"}`}
-                          className="text-destructive hover:text-destructive"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setPendingDelete(c);
-                          }}
-                        >
-                          <Trash2 className="size-3" />
-                        </Button>
+                      <div
+                        className={cn(
+                          "absolute right-1 top-1/2 -translate-y-1/2 flex items-center z-10 transition-opacity",
+                          isSelected
+                            ? "opacity-100"
+                            : "opacity-0 group-hover:opacity-100 focus-within:opacity-100 max-md:opacity-75"
+                        )}
+                      >
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon-xs"
+                              aria-label={`Options for ${displayTitle}`}
+                              title="Conversation options"
+                              className={cn(
+                                "size-6 rounded-md hover:bg-background/80 hover:text-foreground text-muted-foreground transition-all",
+                                isSelected ? "text-sidebar-accent-foreground" : ""
+                              )}
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <MoreHorizontal className="size-3.5" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="w-44">
+                            <DropdownMenuItem
+                              aria-label={`Rename ${displayTitle}`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openRename(c);
+                              }}
+                            >
+                              <Pencil className="size-3.5 text-muted-foreground" />
+                              <span>Rename</span>
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              aria-label={`Share ${displayTitle}`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSharing(c);
+                              }}
+                            >
+                              <Share2 className="size-3.5 text-muted-foreground" />
+                              <span>Share link</span>
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem
+                              variant="destructive"
+                              aria-label={`Delete ${displayTitle}`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setPendingDelete(c);
+                              }}
+                            >
+                              <Trash2 className="size-3.5 text-destructive" />
+                              <span>Delete chat</span>
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
                       </div>
                     </div>
                   );
@@ -859,7 +907,7 @@ export function AppSidebar() {
           <DialogHeader>
             <DialogTitle>Delete conversation?</DialogTitle>
             <DialogDescription>
-              “{pendingDelete?.title || "Untitled"}” and all of its messages will be permanently removed.
+              “{cleanConversationTitle(pendingDelete?.title)}” and all of its messages will be permanently removed.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

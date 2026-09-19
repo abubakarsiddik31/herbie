@@ -3,6 +3,7 @@ import { useNavigate } from "react-router";
 import { useTheme } from "next-themes";
 import {
   Download,
+  FileText,
   FileUp,
   Gauge,
   MessageSquare,
@@ -18,6 +19,7 @@ import {
 } from "lucide-react";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { cleanConversationTitle, isFileTitle } from "@/lib/utils";
 import type { Conversation } from "@/lib/types";
 
 interface Props {
@@ -138,9 +140,9 @@ export function CommandPalette({
         list.push({
           id: `conv-${c.id}`,
           category: "Conversations",
-          title: c.title || "Untitled conversation",
+          title: cleanConversationTitle(c.title),
           subtitle: c.model || undefined,
-          icon: MessageSquare,
+          icon: isFileTitle(c.title) ? FileText : MessageSquare,
           run: () => navigate(`/chat/${c.id}`),
         });
       }

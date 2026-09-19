@@ -55,7 +55,7 @@ func (c *Conversations) Create(ctx context.Context, userID, title string, patch 
 	row := c.pool.QueryRow(ctx,
 		`INSERT INTO conversations (user_id, title, model, temperature, system_prompt, rag_enabled, project_id) VALUES ($1, $2, $3, $4, $5, $6, $7)
 		 RETURNING `+conversationColumns,
-		userID, title, derefString(patch.Model), patch.Temperature, derefString(patch.SystemPrompt), derefBool(patch.RagEnabled, true), patch.ProjectID)
+		userID, SanitizeText(title), derefString(patch.Model), patch.Temperature, SanitizeText(derefString(patch.SystemPrompt)), derefBool(patch.RagEnabled, true), patch.ProjectID)
 	conv, err := scanConversation(row)
 	if err != nil {
 		return Conversation{}, fmt.Errorf("create conversation: %w", err)
@@ -117,7 +117,7 @@ func (c *Conversations) ByID(ctx context.Context, id, userID string) (Conversati
 
 func (c *Conversations) SetTitle(ctx context.Context, id, userID, title string) error {
 	_, err := c.pool.Exec(ctx,
-		`UPDATE conversations SET title = $3 WHERE id = $1 AND user_id = $2`, id, userID, title)
+		`UPDATE conversations SET title = $3 WHERE id = $1 AND user_id = $2`, id, userID, SanitizeText(title))
 	return err
 }
 

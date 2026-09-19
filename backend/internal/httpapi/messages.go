@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/abubakarsiddik31/golem-chatbot/internal/storage"
 	"github.com/abubakarsiddik31/golem/model"
@@ -20,7 +21,12 @@ func (s *Server) handleEditMessage(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Content string `json:"content"`
 	}
-	if err := decodeJSON(r, &req); err != nil || req.Content == "" {
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "invalid request body")
+		return
+	}
+	req.Content = storage.SanitizeText(req.Content)
+	if strings.TrimSpace(req.Content) == "" {
 		writeError(w, http.StatusBadRequest, "bad_request", "content is required")
 		return
 	}

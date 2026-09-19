@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -95,7 +96,12 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 		Content string       `json:"content"`
 		Images  []imageInput `json:"images"`
 	}
-	if err := decodeJSON(r, &req); err != nil || (req.Content == "" && len(req.Images) == 0) {
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "invalid request body")
+		return
+	}
+	req.Content = storage.SanitizeText(req.Content)
+	if strings.TrimSpace(req.Content) == "" && len(req.Images) == 0 {
 		writeError(w, http.StatusBadRequest, "bad_request", "content or images is required")
 		return
 	}
@@ -127,7 +133,7 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 
 	// Auto-title from the first user message.
 	if n, err := s.deps.Convos.CountMessages(ctx, convID, userID); err == nil && n == 0 {
-		_ = s.deps.Convos.SetTitle(ctx, convID, userID, truncateRunes(req.Content, 48))
+		_ = s.deps.Convos.SetTitle(ctx, convID, userID, deriveConversationTitle(req.Content))
 	}
 
 	// Persist the user message first, then build history from prior turns.
@@ -137,11 +143,13 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 		Content: req.Content,
 		Data:    mustJSON(model.Message{Role: model.RoleUser, Content: req.Content, Parts: parts}),
 	}); err != nil {
+		s.deps.Log.Error("could not store message", "err", err, "conv_id", convID)
 		writeError(w, http.StatusInternalServerError, "internal", "could not store message")
 		return
 	}
 	msgs, err := s.deps.Msgs.ForConversation(ctx, convID, userID)
 	if err != nil {
+		s.deps.Log.Error("could not load history", "err", err, "conv_id", convID)
 		writeError(w, http.StatusInternalServerError, "internal", "could not load history")
 		return
 	}
@@ -970,12 +978,79 @@ func historyFrom(msgs []storage.Message, upto int) []model.Message {
 	return history
 }
 
+var (
+	fileBlockRe = regexp.MustCompile(`(?s)--- File:\s*([^\n\r]+?)\s*---\s*(?:` + "```" + `[^\n\r]*\r?\n[\s\S]*?` + "```" + `)?\s*`)
+	fileNameRe  = regexp.MustCompile(`--- File:\s*([^\n\r]+?)\s*---`)
+)
+
+func deriveConversationTitle(content string) string {
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return "New conversation"
+	}
+
+	// 1. Check for attached file headers
+	matches := fileNameRe.FindAllStringSubmatch(content, -1)
+	var fileNames []string
+	for _, m := range matches {
+		if len(m) > 1 {
+			name := strings.TrimSpace(m[1])
+			if name != "" {
+				fileNames = append(fileNames, name)
+			}
+		}
+	}
+
+	// 2. If files were attached, strip the file blocks to see if there is a real user prompt
+	cleanText := content
+	if len(fileNames) > 0 {
+		cleanText = fileBlockRe.ReplaceAllString(content, "")
+		cleanText = strings.TrimSpace(cleanText)
+	}
+
+	// Filter out default automated prompts
+	isDefaultPrompt := cleanText == "" ||
+		cleanText == "Please analyze the attached file(s) above." ||
+		cleanText == "Please analyze the attached file(s) above" ||
+		cleanText == "Please analyze the attached file above." ||
+		cleanText == "Please analyze the attached file above"
+
+	if !isDefaultPrompt {
+		// Clean the user prompt:
+		cleanPrompt := strings.TrimLeft(cleanText, "#*- >_\t\r\n")
+		cleanPrompt = strings.Join(strings.Fields(cleanPrompt), " ")
+		if cleanPrompt != "" {
+			return truncateRunes(cleanPrompt, 48)
+		}
+	}
+
+	// 3. If user prompt is empty or default, use the attached file names
+	if len(fileNames) > 0 {
+		if len(fileNames) == 1 {
+			return truncateRunes(fileNames[0], 48)
+		}
+		if len(fileNames) == 2 {
+			return truncateRunes(fileNames[0]+", "+fileNames[1], 48)
+		}
+		return truncateRunes(fmt.Sprintf("%s + %d files", fileNames[0], len(fileNames)-1), 48)
+	}
+
+	// 4. Fallback for regular text messages
+	cleanText = strings.TrimLeft(cleanText, "#*- >_\t\r\n")
+	cleanText = strings.Join(strings.Fields(cleanText), " ")
+	if cleanText != "" {
+		return truncateRunes(cleanText, 48)
+	}
+
+	return "New conversation"
+}
+
 func truncateRunes(s string, n int) string {
 	r := []rune(s)
 	if len(r) <= n {
-		return s
+		return strings.TrimSpace(s)
 	}
-	return string(r[:n])
+	return strings.TrimSpace(string(r[:n]))
 }
 
 func mustJSON(v any) []byte {

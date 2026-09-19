@@ -40,3 +40,52 @@ func TestConversationSearch(t *testing.T) {
 		t.Fatalf("cross-user leak: %+v %v", foreign, err)
 	}
 }
+
+func TestNullByteSanitizationIntegration(t *testing.T) {
+	pool := newTestPool(t)
+	ctx := context.Background()
+	users := NewUsers(pool)
+	convs := NewConversations(pool)
+	msgs := NewMessages(pool)
+
+	user, err := users.Create(ctx, "nullbyte@test.dev", "hash")
+	if err != nil {
+		user, err = users.ByEmail(ctx, "nullbyte@test.dev")
+	}
+	if err != nil {
+		t.Fatalf("user setup: %v", err)
+	}
+
+	conv, err := convs.Create(ctx, user.ID, "Conv\x00Title", ConversationPatch{})
+	if err != nil {
+		t.Fatalf("create conv with null byte: %v", err)
+	}
+	if conv.Title != "ConvTitle" {
+		t.Fatalf("expected title without null byte, got %q", conv.Title)
+	}
+
+	if err := convs.SetTitle(ctx, conv.ID, user.ID, "Updated\x00Title"); err != nil {
+		t.Fatalf("set title with null byte: %v", err)
+	}
+
+	// Insert message containing null bytes in content and data
+	msg := Message{
+		ConversationID: conv.ID,
+		UserID:         user.ID,
+		Role:           "user",
+		Content:        "Hello\x00World from PDF extraction!",
+		Data:           []byte(`{"role":"user","content":"Hello\u0000World from PDF extraction!"}`),
+		Model:          "test\x00model",
+	}
+	if err := msgs.Add(ctx, msg); err != nil {
+		t.Fatalf("msgs.Add with null bytes failed: %v", err)
+	}
+
+	list, err := msgs.ForConversation(ctx, conv.ID, user.ID)
+	if err != nil || len(list) == 0 {
+		t.Fatalf("messages lookup: %v", err)
+	}
+	if list[0].Content != "HelloWorld from PDF extraction!" {
+		t.Fatalf("expected sanitized content, got %q", list[0].Content)
+	}
+}
