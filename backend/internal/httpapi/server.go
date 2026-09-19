@@ -168,6 +168,7 @@ func newServer(deps ServerDeps) (*Server, http.Handler) {
 	authed.HandleFunc("DELETE /api/workflow-credentials/{id}", s.handleDeleteWorkflowCredential)
 	authed.HandleFunc("GET /api/tool-oauth/providers", s.handleToolOAuthProviders)
 	authed.HandleFunc("GET /api/tool-oauth/{provider}/start", s.handleToolOAuthStart)
+	authed.HandleFunc("POST /api/tool-oauth/{provider}/config", s.handleConfigureToolOAuth)
 	authed.HandleFunc("POST /api/tool-oauth/{provider}/disconnect", s.handleToolOAuthDisconnect)
 	authed.HandleFunc("GET /api/tool-audit-logs", s.handleListToolAuditLogs)
 	authed.HandleFunc("GET /api/mcp/catalog", s.handleListMCPCatalog)

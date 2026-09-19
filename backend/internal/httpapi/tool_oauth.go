@@ -98,6 +98,43 @@ type toolProviderDTO struct {
 	ExpiresAt      *string  `json:"expiresAt,omitempty"`
 }
 
+func (s *Server) resolveOAuthProviderConfig(ctx context.Context, userID, provider string) (clientID, secret string, ok bool) {
+	switch provider {
+	case "google_calendar":
+		cfg := s.deps.Cfg.ToolOAuth.GoogleCalendar
+		if cfg.Enabled() {
+			return cfg.ClientID, cfg.Secret, true
+		}
+	case "github":
+		cfg := s.deps.Cfg.ToolOAuth.GitHub
+		if cfg.Enabled() {
+			return cfg.ClientID, cfg.Secret, true
+		}
+	case "slack":
+		cfg := s.deps.Cfg.ToolOAuth.Slack
+		if cfg.Enabled() {
+			return cfg.ClientID, cfg.Secret, true
+		}
+	}
+
+	if s.deps.Workflows != nil && userID != "" {
+		creds, err := s.deps.Workflows.ListCredentials(ctx, userID)
+		if err == nil {
+			for _, c := range creds {
+				if c.Name == "oauth_config_"+provider {
+					dec := s.decryptCredentialData(c.Data)
+					cid, _ := dec["client_id"].(string)
+					sec, _ := dec["client_secret"].(string)
+					if cid != "" && sec != "" {
+						return cid, sec, true
+					}
+				}
+			}
+		}
+	}
+	return "", "", false
+}
+
 func (s *Server) handleToolOAuthProviders(w http.ResponseWriter, r *http.Request) {
 	userID, _ := userIDFrom(r.Context())
 
@@ -125,7 +162,11 @@ func (s *Server) handleToolOAuthProviders(w http.ResponseWriter, r *http.Request
 	if s.deps.Workflows != nil && userID != "" {
 		creds, _ := s.deps.Workflows.ListCredentials(r.Context(), userID)
 		for i, p := range providers {
+			// Check if dynamically configured
 			for _, c := range creds {
+				if c.Name == "oauth_config_"+p.ID {
+					providers[i].Configured = true
+				}
 				if c.Provider == p.ID || (c.Type == "oauth2" && strings.HasPrefix(c.Name, p.ID)) {
 					providers[i].Connected = true
 					providers[i].ConnectedVia = "oauth"
@@ -138,7 +179,6 @@ func (s *Server) handleToolOAuthProviders(w http.ResponseWriter, r *http.Request
 						exp := c.ExpiresAt.UTC().Format(timeRFC3339)
 						providers[i].ExpiresAt = &exp
 					}
-					break
 				}
 			}
 		}
@@ -186,15 +226,16 @@ func (s *Server) handleToolOAuthStart(w http.ResponseWriter, r *http.Request) {
 	}
 	var authURL string
 
+	cid, _, ok := s.resolveOAuthProviderConfig(r.Context(), userID, provider)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "not_configured", fmt.Sprintf("%s OAuth is not configured", provider))
+		return
+	}
+
 	switch provider {
 	case "google_calendar":
-		cfg := s.deps.Cfg.ToolOAuth.GoogleCalendar
-		if !cfg.Enabled() {
-			writeError(w, http.StatusBadRequest, "not_configured", "Google Calendar OAuth is not configured")
-			return
-		}
 		q := url.Values{
-			"client_id":     {cfg.ClientID},
+			"client_id":     {cid},
 			"redirect_uri":  {redirectURI},
 			"response_type": {"code"},
 			"scope":         {"https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/calendar.events"},
@@ -205,13 +246,8 @@ func (s *Server) handleToolOAuthStart(w http.ResponseWriter, r *http.Request) {
 		authURL = "https://accounts.google.com/o/oauth2/v2/auth?" + q.Encode()
 
 	case "github":
-		cfg := s.deps.Cfg.ToolOAuth.GitHub
-		if !cfg.Enabled() {
-			writeError(w, http.StatusBadRequest, "not_configured", "GitHub OAuth is not configured")
-			return
-		}
 		q := url.Values{
-			"client_id":    {cfg.ClientID},
+			"client_id":    {cid},
 			"redirect_uri": {redirectURI},
 			"scope":        {"repo,read:user"},
 			"state":        {state},
@@ -219,13 +255,8 @@ func (s *Server) handleToolOAuthStart(w http.ResponseWriter, r *http.Request) {
 		authURL = "https://github.com/login/oauth/authorize?" + q.Encode()
 
 	case "slack":
-		cfg := s.deps.Cfg.ToolOAuth.Slack
-		if !cfg.Enabled() {
-			writeError(w, http.StatusBadRequest, "not_configured", "Slack OAuth is not configured")
-			return
-		}
 		q := url.Values{
-			"client_id":    {cfg.ClientID},
+			"client_id":    {cid},
 			"redirect_uri": {redirectURI},
 			"scope":        {"incoming-webhook,chat:write"},
 			"state":        {state},
@@ -249,6 +280,122 @@ func (s *Server) handleToolOAuthStart(w http.ResponseWriter, r *http.Request) {
 	})
 
 	writeJSON(w, http.StatusOK, map[string]any{"url": authURL})
+}
+
+type configureToolOAuthRequest struct {
+	ClientID     string `json:"clientId,omitempty"`
+	ClientSecret string `json:"clientSecret,omitempty"`
+	Token        string `json:"token,omitempty"`
+	RefreshToken string `json:"refreshToken,omitempty"`
+}
+
+func (s *Server) handleConfigureToolOAuth(w http.ResponseWriter, r *http.Request) {
+	provider := r.PathValue("provider")
+	userID, _ := userIDFrom(r.Context())
+	if userID == "" {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "login required")
+		return
+	}
+
+	if s.deps.Workflows == nil {
+		writeError(w, http.StatusNotImplemented, "not_implemented", "workflows store not configured")
+		return
+	}
+
+	var req configureToolOAuthRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "invalid json body")
+		return
+	}
+
+	clientID := strings.TrimSpace(req.ClientID)
+	clientSecret := strings.TrimSpace(req.ClientSecret)
+	token := strings.TrimSpace(req.Token)
+	refreshToken := strings.TrimSpace(req.RefreshToken)
+
+	// If direct token provided, store directly as connected credential
+	if token != "" {
+		credData := map[string]string{
+			"token": token,
+		}
+		if refreshToken != "" {
+			credData["refresh_token"] = refreshToken
+		}
+		var rawData []byte
+		b, _ := json.Marshal(credData)
+		if s.deps.Vault != nil {
+			enc, err := s.deps.Vault.Encrypt(b)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "internal", "encryption failed")
+				return
+			}
+			rawData = enc
+		} else {
+			rawData = b
+		}
+
+		existing, err := s.deps.Workflows.GetCredentialByProvider(r.Context(), userID, provider)
+		if err == nil && existing.ID != "" {
+			existing.Data = rawData
+			existing.UpdatedAt = time.Now()
+			_, _ = s.deps.Workflows.UpdateCredential(r.Context(), existing)
+		} else {
+			_, _ = s.deps.Workflows.CreateCredential(r.Context(), storage.WorkflowCredential{
+				UserID:   userID,
+				Name:     provider,
+				Type:     "oauth2",
+				Provider: provider,
+				Data:     rawData,
+			})
+		}
+	}
+
+	// If Client ID & Secret provided, save as oauth_config_<provider>
+	if clientID != "" && clientSecret != "" {
+		cfgData := map[string]string{
+			"client_id":     clientID,
+			"client_secret": clientSecret,
+		}
+		var rawData []byte
+		b, _ := json.Marshal(cfgData)
+		if s.deps.Vault != nil {
+			enc, err := s.deps.Vault.Encrypt(b)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "internal", "encryption failed")
+				return
+			}
+			rawData = enc
+		} else {
+			rawData = b
+		}
+
+		creds, _ := s.deps.Workflows.ListCredentials(r.Context(), userID)
+		cfgName := "oauth_config_" + provider
+		var foundID string
+		for _, c := range creds {
+			if c.Name == cfgName {
+				foundID = c.ID
+				break
+			}
+		}
+
+		if foundID != "" {
+			existing, _ := s.deps.Workflows.GetCredential(r.Context(), foundID, userID)
+			existing.Data = rawData
+			existing.UpdatedAt = time.Now()
+			_, _ = s.deps.Workflows.UpdateCredential(r.Context(), existing)
+		} else {
+			_, _ = s.deps.Workflows.CreateCredential(r.Context(), storage.WorkflowCredential{
+				UserID:   userID,
+				Name:     cfgName,
+				Type:     "oauth_config",
+				Provider: provider,
+				Data:     rawData,
+			})
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (s *Server) handleToolOAuthCallback(w http.ResponseWriter, r *http.Request) {
@@ -310,10 +457,10 @@ func (s *Server) handleToolOAuthCallback(w http.ResponseWriter, r *http.Request)
 
 	switch provider {
 	case "google_calendar":
-		cfg := s.deps.Cfg.ToolOAuth.GoogleCalendar
+		cid, sec, _ := s.resolveOAuthProviderConfig(r.Context(), userID, provider)
 		form := url.Values{
-			"client_id":     {cfg.ClientID},
-			"client_secret": {cfg.Secret},
+			"client_id":     {cid},
+			"client_secret": {sec},
 			"code":          {code},
 			"grant_type":    {"authorization_code"},
 			"redirect_uri":  {redirectURI},
@@ -372,10 +519,10 @@ func (s *Server) handleToolOAuthCallback(w http.ResponseWriter, r *http.Request)
 		}
 
 	case "github":
-		cfg := s.deps.Cfg.ToolOAuth.GitHub
+		cid, sec, _ := s.resolveOAuthProviderConfig(r.Context(), userID, provider)
 		payload, _ := json.Marshal(map[string]string{
-			"client_id":     cfg.ClientID,
-			"client_secret": cfg.Secret,
+			"client_id":     cid,
+			"client_secret": sec,
 			"code":          code,
 			"redirect_uri":  redirectURI,
 		})
@@ -417,10 +564,10 @@ func (s *Server) handleToolOAuthCallback(w http.ResponseWriter, r *http.Request)
 		}
 
 	case "slack":
-		cfg := s.deps.Cfg.ToolOAuth.Slack
+		cid, sec, _ := s.resolveOAuthProviderConfig(r.Context(), userID, provider)
 		form := url.Values{
-			"client_id":     {cfg.ClientID},
-			"client_secret": {cfg.Secret},
+			"client_id":     {cid},
+			"client_secret": {sec},
 			"code":          {code},
 			"redirect_uri":  {redirectURI},
 		}

@@ -481,3 +481,89 @@ func TestToolOAuthDisconnectEndpoint(t *testing.T) {
 		t.Fatalf("expected oauth_disconnect audit log, got %+v", auditStore.audits)
 	}
 }
+
+func TestConfigureToolOAuth(t *testing.T) {
+	wfStore := newFakeWorkflowStore()
+	auditStore := &fakeAuditStore{}
+	// Make server with unconfigured google calendar
+	server, handler, token := newToolOAuthTestServer(t, wfStore, auditStore)
+	server.deps.Cfg.ToolOAuth.GoogleCalendar.ClientID = ""
+	server.deps.Cfg.ToolOAuth.GoogleCalendar.Secret = ""
+
+	// 1. Initial check: not configured
+	req := httptest.NewRequest(http.MethodGet, "/api/tool-oauth/providers", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	var resp struct {
+		Providers []toolProviderDTO `json:"providers"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &resp)
+	if resp.Providers[0].Configured {
+		t.Fatal("expected google_calendar initially not configured")
+	}
+
+	// 2. Configure Client ID and Secret dynamically
+	body := `{"clientId":"user-google-id-123","clientSecret":"user-google-secret-456"}`
+	req = httptest.NewRequest(http.MethodPost, "/api/tool-oauth/google_calendar/config", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// 3. Check providers again: should now be configured!
+	req = httptest.NewRequest(http.MethodGet, "/api/tool-oauth/providers", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	_ = json.Unmarshal(rec.Body.Bytes(), &resp)
+	if !resp.Providers[0].Configured {
+		t.Fatal("expected google_calendar to be configured after dynamic setup")
+	}
+
+	// 4. Start OAuth: should use user's dynamic client_id
+	req = httptest.NewRequest(http.MethodGet, "/api/tool-oauth/google_calendar/start", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var startResp struct {
+		URL string `json:"url"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &startResp)
+	if !strings.Contains(startResp.URL, "client_id=user-google-id-123") {
+		t.Fatalf("expected dynamic client_id in auth url, got: %s", startResp.URL)
+	}
+
+	// 5. Configure direct token
+	bodyToken := `{"token":"direct-access-token-999"}`
+	req = httptest.NewRequest(http.MethodPost, "/api/tool-oauth/google_calendar/config", strings.NewReader(bodyToken))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+
+	// Check providers: should now be connected!
+	req = httptest.NewRequest(http.MethodGet, "/api/tool-oauth/providers", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	_ = json.Unmarshal(rec.Body.Bytes(), &resp)
+	if !resp.Providers[0].Connected {
+		t.Fatal("expected google_calendar to be connected after direct token")
+	}
+}

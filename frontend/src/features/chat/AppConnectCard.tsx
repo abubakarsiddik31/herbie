@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { useToolOAuthProviders } from "@/features/workflows/useWorkflows";
 import { useLinkCatalogApp } from "@/features/mcp/useMCPCatalog";
-import { LinkAppDialog } from "@/features/mcp/LinkAppDialog";
+import { OAuthPopupDialog } from "@/features/workflows/OAuthPopupDialog";
 import { MentionAppIcon } from "./MentionMenu";
 
 export interface AppConnectCardProps {
@@ -106,10 +106,10 @@ export function AppConnectCard({ providerId, className, returnTo }: AppConnectCa
           <span>Manage</span>
         </Button>
 
-        <LinkAppDialog
+        <OAuthPopupDialog
           open={linkDialogOpen}
           onOpenChange={setLinkDialogOpen}
-          initialAppId={providerId}
+          providerId={providerId}
         />
       </div>
     );
@@ -131,11 +131,11 @@ export function AppConnectCard({ providerId, className, returnTo }: AppConnectCa
             <div className="flex items-center justify-between gap-2">
               <h4 className="font-semibold text-foreground text-xs">{meta.name} Connection Required</h4>
               <Badge variant="outline" className="border-purple-500/40 bg-purple-500/10 text-purple-700 dark:text-purple-400 text-[10px] font-normal">
-                MCP / OAuth
+                Integration
               </Badge>
             </div>
             <p className="text-[11px] text-muted-foreground mt-1 leading-relaxed">
-              {meta.description} Link using an external MCP server or authenticate via OAuth.
+              {meta.description} Connect your account to enable Herbie to take actions on your behalf.
             </p>
           </div>
         </div>
@@ -149,28 +149,18 @@ export function AppConnectCard({ providerId, className, returnTo }: AppConnectCa
             className="gap-1 text-xs text-muted-foreground hover:text-foreground h-7 px-2"
           >
             <SlidersHorizontal className="size-3" />
-            <span>Settings</span>
+            <span>Configure</span>
           </Button>
 
           {providerId === "google_calendar" ? (
             <Button
               size="xs"
               variant="default"
-              disabled={connecting}
-              onClick={handleConnect}
+              onClick={() => setLinkDialogOpen(true)}
               className="gap-1.5 text-xs font-medium shadow-xs h-7"
             >
-              {connecting ? (
-                <>
-                  <Loader2 className="size-3 animate-spin" />
-                  <span>Connecting…</span>
-                </>
-              ) : (
-                <>
-                  <ExternalLink className="size-3" />
-                  <span>Connect Google Calendar</span>
-                </>
-              )}
+              <ExternalLink className="size-3" />
+              <span>Connect Google Calendar</span>
             </Button>
           ) : (
             <>
@@ -214,10 +204,10 @@ export function AppConnectCard({ providerId, className, returnTo }: AppConnectCa
         </div>
       </div>
 
-      <LinkAppDialog
+      <OAuthPopupDialog
         open={linkDialogOpen}
         onOpenChange={setLinkDialogOpen}
-        initialAppId={providerId}
+        providerId={providerId}
       />
     </>
   );
