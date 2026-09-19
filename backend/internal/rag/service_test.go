@@ -167,12 +167,31 @@ func TestIngestHappy(t *testing.T) {
 		t.Fatalf("section order not preserved: %q / %q", call.Chunks[0].Content[:32], call.Chunks[1].Content[:32])
 	}
 	wantKey := ObjectKey("u1", "d1", "notes.md")
-	wantParsedKey := ParsedObjectKey("u1", "d1")
+	wantParsedKey := ParsedObjectKey(wantKey)
 	if len(objs.puts) < 1 || objs.puts[0] != wantKey {
 		t.Fatalf("object key: %v, want at least %s", objs.puts, wantKey)
 	}
 	if len(objs.puts) > 1 && objs.puts[1] != wantParsedKey {
 		t.Fatalf("parsed object key: %v, want %s", objs.puts[1], wantParsedKey)
+	}
+}
+
+func TestIngestWithProjectKey(t *testing.T) {
+	vs, objs := &fakeVS{}, &fakeObjects{}
+	svc := newTestService(vs, objs)
+	key := ProjectObjectKey("u1", "p1", "d1", "report.md")
+	_, _, err := svc.IngestWithKey(context.Background(), key, "u1", "d1", "report.md", "text/markdown", []byte("# Report\n\nContent"), "text/markdown")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(objs.puts) != 2 {
+		t.Fatalf("expected 2 puts (original + parsed), got %d: %v", len(objs.puts), objs.puts)
+	}
+	if objs.puts[0] != "u1/projects/p1/d1/report.md" {
+		t.Fatalf("expected original at u1/projects/p1/d1/report.md, got %q", objs.puts[0])
+	}
+	if objs.puts[1] != "u1/projects/p1/d1/parsed.md" {
+		t.Fatalf("expected parsed at u1/projects/p1/d1/parsed.md, got %q", objs.puts[1])
 	}
 }
 
