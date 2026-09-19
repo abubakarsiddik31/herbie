@@ -1,4 +1,17 @@
-import { ChevronDown, CheckCircle2, Sparkles, BookOpen, Globe, Calendar, GitBranch, MessageSquare, Terminal, FileText, Cpu } from "lucide-react";
+import {
+  ChevronDown,
+  CheckCircle2,
+  Layers,
+  BookOpen,
+  Globe,
+  Calendar,
+  GitBranch,
+  MessageSquare,
+  Terminal,
+  FileText,
+  Cpu,
+  Wrench,
+} from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 
 export interface ThinkingTraceProps {
@@ -8,7 +21,7 @@ export interface ThinkingTraceProps {
 interface HumanizedStep {
   id: string;
   label: string;
-  icon: typeof Sparkles;
+  icon: typeof Layers;
 }
 
 function humanizeStep(row: string, index: number): HumanizedStep {
@@ -90,7 +103,7 @@ function humanizeStep(row: string, index: number): HumanizedStep {
   return {
     id: `${index}-${row}`,
     label: cleaned.charAt(0).toUpperCase() + cleaned.slice(1),
-    icon: Sparkles,
+    icon: Wrench,
   };
 }
 
@@ -103,7 +116,7 @@ export function ThinkingTrace({ rows }: ThinkingTraceProps) {
     <details className="group mb-2.5 text-xs">
       <summary className="flex w-fit cursor-pointer list-none items-center gap-1.5 select-none rounded-lg px-2 py-1 text-muted-foreground hover:bg-muted/60 hover:text-foreground transition-colors">
         <ChevronDown className="size-3 text-muted-foreground/70 transition-transform duration-200 group-open:rotate-0 -rotate-90" />
-        <Sparkles className="size-3 text-emerald-600 dark:text-emerald-400 shrink-0" />
+        <Layers className="size-3 text-emerald-600 dark:text-emerald-400 shrink-0" />
         <span className="font-medium text-foreground/80">Research & Steps</span>
         <Badge variant="secondary" className="px-1.5 py-0 text-[10px] font-mono h-4 shrink-0 ml-0.5">
           {steps.length}

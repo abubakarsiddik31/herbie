@@ -11,7 +11,6 @@ import {
   Loader2,
   MessageSquare,
   Plug,
-  Sparkles,
   Terminal,
   Trash2,
   Wrench,
@@ -155,8 +154,8 @@ export function LinkAppDialog({ open, onOpenChange }: LinkAppDialogProps) {
         <DialogHeader className="pb-3 border-b border-border/60">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2.5">
-              <div className="flex size-8 items-center justify-center rounded-xl bg-purple-600/10 text-purple-600 dark:text-purple-400">
-                <Sparkles className="size-4" />
+              <div className="flex size-8 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                <Plug className="size-4" />
               </div>
               <div>
                 <DialogTitle className="text-base font-semibold">
@@ -307,12 +306,12 @@ export function LinkAppDialog({ open, onOpenChange }: LinkAppDialogProps) {
                               variant="default"
                               onClick={() => handleOneClickLink(app)}
                               disabled={isLinking}
-                              className="h-7 text-xs font-medium bg-purple-600 hover:bg-purple-700 text-white gap-1.5 shadow-xs"
+                              className="h-7 text-xs font-medium bg-emerald-600 hover:bg-emerald-700 text-white dark:bg-emerald-600 dark:hover:bg-emerald-500 gap-1.5 shadow-xs rounded-lg"
                             >
                               {isLinking ? (
                                 <Loader2 className="size-3 animate-spin" />
                               ) : (
-                                <Sparkles className="size-3" />
+                                <Plug className="size-3" />
                               )}
                               <span>1-Click Link</span>
                             </Button>

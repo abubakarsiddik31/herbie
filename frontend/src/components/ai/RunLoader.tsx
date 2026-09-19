@@ -1,5 +1,14 @@
 import { useEffect, useState } from "react";
-import { Sparkles } from "lucide-react";
+import {
+  Activity,
+  BookOpen,
+  Calendar,
+  FileText,
+  GitBranch,
+  Globe,
+  MessageSquare,
+  Terminal,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export interface RunLoaderProps {
@@ -7,46 +16,49 @@ export interface RunLoaderProps {
   className?: string;
 }
 
-function getContextualVerbiage(trace?: string[], elapsed: number = 0): string {
+function getContextualAction(trace?: string[], elapsed: number = 0): {
+  verbiage: string;
+  Icon: typeof Activity;
+} {
   if (trace && trace.length > 0) {
     const latest = trace[trace.length - 1].toLowerCase();
     if (latest.includes("search_documents") || latest.includes("searching documents") || latest.includes("document")) {
-      return "Reading through referenced documents...";
+      return { verbiage: "Reading through referenced documents...", Icon: FileText };
     }
     if (latest.includes("web_fetch") || latest.includes("web search") || latest.includes("@web")) {
-      return "Retrieving relevant information from the web...";
+      return { verbiage: "Retrieving relevant information from the web...", Icon: Globe };
     }
     if (latest.includes("calendar")) {
-      return "Checking calendar schedule...";
+      return { verbiage: "Checking calendar schedule...", Icon: Calendar };
     }
     if (latest.includes("github")) {
-      return "Inspecting GitHub repository...";
+      return { verbiage: "Inspecting GitHub repository...", Icon: GitBranch };
     }
     if (latest.includes("slack")) {
-      return "Checking Slack updates...";
+      return { verbiage: "Checking Slack updates...", Icon: MessageSquare };
     }
     if (latest.includes("code_runner") || latest.includes("sandbox")) {
-      return "Running calculations in sandbox...";
+      return { verbiage: "Running calculations in sandbox...", Icon: Terminal };
     }
     if (latest.includes("compacted") || latest.includes("history summarized")) {
-      return "Reviewing earlier conversation...";
+      return { verbiage: "Reviewing earlier conversation...", Icon: BookOpen };
     }
   }
 
   // Dynamic progression based on time
   if (elapsed < 2.5) {
-    return "Analyzing your request...";
+    return { verbiage: "Analyzing your request...", Icon: Activity };
   }
   if (elapsed < 5.5) {
-    return "Gathering context & insights...";
+    return { verbiage: "Gathering context & insights...", Icon: Activity };
   }
   if (elapsed < 8.5) {
-    return "Connecting the details...";
+    return { verbiage: "Connecting the details...", Icon: Activity };
   }
   if (elapsed < 12) {
-    return "Formulating a thoughtful response...";
+    return { verbiage: "Formulating a thoughtful response...", Icon: Activity };
   }
-  return "Polishing the final answer...";
+  return { verbiage: "Polishing the final answer...", Icon: Activity };
 }
 
 export function RunLoader({ trace, className }: RunLoaderProps) {
@@ -57,7 +69,7 @@ export function RunLoader({ trace, className }: RunLoaderProps) {
     return () => clearInterval(t);
   }, []);
 
-  const verbiage = getContextualVerbiage(trace, elapsed);
+  const { verbiage, Icon } = getContextualAction(trace, elapsed);
 
   return (
     <div className={cn("inline-flex items-center gap-2.5 py-1 text-muted-foreground", className)}>
@@ -72,9 +84,9 @@ export function RunLoader({ trace, className }: RunLoaderProps) {
         ))}
       </span>
 
-      {/* Engaging, Human-Friendly Dynamic Verbiage */}
+      {/* Engaging, Human-Friendly Dynamic Verbiage with Authentic Tool/Activity Icons */}
       <div className="flex items-center gap-1.5 min-w-0">
-        <Sparkles className="size-3 text-emerald-500/80 dark:text-emerald-400 shrink-0 animate-pulse" />
+        <Icon className="size-3 text-emerald-600 dark:text-emerald-400 shrink-0" />
         <span className="text-xs font-medium text-foreground/80 truncate">
           {verbiage}
         </span>

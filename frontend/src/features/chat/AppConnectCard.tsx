@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ExternalLink, CheckCircle2, Loader2, Sparkles, SlidersHorizontal } from "lucide-react";
+import { ExternalLink, CheckCircle2, Loader2, Plug, SlidersHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { apiFetch } from "@/lib/api";
@@ -190,12 +190,12 @@ export function AppConnectCard({ providerId, className, returnTo }: AppConnectCa
                 variant="default"
                 disabled={linkCatalogApp.isPending}
                 onClick={handleOneClickLink}
-                className="gap-1.5 text-xs font-medium bg-purple-600 hover:bg-purple-700 text-white shadow-xs h-7"
+                className="gap-1.5 text-xs font-medium bg-emerald-600 hover:bg-emerald-700 text-white dark:bg-emerald-600 dark:hover:bg-emerald-500 shadow-xs h-7 rounded-lg"
               >
                 {linkCatalogApp.isPending ? (
                   <Loader2 className="size-3 animate-spin" />
                 ) : (
-                  <Sparkles className="size-3" />
+                  <Plug className="size-3" />
                 )}
                 <span>Connect {meta.name}</span>
               </Button>
