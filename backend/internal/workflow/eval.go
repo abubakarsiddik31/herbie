@@ -20,6 +20,22 @@ type EvalContext struct {
 	Credentials map[string]map[string]any // $credentials: stored credentials by name
 }
 
+// CollectCredentialSecrets extracts all string values from credentials for redaction filtering.
+func CollectCredentialSecrets(creds map[string]map[string]any) []string {
+	if creds == nil {
+		return nil
+	}
+	var secrets []string
+	for _, cred := range creds {
+		for _, v := range cred {
+			if s, ok := v.(string); ok && len(strings.TrimSpace(s)) >= 4 {
+				secrets = append(secrets, strings.TrimSpace(s))
+			}
+		}
+	}
+	return secrets
+}
+
 // ResolveAny recursively evaluates expressions in strings, slices, and maps.
 func ResolveAny(input any, ctx *EvalContext) any {
 	if ctx == nil {

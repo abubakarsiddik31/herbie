@@ -9,7 +9,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -91,7 +90,7 @@ func executeChatTrigger(_ context.Context, _ Node, evalCtx *EvalContext, _ *Exec
 func executeHTTPRequest(ctx context.Context, node Node, evalCtx *EvalContext, env *ExecutionEnvironment) (any, string, error) {
 	client := env.HTTPClient
 	if client == nil {
-		client = http.DefaultClient
+		client = NewSafeHTTPClient(env.AllowPrivateHosts, 20*time.Second)
 	}
 
 	rawURL, _ := node.Data["url"].(string)
@@ -107,14 +106,8 @@ func executeHTTPRequest(ctx context.Context, node Node, evalCtx *EvalContext, en
 	method = strings.ToUpper(strings.TrimSpace(method))
 
 	// SSRF check
-	if !env.AllowPrivateHosts {
-		parsedURL, err := url.Parse(resolvedURL)
-		if err != nil {
-			return nil, "", fmt.Errorf("invalid url: %w", err)
-		}
-		if err := checkHost(ctx, parsedURL.Host); err != nil {
-			return nil, "", fmt.Errorf("host blocked: %w", err)
-		}
+	if _, err := ValidatePublicURL(ctx, resolvedURL, env.AllowPrivateHosts); err != nil {
+		return nil, "", err
 	}
 
 	var reqBody io.Reader
@@ -433,7 +426,7 @@ func executeGitHubAction(ctx context.Context, node Node, evalCtx *EvalContext, e
 
 	client := env.HTTPClient
 	if client == nil {
-		client = http.DefaultClient
+		client = NewSafeHTTPClient(env.AllowPrivateHosts, 20*time.Second)
 	}
 
 	switch action {
@@ -501,6 +494,9 @@ func executeSlackAction(ctx context.Context, node Node, evalCtx *EvalContext, en
 	if webhookURL == "" {
 		return nil, "", fmt.Errorf("slack webhookUrl is required")
 	}
+	if err := ValidateSlackWebhookURL(webhookURL); err != nil {
+		return nil, "", err
+	}
 
 	payload, _ := json.Marshal(map[string]any{"text": text})
 	req, err := http.NewRequestWithContext(ctx, "POST", webhookURL, bytes.NewReader(payload))
@@ -511,7 +507,7 @@ func executeSlackAction(ctx context.Context, node Node, evalCtx *EvalContext, en
 
 	client := env.HTTPClient
 	if client == nil {
-		client = http.DefaultClient
+		client = NewSafeHTTPClient(env.AllowPrivateHosts, 20*time.Second)
 	}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -533,6 +529,9 @@ func executeDiscordAction(ctx context.Context, node Node, evalCtx *EvalContext, 
 	if webhookURL == "" {
 		return nil, "", fmt.Errorf("discord webhookUrl is required")
 	}
+	if err := ValidateDiscordWebhookURL(webhookURL); err != nil {
+		return nil, "", err
+	}
 
 	bodyMap := map[string]any{"content": content}
 	if uname, ok := node.Data["username"].(string); ok && uname != "" {
@@ -548,7 +547,7 @@ func executeDiscordAction(ctx context.Context, node Node, evalCtx *EvalContext, 
 
 	client := env.HTTPClient
 	if client == nil {
-		client = http.DefaultClient
+		client = NewSafeHTTPClient(env.AllowPrivateHosts, 20*time.Second)
 	}
 	resp, err := client.Do(req)
 	if err != nil {

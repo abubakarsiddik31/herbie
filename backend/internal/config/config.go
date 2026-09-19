@@ -46,6 +46,12 @@ type Config struct {
 	// UI hides providers that are not configured.
 	OAuth OAuthConfig
 
+	// ToolOAuth carries third-party OAuth integrations (GitHub, Slack).
+	ToolOAuth ToolOAuthConfig
+
+	// CredentialEncryptionKey is the AES-256 master key for credentials vault.
+	CredentialEncryptionKey string
+
 	// WebSearch configures live web search (Tavily or Brave). When an API key
 	// is provided, the built-in web_search tool is registered.
 	WebSearch                websearch.Config
@@ -94,6 +100,12 @@ func (c OAuthProviderConfig) Enabled() bool {
 type OAuthConfig struct {
 	Google       OAuthProviderConfig
 	GitHub       OAuthProviderConfig
+	RedirectBase string
+}
+
+type ToolOAuthConfig struct {
+	GitHub       OAuthProviderConfig
+	Slack        OAuthProviderConfig
 	RedirectBase string
 }
 
@@ -232,6 +244,20 @@ func Load() (Config, error) {
 			},
 			RedirectBase: os.Getenv("OAUTH_REDIRECT_BASE"),
 		},
+
+		ToolOAuth: ToolOAuthConfig{
+			GitHub: OAuthProviderConfig{
+				ClientID: env("TOOL_OAUTH_GITHUB_CLIENT_ID", os.Getenv("OAUTH_GITHUB_CLIENT_ID")),
+				Secret:   env("TOOL_OAUTH_GITHUB_CLIENT_SECRET", os.Getenv("OAUTH_GITHUB_CLIENT_SECRET")),
+			},
+			Slack: OAuthProviderConfig{
+				ClientID: env("TOOL_OAUTH_SLACK_CLIENT_ID", os.Getenv("SLACK_CLIENT_ID")),
+				Secret:   env("TOOL_OAUTH_SLACK_CLIENT_SECRET", os.Getenv("SLACK_CLIENT_SECRET")),
+			},
+			RedirectBase: env("TOOL_OAUTH_REDIRECT_BASE", os.Getenv("OAUTH_REDIRECT_BASE")),
+		},
+
+		CredentialEncryptionKey: env("CREDENTIAL_ENCRYPTION_KEY", os.Getenv("JWT_SECRET")),
 
 		WebSearch: websearch.Config{
 			Provider: wsProvider,

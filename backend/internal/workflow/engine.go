@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/abubakarsiddik31/golem-chatbot/internal/vault"
 	"github.com/google/uuid"
 )
 
@@ -101,6 +102,7 @@ func (e *Engine) Execute(ctx context.Context, nodes []Node, edges []Edge, opts R
 	}
 
 	var lastOutput any = opts.InputData
+	credSecrets := CollectCredentialSecrets(opts.Credentials)
 
 	for len(queue) > 0 {
 		if err := ctx.Err(); err != nil {
@@ -166,11 +168,12 @@ func (e *Engine) Execute(ctx context.Context, nodes []Node, edges []Edge, opts R
 
 		if execErr != nil {
 			nodeRes.Status = "failed"
-			nodeRes.Error = execErr.Error()
-			nodeRes.Output = output
+			cleanErr := vault.RedactSecrets(execErr.Error(), credSecrets)
+			nodeRes.Error = cleanErr
+			nodeRes.Output = vault.SanitizeValue(output, credSecrets)
 			result.NodeResults[node.ID] = nodeRes
 			result.Status = "failed"
-			result.Error = execErr.Error()
+			result.Error = cleanErr
 			if opts.Events != nil {
 				select {
 				case opts.Events <- StepEvent{Type: "node_finish", NodeID: node.ID, Result: &nodeRes}:
@@ -180,10 +183,11 @@ func (e *Engine) Execute(ctx context.Context, nodes []Node, edges []Edge, opts R
 			break
 		}
 
+		cleanOutput := vault.SanitizeValue(output, credSecrets)
 		nodeRes.Status = "success"
-		nodeRes.Output = output
+		nodeRes.Output = cleanOutput
 		result.NodeResults[node.ID] = nodeRes
-		lastOutput = output
+		lastOutput = cleanOutput
 
 		// Store output indexed by ID and by Name
 		nodeOutputs[node.ID] = output

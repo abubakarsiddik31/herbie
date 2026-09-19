@@ -204,3 +204,49 @@ func TestEngineHTTPRequestNode(t *testing.T) {
 		t.Errorf("expected data.ok == true")
 	}
 }
+
+func TestEngineSecretRedaction(t *testing.T) {
+	engine := NewEngine(nil)
+
+	secretVal := "super_secret_token_12345"
+	nodes := []Node{
+		{
+			ID:   "start",
+			Type: "manual",
+			Name: "Start",
+		},
+		{
+			ID:   "transform",
+			Type: "code_transform",
+			Name: "Transform",
+			Data: map[string]any{
+				"fields": map[string]any{
+					"echoSecret": "Key is: {{ $credentials.github.token }}",
+					"bearer":     "Bearer abcdef12345678",
+				},
+			},
+		},
+	}
+	edges := []Edge{
+		{ID: "e1", Source: "start", Target: "transform"},
+	}
+
+	res, err := engine.Execute(context.Background(), nodes, edges, RunOptions{
+		Credentials: map[string]map[string]any{
+			"github": {"token": secretVal},
+		},
+	})
+	if err != nil || res.Status != "success" {
+		t.Fatalf("expected success: %v, %s", err, res.Error)
+	}
+
+	out := res.Output.(map[string]any)
+	echo := out["echoSecret"].(string)
+	if echo != "Key is: [REDACTED_SECRET]" {
+		t.Errorf("expected redacted secret in output, got: %q", echo)
+	}
+	bearer := out["bearer"].(string)
+	if bearer != "Bearer [REDACTED_TOKEN]" {
+		t.Errorf("expected redacted bearer in output, got: %q", bearer)
+	}
+}
