@@ -202,6 +202,9 @@ func (f *fakeWorkflowStore) UpdateCredential(_ context.Context, c storage.Workfl
 	}
 	existing.Name = c.Name
 	existing.Type = c.Type
+	existing.Provider = c.Provider
+	existing.Scopes = c.Scopes
+	existing.ExpiresAt = c.ExpiresAt
 	existing.Data = c.Data
 	existing.UpdatedAt = time.Now()
 	f.credentials[c.ID] = existing

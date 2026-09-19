@@ -104,9 +104,11 @@ type OAuthConfig struct {
 }
 
 type ToolOAuthConfig struct {
-	GitHub       OAuthProviderConfig
-	Slack        OAuthProviderConfig
-	RedirectBase string
+	GitHub          OAuthProviderConfig
+	Slack           OAuthProviderConfig
+	GoogleCalendar  OAuthProviderConfig
+	RedirectBase    string
+	CalendarBaseURL string
 }
 
 // dotenvPaths are where a repo-root .env may sit relative to the working
@@ -254,7 +256,12 @@ func Load() (Config, error) {
 				ClientID: env("TOOL_OAUTH_SLACK_CLIENT_ID", os.Getenv("SLACK_CLIENT_ID")),
 				Secret:   env("TOOL_OAUTH_SLACK_CLIENT_SECRET", os.Getenv("SLACK_CLIENT_SECRET")),
 			},
-			RedirectBase: env("TOOL_OAUTH_REDIRECT_BASE", os.Getenv("OAUTH_REDIRECT_BASE")),
+			GoogleCalendar: OAuthProviderConfig{
+				ClientID: env("TOOL_OAUTH_GOOGLE_CLIENT_ID", os.Getenv("OAUTH_GOOGLE_CLIENT_ID")),
+				Secret:   env("TOOL_OAUTH_GOOGLE_CLIENT_SECRET", os.Getenv("OAUTH_GOOGLE_CLIENT_SECRET")),
+			},
+			RedirectBase:    env("TOOL_OAUTH_REDIRECT_BASE", os.Getenv("OAUTH_REDIRECT_BASE")),
+			CalendarBaseURL: env("GOOGLE_CALENDAR_BASE_URL", "https://www.googleapis.com"),
 		},
 
 		CredentialEncryptionKey: env("CREDENTIAL_ENCRYPTION_KEY", os.Getenv("JWT_SECRET")),

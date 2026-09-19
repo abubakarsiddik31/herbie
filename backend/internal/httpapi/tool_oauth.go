@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"bytes"
+	"context"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
@@ -27,8 +28,8 @@ const (
 )
 
 // sealToolOAuthState creates a signed tamper-proof state for tool OAuth connections.
-func sealToolOAuthState(secret []byte, userID, provider, state string, exp time.Time) string {
-	payload := strings.Join([]string{userID, provider, state, strconv.FormatInt(exp.Unix(), 10)}, "|")
+func sealToolOAuthState(secret []byte, userID, provider, state, returnTo string, exp time.Time) string {
+	payload := strings.Join([]string{userID, provider, state, strconv.FormatInt(exp.Unix(), 10), returnTo}, "|")
 	mac := hmac.New(sha256.New, secret)
 	mac.Write([]byte(payload))
 	return base64.RawURLEncoding.EncodeToString([]byte(payload)) + "." +
@@ -36,33 +37,37 @@ func sealToolOAuthState(secret []byte, userID, provider, state string, exp time.
 }
 
 // openToolOAuthState verifies the signature and expiration of tool OAuth state.
-func openToolOAuthState(secret []byte, sealed string, now time.Time) (userID, provider, state string, ok bool) {
+func openToolOAuthState(secret []byte, sealed string, now time.Time) (userID, provider, state, returnTo string, ok bool) {
 	parts := strings.Split(sealed, ".")
 	if len(parts) != 2 {
-		return "", "", "", false
+		return "", "", "", "", false
 	}
 	payload, err := base64.RawURLEncoding.DecodeString(parts[0])
 	if err != nil {
-		return "", "", "", false
+		return "", "", "", "", false
 	}
 	sig, err := base64.RawURLEncoding.DecodeString(parts[1])
 	if err != nil {
-		return "", "", "", false
+		return "", "", "", "", false
 	}
 	mac := hmac.New(sha256.New, secret)
 	mac.Write(payload)
 	if subtle.ConstantTimeCompare(mac.Sum(nil), sig) != 1 {
-		return "", "", "", false
+		return "", "", "", "", false
 	}
 	fields := strings.Split(string(payload), "|")
-	if len(fields) != 4 {
-		return "", "", "", false
+	if len(fields) < 4 {
+		return "", "", "", "", false
 	}
 	exp, err := strconv.ParseInt(fields[3], 10, 64)
 	if err != nil || now.Unix() > exp {
-		return "", "", "", false
+		return "", "", "", "", false
 	}
-	return fields[0], fields[1], fields[2], true
+	ret := ""
+	if len(fields) >= 5 {
+		ret = fields[4]
+	}
+	return fields[0], fields[1], fields[2], ret, true
 }
 
 func (s *Server) toolOAuthRedirectBase(r *http.Request) string {
@@ -94,6 +99,12 @@ func (s *Server) handleToolOAuthProviders(w http.ResponseWriter, r *http.Request
 	userID, _ := userIDFrom(r.Context())
 
 	providers := []toolProviderDTO{
+		{
+			ID:         "google_calendar",
+			Name:       "Google Calendar",
+			Configured: s.deps.Cfg.ToolOAuth.GoogleCalendar.Enabled(),
+			Scopes:     []string{"https://www.googleapis.com/auth/calendar.readonly", "https://www.googleapis.com/auth/calendar.events"},
+		},
 		{
 			ID:         "github",
 			Name:       "GitHub",
@@ -148,9 +159,30 @@ func (s *Server) handleToolOAuthStart(w http.ResponseWriter, r *http.Request) {
 	state := hex.EncodeToString(stateBytes)
 
 	redirectURI := fmt.Sprintf("%s/api/tool-oauth/%s/callback", s.toolOAuthRedirectBase(r), provider)
+	returnTo := r.URL.Query().Get("return_to")
+	if !strings.HasPrefix(returnTo, "/") || strings.HasPrefix(returnTo, "//") {
+		returnTo = ""
+	}
 	var authURL string
 
 	switch provider {
+	case "google_calendar":
+		cfg := s.deps.Cfg.ToolOAuth.GoogleCalendar
+		if !cfg.Enabled() {
+			writeError(w, http.StatusBadRequest, "not_configured", "Google Calendar OAuth is not configured")
+			return
+		}
+		q := url.Values{
+			"client_id":     {cfg.ClientID},
+			"redirect_uri":  {redirectURI},
+			"response_type": {"code"},
+			"scope":         {"https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/calendar.events"},
+			"access_type":   {"offline"},
+			"prompt":        {"consent"},
+			"state":         {state},
+		}
+		authURL = "https://accounts.google.com/o/oauth2/v2/auth?" + q.Encode()
+
 	case "github":
 		cfg := s.deps.Cfg.ToolOAuth.GitHub
 		if !cfg.Enabled() {
@@ -184,7 +216,7 @@ func (s *Server) handleToolOAuthStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sealed := sealToolOAuthState([]byte(s.deps.Cfg.JWTSecret), userID, provider, state, time.Now().Add(toolOAuthTTL))
+	sealed := sealToolOAuthState([]byte(s.deps.Cfg.JWTSecret), userID, provider, state, returnTo, time.Now().Add(toolOAuthTTL))
 	http.SetCookie(w, &http.Cookie{
 		Name:     toolOAuthCookie,
 		Value:    sealed,
@@ -200,8 +232,14 @@ func (s *Server) handleToolOAuthStart(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleToolOAuthCallback(w http.ResponseWriter, r *http.Request) {
 	provider := r.PathValue("provider")
-	targetRedirect := fmt.Sprintf("%s/workflows?connected=%s", s.deps.Cfg.FrontendOrigin, provider)
 
+	cookie, err := r.Cookie(toolOAuthCookie)
+	if err != nil {
+		http.Redirect(w, r, fmt.Sprintf("%s/workflows?error=missing_state_cookie", s.deps.Cfg.FrontendOrigin), http.StatusFound)
+		return
+	}
+
+	userID, expectedProvider, expectedState, returnTo, ok := openToolOAuthState([]byte(s.deps.Cfg.JWTSecret), cookie.Value, time.Now())
 	fail := func(reason string) {
 		http.SetCookie(w, &http.Cookie{
 			Name:     toolOAuthCookie,
@@ -210,16 +248,17 @@ func (s *Server) handleToolOAuthCallback(w http.ResponseWriter, r *http.Request)
 			HttpOnly: true,
 			Secure:   s.isSecure(r),
 		})
-		http.Redirect(w, r, fmt.Sprintf("%s/workflows?error=%s", s.deps.Cfg.FrontendOrigin, url.QueryEscape(reason)), http.StatusFound)
+		errDest := "/workflows"
+		if returnTo != "" && strings.HasPrefix(returnTo, "/") && !strings.HasPrefix(returnTo, "//") {
+			errDest = returnTo
+		}
+		sep := "?"
+		if strings.Contains(errDest, "?") {
+			sep = "&"
+		}
+		http.Redirect(w, r, fmt.Sprintf("%s%s%serror=%s", s.deps.Cfg.FrontendOrigin, errDest, sep, url.QueryEscape(reason)), http.StatusFound)
 	}
 
-	cookie, err := r.Cookie(toolOAuthCookie)
-	if err != nil {
-		fail("missing_state_cookie")
-		return
-	}
-
-	userID, expectedProvider, expectedState, ok := openToolOAuthState([]byte(s.deps.Cfg.JWTSecret), cookie.Value, time.Now())
 	if !ok || expectedProvider != provider {
 		fail("invalid_or_expired_state")
 		return
@@ -232,6 +271,15 @@ func (s *Server) handleToolOAuthCallback(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	targetRedirect := fmt.Sprintf("%s/workflows?connected=%s", s.deps.Cfg.FrontendOrigin, provider)
+	if returnTo != "" && strings.HasPrefix(returnTo, "/") && !strings.HasPrefix(returnTo, "//") {
+		sep := "?"
+		if strings.Contains(returnTo, "?") {
+			sep = "&"
+		}
+		targetRedirect = fmt.Sprintf("%s%s%sconnected=%s", s.deps.Cfg.FrontendOrigin, returnTo, sep, provider)
+	}
+
 	redirectURI := fmt.Sprintf("%s/api/tool-oauth/%s/callback", s.toolOAuthRedirectBase(r), provider)
 	client := &http.Client{Timeout: 15 * time.Second}
 
@@ -240,6 +288,68 @@ func (s *Server) handleToolOAuthCallback(w http.ResponseWriter, r *http.Request)
 	var expiresAt *time.Time
 
 	switch provider {
+	case "google_calendar":
+		cfg := s.deps.Cfg.ToolOAuth.GoogleCalendar
+		form := url.Values{
+			"client_id":     {cfg.ClientID},
+			"client_secret": {cfg.Secret},
+			"code":          {code},
+			"grant_type":    {"authorization_code"},
+			"redirect_uri":  {redirectURI},
+		}
+		tokenURL := "https://oauth2.googleapis.com/token"
+		if s.deps.Cfg.ToolOAuth.CalendarBaseURL != "" && s.deps.Cfg.ToolOAuth.CalendarBaseURL != "https://www.googleapis.com" {
+			tokenURL = s.deps.Cfg.ToolOAuth.CalendarBaseURL + "/token"
+		}
+		req, err := http.NewRequestWithContext(r.Context(), "POST", tokenURL, strings.NewReader(form.Encode()))
+		if err != nil {
+			fail("request_error")
+			return
+		}
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+		resp, err := client.Do(req)
+		if err != nil {
+			fail("token_exchange_failed")
+			return
+		}
+		defer resp.Body.Close()
+		body, _ := io.ReadAll(resp.Body)
+
+		var res struct {
+			AccessToken  string `json:"access_token"`
+			ExpiresIn    int    `json:"expires_in"`
+			RefreshToken string `json:"refresh_token"`
+			Scope        string `json:"scope"`
+			TokenType    string `json:"token_type"`
+			Error        string `json:"error"`
+		}
+		if err := json.Unmarshal(body, &res); err != nil || res.AccessToken == "" || res.Error != "" {
+			fail("token_error_" + res.Error)
+			return
+		}
+
+		if res.Scope != "" {
+			scopes = strings.Fields(res.Scope)
+		}
+		if res.ExpiresIn > 0 {
+			exp := time.Now().Add(time.Duration(res.ExpiresIn) * time.Second)
+			expiresAt = &exp
+		}
+		credData = map[string]string{
+			"token": res.AccessToken,
+		}
+		if res.RefreshToken != "" {
+			credData["refresh_token"] = res.RefreshToken
+		} else if s.deps.Workflows != nil {
+			if oldCred, err := s.deps.Workflows.GetCredentialByProvider(r.Context(), userID, provider); err == nil {
+				oldData := s.decryptCredentialData(oldCred.Data)
+				if rt, ok := oldData["refresh_token"].(string); ok && rt != "" {
+					credData["refresh_token"] = rt
+				}
+			}
+		}
+
 	case "github":
 		cfg := s.deps.Cfg.ToolOAuth.GitHub
 		payload, _ := json.Marshal(map[string]string{
@@ -472,4 +582,91 @@ func (s *Server) handleListToolAuditLogs(w http.ResponseWriter, r *http.Request)
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"audits": logs})
+}
+
+// decryptCredentialData decrypts AES-GCM encrypted data or falls back to plaintext JSON.
+func (s *Server) decryptCredentialData(data []byte) map[string]any {
+	raw := data
+	if s.deps.Vault != nil {
+		if dec, err := s.deps.Vault.Decrypt(data); err == nil {
+			raw = dec
+		}
+	}
+	var d map[string]any
+	_ = json.Unmarshal(raw, &d)
+	if d == nil {
+		d = make(map[string]any)
+	}
+	return d
+}
+
+// getValidGoogleCalendarToken returns an active access token for Google Calendar,
+// automatically refreshing it if expired or within 5 minutes of expiry.
+func (s *Server) getValidGoogleCalendarToken(ctx context.Context, userID string) (string, error) {
+	if s.deps.Workflows == nil {
+		return "", errors.New("workflows store not configured")
+	}
+	cred, err := s.deps.Workflows.GetCredentialByProvider(ctx, userID, "google_calendar")
+	if err != nil {
+		return "", fmt.Errorf("google calendar not connected: %w", err)
+	}
+	d := s.decryptCredentialData(cred.Data)
+	token, _ := d["token"].(string)
+	refreshToken, _ := d["refresh_token"].(string)
+	if token == "" {
+		return "", errors.New("empty google calendar token")
+	}
+
+	needsRefresh := cred.ExpiresAt != nil && time.Until(*cred.ExpiresAt) < 5*time.Minute
+	if needsRefresh && refreshToken != "" {
+		cfg := s.deps.Cfg.ToolOAuth.GoogleCalendar
+		tokenURL := "https://oauth2.googleapis.com/token"
+		if s.deps.Cfg.ToolOAuth.CalendarBaseURL != "" && s.deps.Cfg.ToolOAuth.CalendarBaseURL != "https://www.googleapis.com" {
+			tokenURL = s.deps.Cfg.ToolOAuth.CalendarBaseURL + "/token"
+		}
+		form := url.Values{
+			"client_id":     {cfg.ClientID},
+			"client_secret": {cfg.Secret},
+			"refresh_token": {refreshToken},
+			"grant_type":    {"refresh_token"},
+		}
+		req, err := http.NewRequestWithContext(ctx, "POST", tokenURL, strings.NewReader(form.Encode()))
+		if err == nil {
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			client := &http.Client{Timeout: 10 * time.Second}
+			resp, err := client.Do(req)
+			if err == nil {
+				defer resp.Body.Close()
+				body, _ := io.ReadAll(resp.Body)
+				var res struct {
+					AccessToken  string `json:"access_token"`
+					ExpiresIn    int    `json:"expires_in"`
+					RefreshToken string `json:"refresh_token"`
+					Error        string `json:"error"`
+				}
+				if json.Unmarshal(body, &res) == nil && res.AccessToken != "" {
+					token = res.AccessToken
+					d["token"] = res.AccessToken
+					if res.RefreshToken != "" {
+						d["refresh_token"] = res.RefreshToken
+					}
+					if res.ExpiresIn > 0 {
+						newExp := time.Now().Add(time.Duration(res.ExpiresIn) * time.Second)
+						cred.ExpiresAt = &newExp
+					}
+					rawBytes, _ := json.Marshal(d)
+					if s.deps.Vault != nil {
+						if enc, err := s.deps.Vault.Encrypt(rawBytes); err == nil {
+							cred.Data = enc
+						}
+					} else {
+						cred.Data = rawBytes
+					}
+					_, _ = s.deps.Workflows.UpdateCredential(ctx, cred)
+				}
+			}
+		}
+	}
+
+	return token, nil
 }

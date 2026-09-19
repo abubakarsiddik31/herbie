@@ -75,6 +75,11 @@ type Server struct {
 // public on the main mux; everything mounted on the authed submux sits
 // behind the bearer-token middleware. Later tasks add routes to authed.
 func NewServer(deps ServerDeps) http.Handler {
+	_, h := newServer(deps)
+	return h
+}
+
+func newServer(deps ServerDeps) (*Server, http.Handler) {
 	s := &Server{deps: deps, mux: http.NewServeMux()}
 	s.mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -155,7 +160,7 @@ func NewServer(deps ServerDeps) http.Handler {
 	authed.HandleFunc("GET /api/tool-audit-logs", s.handleListToolAuditLogs)
 	s.mux.Handle("/api/", requireAuth(deps.Tokens, authed))
 
-	return withCORS(deps.Cfg.FrontendOrigin, logRequests(deps.Log, s.mux))
+	return s, withCORS(deps.Cfg.FrontendOrigin, logRequests(deps.Log, s.mux))
 }
 
 func (s *Server) isSecure(r *http.Request) bool {
