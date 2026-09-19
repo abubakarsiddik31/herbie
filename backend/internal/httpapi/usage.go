@@ -4,6 +4,7 @@ import (
 	"math"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/abubakarsiddik31/golem-chatbot/internal/storage"
 )
@@ -31,7 +32,11 @@ func (s *Server) handleUsageSummary(w http.ResponseWriter, r *http.Request) {
 	}
 	totals := make([]row, 0, len(sum.Totals))
 	for _, t := range sum.Totals {
-		totals = append(totals, row{t.Kind, t.Model, t.InputTokens, t.OutputTokens, t.Requests, microsToUSD(t.CostMicros)})
+		modelName := t.Model
+		if strings.EqualFold(modelName, "wigolo") {
+			modelName = "web_search"
+		}
+		totals = append(totals, row{t.Kind, modelName, t.InputTokens, t.OutputTokens, t.Requests, microsToUSD(t.CostMicros)})
 	}
 	type daily struct {
 		Day          string  `json:"day"`
@@ -66,20 +71,31 @@ func (s *Server) handleUsageSummary(w http.ResponseWriter, r *http.Request) {
 	}
 	recent := make([]searchItem, 0, len(sum.Searches.Recent))
 	for _, qi := range sum.Searches.Recent {
+		prov := qi.Provider
+		if strings.EqualFold(prov, "wigolo") {
+			prov = "web_search"
+		}
 		recent = append(recent, searchItem{
 			ID:             qi.ID,
 			Query:          qi.Query,
 			Kind:           qi.Kind,
-			Provider:       qi.Provider,
+			Provider:       prov,
 			ResultsCount:   qi.ResultsCount,
 			DurationMs:     qi.DurationMs,
 			CreatedAt:      qi.CreatedAt.UTC().Format("2006-01-02T15:04:05.000Z07:00"),
 			ConversationID: qi.ConversationID,
 		})
 	}
-	byProvider := sum.Searches.ByProvider
-	if byProvider == nil {
-		byProvider = []storage.SearchProviderCount{}
+	byProvider := make([]storage.SearchProviderCount, 0, len(sum.Searches.ByProvider))
+	for _, p := range sum.Searches.ByProvider {
+		prov := p.Provider
+		if strings.EqualFold(prov, "wigolo") {
+			prov = "web_search"
+		}
+		byProvider = append(byProvider, storage.SearchProviderCount{
+			Provider: prov,
+			Count:    p.Count,
+		})
 	}
 	dailySearches := sum.Searches.Daily
 	if dailySearches == nil {
@@ -99,10 +115,37 @@ func (s *Server) handleUsageSummary(w http.ResponseWriter, r *http.Request) {
 		"topQueries":   topQueries,
 	}
 
+	type toolCountRow struct {
+		ToolName string `json:"toolName"`
+		Count    int    `json:"count"`
+	}
+	toolsByTool := make([]toolCountRow, 0, len(sum.Tools.ByTool))
+	for _, tc := range sum.Tools.ByTool {
+		name := tc.ToolName
+		if strings.EqualFold(name, "code_runner") || strings.EqualFold(name, "sandbox") {
+			name = "code_sandbox"
+		} else if strings.EqualFold(name, "wigolo") {
+			name = "web_search"
+		}
+		toolsByTool = append(toolsByTool, toolCountRow{
+			ToolName: name,
+			Count:    tc.Count,
+		})
+	}
+	tools := map[string]any{
+		"totalExecutions":   sum.Tools.TotalExecutions,
+		"sandboxExecutions": sum.Tools.SandboxExecutions,
+		"successCount":      sum.Tools.SuccessCount,
+		"failedCount":       sum.Tools.FailedCount,
+		"avgDurationMs":     sum.Tools.AvgDurationMs,
+		"byTool":            toolsByTool,
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"totals":    totals,
 		"daily":     dailies,
 		"documents": docs,
 		"searches":  searches,
+		"tools":     tools,
 	})
 }

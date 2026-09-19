@@ -137,7 +137,10 @@ func TestUsageSummaryEmptyIsJSONNotNull(t *testing.T) {
 	if _, ok := got["searches"]; !ok {
 		t.Fatalf("key 'searches' must be present in usage summary")
 	}
-	if len(got) != 4 {
+	if _, ok := got["tools"]; !ok {
+		t.Fatalf("key 'tools' must be present in usage summary")
+	}
+	if len(got) != 5 {
 		t.Fatalf("unexpected keys: %v", got)
 	}
 }
@@ -252,5 +255,52 @@ func TestUsageSummaryIncludesSearchAnalysis(t *testing.T) {
 	}
 	if len(body.Searches.Recent) != 1 || body.Searches.Recent[0].Query != "latest news" {
 		t.Fatalf("unexpected recent: %+v", body.Searches.Recent)
+	}
+}
+
+func TestUsageSummaryIncludesToolsAnalysis(t *testing.T) {
+	store := &fakeSummaryStore{summary: storage.Summary{
+		Tools: storage.ToolAnalysis{
+			TotalExecutions:   5,
+			SandboxExecutions: 3,
+			SuccessCount:      4,
+			FailedCount:       1,
+			AvgDurationMs:     125,
+			ByTool: []storage.ToolCount{
+				{ToolName: "code_runner", Count: 3},
+				{ToolName: "google_calendar", Count: 2},
+			},
+		},
+	}}
+	h, token := newHandlerServer(t, nil, newFakeConvos(newFakeMsgs()), newFakeMsgs(), store)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/usage/summary?days=7", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Tools struct {
+			TotalExecutions   int `json:"totalExecutions"`
+			SandboxExecutions int `json:"sandboxExecutions"`
+			SuccessCount      int `json:"successCount"`
+			FailedCount       int `json:"failedCount"`
+			AvgDurationMs     int `json:"avgDurationMs"`
+			ByTool            []struct {
+				ToolName string `json:"toolName"`
+				Count    int    `json:"count"`
+			} `json:"byTool"`
+		} `json:"tools"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Tools.TotalExecutions != 5 || body.Tools.SandboxExecutions != 3 || body.Tools.SuccessCount != 4 {
+		t.Fatalf("unexpected tools counts: %+v", body.Tools)
+	}
+	if len(body.Tools.ByTool) != 2 || body.Tools.ByTool[0].ToolName != "code_sandbox" {
+		t.Fatalf("expected code_runner mapped to code_sandbox, got: %+v", body.Tools.ByTool)
 	}
 }

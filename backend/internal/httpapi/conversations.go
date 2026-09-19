@@ -124,7 +124,33 @@ func (s *Server) handleGetConversation(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal", "could not load messages")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"conversation": toConversationDTO(conv), "messages": transcriptMessages(msgs, true)})
+	compThreshold := 40000
+	compKeepRecent := 10
+	if s.deps.Compactor != nil {
+		compThreshold = s.deps.Compactor.Threshold()
+		compKeepRecent = s.deps.Compactor.KeepRecent()
+	} else if s.deps.Cfg.RAG.CompactionThreshold > 0 {
+		compThreshold = s.deps.Cfg.RAG.CompactionThreshold
+		compKeepRecent = s.deps.Cfg.RAG.CompactionKeepRecent
+	}
+	estimatedTokens := chat.EstimateStorageTokens(msgs)
+	hasCompacted := false
+	for _, m := range msgs {
+		if strings.Contains(m.Content, "[Compacted earlier context") || strings.Contains(m.Content, "[input auto-compacted") {
+			hasCompacted = true
+			break
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"conversation": toConversationDTO(conv),
+		"messages":     transcriptMessages(msgs, true),
+		"context": map[string]any{
+			"estimatedTokens": estimatedTokens,
+			"thresholdTokens": compThreshold,
+			"keepRecent":      compKeepRecent,
+			"compacted":       hasCompacted,
+		},
+	})
 }
 
 type usageDTO struct {

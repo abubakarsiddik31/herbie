@@ -62,6 +62,9 @@ func TestListDocumentsToolExec(t *testing.T) {
 	if !strings.Contains(out.Text, "[id: doc-2] budget.pdf") || !strings.Contains(out.Text, "Chunks: 15 | Size: 1.0 MB") {
 		t.Fatalf("doc-2 missing or formatted incorrectly: %q", out.Text)
 	}
+	if !strings.Contains(out.Text, "Usage Guide:") || !strings.Contains(out.Text, "read_document") {
+		t.Fatalf("usage guide missing in list_documents: %q", out.Text)
+	}
 }
 
 func TestListDocumentsToolEmpty(t *testing.T) {

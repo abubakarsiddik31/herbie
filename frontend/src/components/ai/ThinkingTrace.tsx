@@ -41,6 +41,13 @@ function humanizeStep(row: string, index: number): HumanizedStep {
       icon: BookOpen,
     };
   }
+  if (lower.includes("read_document") || lower.includes("reading document")) {
+    return {
+      id: `${index}-${row}`,
+      label: "Read document sections & text",
+      icon: BookOpen,
+    };
+  }
   if (lower.includes("web_fetch") || lower.includes("web search") || lower.includes("@web")) {
     return {
       id: `${index}-${row}`,

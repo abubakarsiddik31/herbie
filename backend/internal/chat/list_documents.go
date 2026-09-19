@@ -38,7 +38,7 @@ var listDocumentsSchema = json.RawMessage(`{
 func ListDocumentsTool() tool.Tool[Deps] {
 	return tool.Tool[Deps]{
 		Name:        ListDocumentsToolName,
-		Description: "List the user's uploaded documents available for retrieval, including their filename, document ID, chunk count, file size, and status. Call this tool when you need to know what documents exist, check document sizes/chunk counts, or look up document IDs to target specific files with search_documents.",
+		Description: "List the user's uploaded documents available for retrieval, including their filename, document ID, chunk count, file size, and status. Call this tool first to discover available documents and IDs. To summarize a document, use read_document(documentId=..., offset=0). For targeted queries, use search_documents.",
 		Schema:      listDocumentsSchema,
 		Timeout:     15 * time.Second,
 		MaxRetries:  tool.RetryLimit(1),
@@ -76,6 +76,11 @@ func ListDocumentsTool() tool.Tool[Deps] {
 			if limit < len(docs) {
 				fmt.Fprintf(&sb, "...and %d more documents.\n", len(docs)-limit)
 			}
+			fmt.Fprintf(&sb, "\nUsage Guide:\n")
+			fmt.Fprintf(&sb, "• To summarize a document: call read_document(documentId=\"<id>\", offset=0, limit=5) to read its title, abstract, and introduction.\n")
+			fmt.Fprintf(&sb, "• To read subsequent sections: call read_document with the next offset.\n")
+			fmt.Fprintf(&sb, "• For specific keywords or multi-hop facts: call search_documents(query=\"...\", documentIds=[\"<id>\"]).\n")
+			fmt.Fprintf(&sb, "• Never use web_search for uploaded documents.\n")
 			return tool.Text(strings.TrimSpace(sb.String())), nil
 		},
 	}

@@ -30,6 +30,7 @@ import {
 import { ApiError, apiFetch } from "@/lib/api";
 import { cn, cleanConversationTitle, fmtTokens } from "@/lib/utils";
 import type { ChatMessage, Conversation } from "@/lib/types";
+import { ContextStatusMeter } from "@/features/chat/ContextStatusMeter";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -102,6 +103,12 @@ function CopyMessageButton({ text }: { text: string }) {
 interface ConversationDetail {
   conversation: Conversation;
   messages: ChatMessage[];
+  context?: {
+    estimatedTokens: number;
+    thresholdTokens: number;
+    keepRecent?: number;
+    compacted?: boolean;
+  };
 }
 
 function toChatMessage(m: ChatMessage): ChatMessage {
@@ -156,7 +163,7 @@ export function ProjectWorkspacePage() {
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const seededRef = useRef<string | null>(null);
 
-  const { messages, setMessages, status, send, regenerate, resolve, stop, reset, trace, pending } = useChat(() => {
+  const { messages, setMessages, status, send, regenerate, resolve, stop, reset, trace, pending, contextStatus, setContextStatus } = useChat(() => {
     void queryClient.invalidateQueries({ queryKey: ["project", projectId] });
   });
   const deleteMessage = useDeleteMessage(selectedConvId);
@@ -272,6 +279,9 @@ export function ProjectWorkspacePage() {
     if (detail && seededRef.current !== selectedConvId) {
       seededRef.current = selectedConvId;
       setMessages(detail.messages.map(toChatMessage));
+      if (detail.context) {
+        setContextStatus(detail.context);
+      }
       setSendError(null);
     }
   }, [selectedConvId, detail, reset, setMessages]);
@@ -406,6 +416,11 @@ export function ProjectWorkspacePage() {
       </div>
     );
   }
+
+  const activeEstimatedTokens = contextStatus?.estimatedTokens ?? messages.reduce((acc, m) => acc + Math.round(m.content.length / 4) + 40, 0);
+  const activeThresholdTokens = contextStatus?.thresholdTokens ?? 40000;
+  const activeKeepRecent = contextStatus?.keepRecent ?? 10;
+  const isCompacted = contextStatus?.compacted ?? false;
 
   return (
     <div className="flex h-full flex-col bg-background">
@@ -826,6 +841,12 @@ export function ProjectWorkspacePage() {
                       <FolderGit2 className="size-3 text-primary" />
                       <span>RAG first</span>
                     </span>
+                    <ContextStatusMeter
+                      estimatedTokens={activeEstimatedTokens}
+                      thresholdTokens={activeThresholdTokens}
+                      keepRecent={activeKeepRecent}
+                      compacted={isCompacted}
+                    />
                   </div>
 
                   <div className="flex items-center gap-1.5">

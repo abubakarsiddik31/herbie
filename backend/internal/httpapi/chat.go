@@ -10,6 +10,7 @@ import (
 	"math"
 	"net/http"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -212,8 +213,29 @@ func (s *Server) runTurn(ctx context.Context, userID, convID string, spec chat.R
 		writeError(w, http.StatusInternalServerError, "internal", "streaming unsupported")
 		return
 	}
+	compThreshold := 40000
+	compKeepRecent := 10
+	if s.deps.Compactor != nil {
+		compThreshold = s.deps.Compactor.Threshold()
+		compKeepRecent = s.deps.Compactor.KeepRecent()
+	} else if s.deps.Cfg.RAG.CompactionThreshold > 0 {
+		compThreshold = s.deps.Cfg.RAG.CompactionThreshold
+		compKeepRecent = s.deps.Cfg.RAG.CompactionKeepRecent
+	}
+
+	_ = sink.event("meta", map[string]any{
+		"type":            "context",
+		"estimatedTokens": chat.EstimateHistoryTokens(history),
+		"thresholdTokens": compThreshold,
+		"keepRecent":      compKeepRecent,
+	})
+
 	if compacted {
-		_ = sink.event("meta", map[string]any{"type": "compacted"})
+		_ = sink.event("meta", map[string]any{
+			"type":            "compacted",
+			"thresholdTokens": compThreshold,
+			"keepRecent":      compKeepRecent,
+		})
 	}
 	var sources []rag.Scored
 	outcome, err := s.deps.Agent.Run(ctx, chat.Deps{
@@ -221,6 +243,7 @@ func (s *Server) runTurn(ctx context.Context, userID, convID string, spec chat.R
 		ConversationID: convID,
 		Search:         s.searchDeps(userID, convID, &sources),
 		ListDocs:       s.listDocsDeps(userID, convID),
+		ReadDoc:        s.readDocDeps(userID, convID, &sources),
 		SaveMemory:     s.saveMemoryFunc(userID),
 		RecordSearch:   s.recordSearchFunc(userID, convID),
 	}, history, prompt, parts, sink, tools, spec)
@@ -383,7 +406,7 @@ func (s *Server) userTools(ctx context.Context, userID string, ragEnabled bool) 
 			}
 		}
 		if hasDocs {
-			tools = append(tools, chat.SearchTool(), chat.ListDocumentsTool())
+			tools = append(tools, chat.SearchTool(), chat.ListDocumentsTool(), chat.ReadDocumentTool())
 		}
 	}
 	if s.deps.WebSearch != nil {
@@ -626,6 +649,79 @@ func (s *Server) listDocsDeps(userID, convID string) chat.ListDocsFunc {
 	}
 }
 
+func (s *Server) readDocDeps(userID, convID string, sources *[]rag.Scored) chat.ReadDocFunc {
+	if s.deps.Vectors == nil || s.deps.Docs == nil {
+		return nil
+	}
+	return func(ctx context.Context, documentID string, offset, limit int) (chat.ReadDocResult, error) {
+		doc, err := s.deps.Docs.Get(ctx, documentID, userID)
+		if err != nil {
+			return chat.ReadDocResult{}, fmt.Errorf("document %q not found", documentID)
+		}
+		if doc.Status != "ready" {
+			return chat.ReadDocResult{
+				DocumentID:  doc.ID,
+				DocTitle:    doc.Filename,
+				TotalChunks: doc.ChunkCount,
+			}, fmt.Errorf("document %q is in status %q and not ready for reading", doc.Filename, doc.Status)
+		}
+		if doc.ChunkCount == 0 {
+			return chat.ReadDocResult{
+				DocumentID:  doc.ID,
+				DocTitle:    doc.Filename,
+				TotalChunks: 0,
+			}, nil
+		}
+		if offset < 0 {
+			offset = 0
+		}
+		if limit <= 0 {
+			limit = 5
+		}
+		if limit > 10 {
+			limit = 10
+		}
+		if offset >= doc.ChunkCount {
+			return chat.ReadDocResult{
+				DocumentID:  doc.ID,
+				DocTitle:    doc.Filename,
+				TotalChunks: doc.ChunkCount,
+				Offset:      offset,
+				Limit:       limit,
+			}, nil
+		}
+		end := offset + limit - 1
+		if end >= doc.ChunkCount {
+			end = doc.ChunkCount - 1
+		}
+		chunks, err := s.deps.Vectors.ExpandRange(ctx, userID, documentID, offset, end)
+		if err != nil {
+			return chat.ReadDocResult{}, fmt.Errorf("read document chunks: %w", err)
+		}
+		sort.Slice(chunks, func(i, j int) bool {
+			return chunks[i].Index < chunks[j].Index
+		})
+
+		sourceOffset := len(*sources)
+		for _, ch := range chunks {
+			*sources = append(*sources, rag.Scored{
+				Chunk: ch,
+				Score: 1.0,
+			})
+		}
+
+		return chat.ReadDocResult{
+			DocumentID:   doc.ID,
+			DocTitle:     doc.Filename,
+			TotalChunks:  doc.ChunkCount,
+			Offset:       offset,
+			Limit:        limit,
+			Chunks:       chunks,
+			SourceOffset: sourceOffset,
+		}, nil
+	}
+}
+
 // searchDeps wraps the raw RagSearch with embedding metering (every query
 // embed is an exact-token `embedding` usage event priced from the rate
 // table), optional rerank generation metering, and per-run source collection
@@ -698,12 +794,16 @@ func (s *Server) recordSearch(ctx context.Context, userID, convID, query, kind, 
 		cidPtr = &convID
 	}
 	if s.deps.Usage != nil {
+		modelName := provider
+		if kind == "web_search" || strings.EqualFold(provider, "wigolo") {
+			modelName = "web_search"
+		}
 		_ = s.deps.Usage.RecordSearch(ctx, storage.SearchQuery{
 			UserID:         userID,
 			ConversationID: cidPtr,
 			Query:          query,
 			Kind:           kind,
-			Provider:       provider,
+			Provider:       modelName,
 			ResultsCount:   resultsCount,
 			DurationMs:     durationMs,
 			CreatedAt:      time.Now(),
@@ -711,7 +811,7 @@ func (s *Server) recordSearch(ctx context.Context, userID, convID, query, kind, 
 		_ = s.deps.Usage.Add(ctx, storage.UsageEvent{
 			UserID:         userID,
 			Kind:           kind,
-			Model:          provider,
+			Model:          modelName,
 			ConversationID: cidPtr,
 			Requests:       1,
 			CostMicros:     0,
@@ -973,13 +1073,26 @@ func (s *Server) finishRun(ctx context.Context, userID, convID string, spec chat
 		msgID = msgs[len(msgs)-1].ID
 	}
 	cost := s.deps.Rates.ChatCostMicrosFor(spec.Model, outcome.Usage.InputTokens, outcome.Usage.OutputTokens)
+	compThreshold := 40000
+	compKeepRecent := 10
+	if s.deps.Compactor != nil {
+		compThreshold = s.deps.Compactor.Threshold()
+		compKeepRecent = s.deps.Compactor.KeepRecent()
+	} else if s.deps.Cfg.RAG.CompactionThreshold > 0 {
+		compThreshold = s.deps.Cfg.RAG.CompactionThreshold
+		compKeepRecent = s.deps.Cfg.RAG.CompactionKeepRecent
+	}
+	ctxTokens := chat.EstimateHistoryTokens(outcome.Messages)
 	_ = sink.event("done", map[string]any{
-		"messageId":    msgID,
-		"inputTokens":  outcome.Usage.InputTokens,
-		"outputTokens": outcome.Usage.OutputTokens,
-		"requests":     outcome.Requests,
-		"costUsd":      math.Round(float64(cost)/10) / 1e5, // 5 decimal places
-		"model":        spec.Model,
+		"messageId":       msgID,
+		"inputTokens":     outcome.Usage.InputTokens,
+		"outputTokens":    outcome.Usage.OutputTokens,
+		"requests":        outcome.Requests,
+		"costUsd":         math.Round(float64(cost)/10) / 1e5, // 5 decimal places
+		"model":           spec.Model,
+		"contextTokens":   ctxTokens,
+		"thresholdTokens": compThreshold,
+		"keepRecent":      compKeepRecent,
 	})
 }
 

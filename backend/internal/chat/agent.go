@@ -20,6 +20,7 @@ type Deps struct {
 	ConversationID string
 	Search         SearchFunc
 	ListDocs       ListDocsFunc
+	ReadDoc        ReadDocFunc
 	SaveMemory     func(ctx context.Context, fact string) error
 	RecordSearch   func(ctx context.Context, query, kind, provider string, resultsCount int, durationMs int64)
 }
@@ -107,19 +108,37 @@ const retrievalGuidance = `
 
 You have retrieval tools over the user's uploaded files:
 - list_documents: lists all uploaded files with their document IDs, filenames, chunk counts, sizes, and statuses. Use this when you need an overview of available documents or want to find specific document IDs.
+- read_document: reads bounded sequential chunks of a specific document (parameters: documentId, offset, limit). Use this for document summarization, chapter reading, or inspecting consecutive text.
 - search_documents: searches for passages relevant to a query across all files or filtered by documentIds.
 
+Workflows for document requests:
+1. Summarization workflow:
+   - When asked to summarize, outline, or explain an uploaded document (e.g. "summarize <file>"):
+   - Step 1: Look up the document ID using list_documents if not already known.
+   - Step 2: Call read_document(documentId="<id>", offset=0, limit=5) to read the beginning (title, authors, abstract, executive summary, and introduction).
+   - Step 3: If you need the conclusion or key findings to complete the summary, either call read_document with the next offset or call search_documents with targeted keywords like "conclusion results discussion" filtered to that document ID.
+   - Step 4: Synthesize a well-structured markdown summary with citations [1], [2] referencing the read chunks.
+   - NEVER call web_search when asked to summarize or query an uploaded document.
+
+2. Multi-hop & comparative queries:
+   - When asked a complex or multi-part question across documents or sections:
+   - Break the query into logical sub-hops. Retrieve premise facts or section pointers first using search_documents or read_document on the first document.
+   - Use the discovered entities/keywords to execute the second targeted retrieval on the related document or section.
+   - Synthesize the connected findings with proper bracket citations. Limit retrieval to 2-3 focused calls total.
+
 Retrieval budget & stop discipline:
-- Limit retrieval to 1 or at most 2 focused searches total (call again with a refined query or narrow documentIds only if initial results are completely off-topic).
-- Do NOT perform multi-round exploratory searches trying to crawl through entire tables of contents, individual chapters, or sub-topics.
-- Once you obtain initial relevant passages, STOP calling search tools immediately and synthesize your final answer using the retrieved context.
-- Never attribute claims to uploaded documents if they were not in the search results.
+- Limit retrieval to 1 or at most 2-3 focused tool calls total (call again with a refined query or narrow documentIds only if initial results are completely off-topic).
+- Once you obtain initial relevant passages or the core document sections, STOP calling search/read tools immediately and synthesize your final answer.
+- Never attribute claims to uploaded documents if they were not in the search/read results.
 
 Citation discipline (hard rules): cite EVERY claim that comes from documents with its bracket number, e.g. [1]; cite ONLY bracket numbers shown in tool results — numbers are cumulative across calls ([1], [2], [3]...); never invent numbers not present in results. If the question specifically asks about the user's uploaded documents and the evidence does not support an answer, say what is missing instead of guessing; for general knowledge questions or external tools, answer normally using that information.`
 
 const webSearchGuidance = `
 
-You have a web_search tool to search the live web. Call it whenever the user asks about current events, breaking news, live data, or facts not present in your knowledge. Formulate clean, concise search keywords (do not include mention tags like "@web" in your query).
+You have a web_search tool to search the live web. Call it whenever the user asks about current events, breaking news, live data, or general external facts not present in your knowledge. Formulate clean, concise search keywords (do not include mention tags like "@web" in your query).
+
+STRICT EXCLUSION FOR UPLOADED DOCUMENTS:
+- Do NOT use web_search if the user's request is asking to summarize, explain, or query an uploaded document, file, or workspace attachment. Use read_document and search_documents exclusively for files.
 
 Search budget & loop discipline:
 - Be concise and selective with searches: 1 to 3 targeted queries are usually plenty to answer even broad topics.
@@ -142,7 +161,7 @@ func promptFor(spec RunSpec, tools []tool.Tool[Deps]) string {
 	hasDocSearch := false
 	hasWebSearch := false
 	for _, t := range tools {
-		if t.Name == SearchToolName || t.Name == ListDocumentsToolName {
+		if t.Name == SearchToolName || t.Name == ListDocumentsToolName || t.Name == ReadDocumentToolName {
 			hasDocSearch = true
 		}
 		if t.Name == WebSearchToolName {

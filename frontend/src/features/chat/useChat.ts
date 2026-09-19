@@ -6,14 +6,41 @@ import type { ChatMessage, PendingApproval, Source } from "@/lib/types";
 
 export type RunStatus = "idle" | "running" | "error";
 
-interface DonePayload { messageId: string; inputTokens: number; outputTokens: number; requests: number; costUsd: number; model?: string }
-interface MetaPayload { type: string; inputTokens?: number; outputTokens?: number; name?: string; ok?: boolean }
+export interface ContextStatus {
+  estimatedTokens: number;
+  thresholdTokens: number;
+  keepRecent?: number;
+  compacted?: boolean;
+}
+
+interface DonePayload {
+  messageId: string;
+  inputTokens: number;
+  outputTokens: number;
+  requests: number;
+  costUsd: number;
+  model?: string;
+  contextTokens?: number;
+  thresholdTokens?: number;
+  keepRecent?: number;
+}
+interface MetaPayload {
+  type: string;
+  inputTokens?: number;
+  outputTokens?: number;
+  name?: string;
+  ok?: boolean;
+  estimatedTokens?: number;
+  thresholdTokens?: number;
+  keepRecent?: number;
+}
 interface SourcesPayload { sources: Source[] }
 
 // Model-facing tool names become human phrases in the run trace.
 const toolLabels: Record<string, string> = {
   search_documents: "searching documents",
   list_documents: "listing documents",
+  read_document: "reading document",
 };
 
 function toolLabel(name?: string): string {
@@ -27,6 +54,7 @@ export function useChat(onDone?: () => void) {
   const [trace, setTrace] = useState<string[]>([]);
   const [pending, setPending] = useState<PendingApproval[]>([]);
   const [status, setStatus] = useState<RunStatus>("idle");
+  const [contextStatus, setContextStatus] = useState<ContextStatus | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   const stop = useCallback(() => abortRef.current?.abort(), []);
@@ -37,6 +65,7 @@ export function useChat(onDone?: () => void) {
     setMessages([]);
     setTrace([]);
     setPending([]);
+    setContextStatus(null);
     setStatus("idle");
   }, []);
 
@@ -54,8 +83,21 @@ export function useChat(onDone?: () => void) {
         const meta = payload as MetaPayload;
         if (meta.type === "model_end") {
           setTrace((t) => [...t, `model call · ${meta.inputTokens ?? 0} in / ${meta.outputTokens ?? 0} out`]);
+        } else if (meta.type === "context") {
+          setContextStatus({
+            estimatedTokens: meta.estimatedTokens ?? 0,
+            thresholdTokens: meta.thresholdTokens ?? 40000,
+            keepRecent: meta.keepRecent ?? 10,
+            compacted: false,
+          });
         } else if (meta.type === "compacted") {
           setTrace((t) => [...t, "earlier history summarized"]);
+          setContextStatus((prev) => ({
+            estimatedTokens: prev?.estimatedTokens ?? 0,
+            thresholdTokens: meta.thresholdTokens ?? prev?.thresholdTokens ?? 40000,
+            keepRecent: meta.keepRecent ?? prev?.keepRecent ?? 10,
+            compacted: true,
+          }));
         } else if (meta.type === "tool_start") {
           setTrace((t) => [...t, `${toolLabel(meta.name)}…`]);
         } else if (meta.type === "tool_end") {
@@ -69,6 +111,14 @@ export function useChat(onDone?: () => void) {
       } else if (frame.event === "done") {
         const done = payload as DonePayload;
         setPending([]);
+        if (done.contextTokens != null) {
+          setContextStatus((prev) => ({
+            estimatedTokens: done.contextTokens ?? (done.inputTokens + done.outputTokens),
+            thresholdTokens: done.thresholdTokens ?? prev?.thresholdTokens ?? 40000,
+            keepRecent: done.keepRecent ?? prev?.keepRecent ?? 10,
+            compacted: prev?.compacted ?? false,
+          }));
+        }
         setMessages((m) => m.map((msg) => msg.id === assistantId
           ? {
               ...msg,
@@ -215,5 +265,5 @@ export function useChat(onDone?: () => void) {
     await start(`/api/conversations/${conversationId}/approvals`, { decisions }, controller, assistantId);
   }, [start]);
 
-  return { messages, setMessages, status, send, edit, regenerate, resolve, stop, reset, trace, pending };
+  return { messages, setMessages, status, send, edit, regenerate, resolve, stop, reset, trace, pending, contextStatus, setContextStatus };
 }

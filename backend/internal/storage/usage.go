@@ -114,6 +114,20 @@ type DailyRow struct {
 	CostMicros   int64
 }
 
+type ToolCount struct {
+	ToolName string `json:"toolName"`
+	Count    int    `json:"count"`
+}
+
+type ToolAnalysis struct {
+	TotalExecutions   int         `json:"totalExecutions"`
+	SandboxExecutions int         `json:"sandboxExecutions"`
+	SuccessCount      int         `json:"successCount"`
+	FailedCount       int         `json:"failedCount"`
+	AvgDurationMs     int64       `json:"avgDurationMs"`
+	ByTool            []ToolCount `json:"byTool"`
+}
+
 type Summary struct {
 	Totals []KindModelRow
 	Daily  []DailyRow
@@ -121,6 +135,8 @@ type Summary struct {
 	Documents []DocumentSpend
 	// Searches carries analysis of search queries performed by the user's AI.
 	Searches SearchAnalysis
+	// Tools carries overview analysis of tool and sandbox executions.
+	Tools ToolAnalysis
 }
 
 // DocumentSpend is one document's embedding ledger rollup.
@@ -282,6 +298,35 @@ func (u *Usage) Summary(ctx context.Context, userID string, days int) (Summary, 
 			var qc SearchQueryCount
 			if err := rowsTop.Scan(&qc.Query, &qc.Count); err == nil {
 				sum.Searches.TopQueries = append(sum.Searches.TopQueries, qc)
+			}
+		}
+	}
+
+	// Tool and Code Sandbox breakdown and overview
+	sum.Tools.ByTool = []ToolCount{}
+	rowToolAgg := u.pool.QueryRow(ctx,
+		`SELECT COUNT(*)::int,
+		        COALESCE(COUNT(*) FILTER (WHERE tool_name = 'code_runner' OR tool_name = 'sandbox'), 0)::int,
+		        COALESCE(COUNT(*) FILTER (WHERE status = 'success'), 0)::int,
+		        COALESCE(COUNT(*) FILTER (WHERE status != 'success'), 0)::int,
+		        COALESCE(AVG(duration_ms), 0)::bigint
+		 FROM tool_audit_logs
+		 WHERE user_id = $1 AND (action = 'execute' OR action = '')
+		   AND created_at > now() - make_interval(days => $2)`, userID, days)
+	_ = rowToolAgg.Scan(&sum.Tools.TotalExecutions, &sum.Tools.SandboxExecutions, &sum.Tools.SuccessCount, &sum.Tools.FailedCount, &sum.Tools.AvgDurationMs)
+
+	rowsTools, err := u.pool.Query(ctx,
+		`SELECT tool_name, COUNT(*)::int
+		 FROM tool_audit_logs
+		 WHERE user_id = $1 AND (action = 'execute' OR action = '')
+		   AND created_at > now() - make_interval(days => $2)
+		 GROUP BY tool_name ORDER BY 2 DESC LIMIT 10`, userID, days)
+	if err == nil {
+		defer rowsTools.Close()
+		for rowsTools.Next() {
+			var tc ToolCount
+			if err := rowsTools.Scan(&tc.ToolName, &tc.Count); err == nil {
+				sum.Tools.ByTool = append(sum.Tools.ByTool, tc)
 			}
 		}
 	}

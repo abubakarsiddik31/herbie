@@ -6,6 +6,7 @@ describe("ThinkingTrace", () => {
   it("renders humanized steps and friendly summary instead of raw agent thinking", () => {
     const rawRows = [
       "search_documents…",
+      "read_document…",
       "model call · 1500 in / 45 out",
       "earlier history summarized",
     ];
@@ -18,6 +19,7 @@ describe("ThinkingTrace", () => {
 
     // Humanized steps replace raw developer tokens and internal names
     expect(screen.getByText("Searched referenced workspace documents")).toBeInTheDocument();
+    expect(screen.getByText("Read document sections & text")).toBeInTheDocument();
     expect(screen.getByText("Composed and structured findings")).toBeInTheDocument();
     expect(screen.getByText("Synthesized previous conversation context")).toBeInTheDocument();
 

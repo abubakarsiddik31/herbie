@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/abubakarsiddik31/golem-chatbot/internal/storage"
 	"github.com/abubakarsiddik31/golem/model"
 )
 
@@ -38,6 +39,15 @@ func NewCompactor(m model.Model, modelName string, thresholdTokens, keepRecent, 
 // ModelName reports the summarizer model, for usage metering.
 func (c *Compactor) ModelName() string { return c.name }
 
+// Threshold returns the token threshold at which compaction triggers.
+func (c *Compactor) Threshold() int { return c.threshold }
+
+// KeepRecent returns how many recent messages are kept uncompacted.
+func (c *Compactor) KeepRecent() int { return c.keepRecent }
+
+// SummaryTokens returns the target maximum tokens for the generated summary.
+func (c *Compactor) SummaryTokens() int { return c.summaryTokens }
+
 // EstimateHistoryTokens approximates Σ content tokens at 4 chars/token
 // plus 40 tokens of framing per message (roles, tool envelopes).
 func EstimateHistoryTokens(msgs []model.Message) int {
@@ -48,6 +58,15 @@ func EstimateHistoryTokens(msgs []model.Message) int {
 			n += len(p.Data)
 		}
 		total += n/4 + 40
+	}
+	return total
+}
+
+// EstimateStorageTokens approximates Σ content tokens for persisted database messages.
+func EstimateStorageTokens(msgs []storage.Message) int {
+	total := 0
+	for _, m := range msgs {
+		total += len(m.Content)/4 + 40
 	}
 	return total
 }

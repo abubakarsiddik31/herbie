@@ -264,7 +264,7 @@ func TestUserToolsRespectConversationRagToggle(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, tl := range off {
-		if tl.Name == chat.SearchToolName || tl.Name == chat.ListDocumentsToolName {
+		if tl.Name == chat.SearchToolName || tl.Name == chat.ListDocumentsToolName || tl.Name == chat.ReadDocumentToolName {
 			t.Fatalf("%s offered to a RAG-disabled conversation", tl.Name)
 		}
 	}
@@ -275,6 +275,7 @@ func TestUserToolsRespectConversationRagToggle(t *testing.T) {
 	}
 	foundSearch := false
 	foundList := false
+	foundRead := false
 	for _, tl := range on {
 		if tl.Name == chat.SearchToolName {
 			foundSearch = true
@@ -282,12 +283,18 @@ func TestUserToolsRespectConversationRagToggle(t *testing.T) {
 		if tl.Name == chat.ListDocumentsToolName {
 			foundList = true
 		}
+		if tl.Name == chat.ReadDocumentToolName {
+			foundRead = true
+		}
 	}
 	if !foundSearch {
 		t.Fatal("search_documents missing for a RAG-enabled conversation")
 	}
 	if !foundList {
 		t.Fatal("list_documents missing for a RAG-enabled conversation")
+	}
+	if !foundRead {
+		t.Fatal("read_document missing for a RAG-enabled conversation")
 	}
 }
 
@@ -476,6 +483,9 @@ func TestSendMessageWithoutRagHasNoSearchTool(t *testing.T) {
 	if strings.Contains(rec.Body.String(), "list_documents") {
 		t.Fatal("list tool must not be registered when RAG is disabled")
 	}
+	if strings.Contains(rec.Body.String(), "read_document") {
+		t.Fatal("read tool must not be registered when RAG is disabled")
+	}
 }
 
 func TestListDocsDepsScoping(t *testing.T) {
@@ -517,6 +527,88 @@ func TestListDocsDepsScoping(t *testing.T) {
 	}
 	if len(res2) != 1 || res2[0].ID != "d2" {
 		t.Fatalf("expected 1 project doc, got %+v", res2)
+	}
+}
+
+type fakeChatVectorsStore struct {
+	chunks []rag.Chunk
+}
+
+func (f *fakeChatVectorsStore) UpsertChunks(_ context.Context, _, _, _ string, _ []rag.Chunk, _ [][]float32) error {
+	return nil
+}
+func (f *fakeChatVectorsStore) DeleteDocument(_ context.Context, _ string) error { return nil }
+func (f *fakeChatVectorsStore) HybridSearch(_ context.Context, _, _ string, _ []float32, _ float64, _ int, _ []string) ([]rag.Scored, error) {
+	return nil, nil
+}
+func (f *fakeChatVectorsStore) ExpandRange(_ context.Context, _, docID string, lo, hi int) ([]rag.Chunk, error) {
+	var out []rag.Chunk
+	for _, ch := range f.chunks {
+		if ch.DocumentID == docID && ch.Index >= lo && ch.Index <= hi {
+			out = append(out, ch)
+		}
+	}
+	return out, nil
+}
+
+func TestReadDocDepsScopingAndPaging(t *testing.T) {
+	docs := &fakeDocs{
+		rows: []storage.Document{
+			{ID: "doc-1", UserID: "u-1", Filename: "paper.pdf", Status: "ready", ChunkCount: 5, SizeBytes: 10240},
+			{ID: "doc-pending", UserID: "u-1", Filename: "raw.pdf", Status: "processing", ChunkCount: 0, SizeBytes: 10240},
+		},
+	}
+	vecs := &fakeChatVectorsStore{
+		chunks: []rag.Chunk{
+			{DocumentID: "doc-1", DocTitle: "paper.pdf", Index: 0, Content: "chunk 0 content", Heading: "Abstract"},
+			{DocumentID: "doc-1", DocTitle: "paper.pdf", Index: 1, Content: "chunk 1 content", Heading: "Intro"},
+			{DocumentID: "doc-1", DocTitle: "paper.pdf", Index: 2, Content: "chunk 2 content", Heading: "Methods"},
+			{DocumentID: "doc-1", DocTitle: "paper.pdf", Index: 3, Content: "chunk 3 content", Heading: "Results"},
+			{DocumentID: "doc-1", DocTitle: "paper.pdf", Index: 4, Content: "chunk 4 content", Heading: "Discussion"},
+		},
+	}
+	srv := &Server{deps: ServerDeps{Docs: docs, Vectors: vecs}}
+
+	var sources []rag.Scored
+	fn := srv.readDocDeps("u-1", "conv-1", &sources)
+	if fn == nil {
+		t.Fatal("readDocDeps should not be nil")
+	}
+
+	// 1. Read first 2 chunks
+	res, err := fn(context.Background(), "doc-1", 0, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.TotalChunks != 5 || len(res.Chunks) != 2 || res.Offset != 0 {
+		t.Fatalf("unexpected read result: %+v", res)
+	}
+	if len(sources) != 2 {
+		t.Fatalf("expected 2 sources appended, got %d", len(sources))
+	}
+
+	// 2. Read next 2 chunks (paging)
+	res2, err := fn(context.Background(), "doc-1", 2, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res2.Chunks) != 2 || res2.Chunks[0].Index != 2 {
+		t.Fatalf("unexpected second page: %+v", res2)
+	}
+	if len(sources) != 4 {
+		t.Fatalf("expected 4 sources total, got %d", len(sources))
+	}
+
+	// 3. Read pending doc -> returns error
+	_, err = fn(context.Background(), "doc-pending", 0, 2)
+	if err == nil {
+		t.Fatal("expected error for unready doc")
+	}
+
+	// 4. Read non-existent doc -> returns error
+	_, err = fn(context.Background(), "doc-missing", 0, 2)
+	if err == nil {
+		t.Fatal("expected error for missing doc")
 	}
 }
 

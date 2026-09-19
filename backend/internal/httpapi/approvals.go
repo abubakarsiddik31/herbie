@@ -143,6 +143,7 @@ func (s *Server) handleApprovals(w http.ResponseWriter, r *http.Request) {
 			ConversationID: convID,
 			Search:         s.searchDeps(userID, convID, &sources),
 			ListDocs:       s.listDocsDeps(userID, convID),
+			ReadDoc:        s.readDocDeps(userID, convID, &sources),
 			SaveMemory:     s.saveMemoryFunc(userID),
 			RecordSearch:   s.recordSearchFunc(userID, convID),
 		},

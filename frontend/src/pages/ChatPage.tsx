@@ -78,10 +78,17 @@ import {
 } from "@/features/chat/useConversations";
 import { useTools } from "@/features/tools/useTools";
 import { useDocuments } from "@/features/documents/useDocuments";
+import { ContextStatusMeter } from "@/features/chat/ContextStatusMeter";
 
 interface ConversationDetail {
   conversation: Conversation;
   messages: ChatMessage[];
+  context?: {
+    estimatedTokens: number;
+    thresholdTokens: number;
+    keepRecent?: number;
+    compacted?: boolean;
+  };
 }
 
 function toChatMessage(m: ChatMessage): ChatMessage {
@@ -281,7 +288,7 @@ export function ChatPage() {
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const seededRef = useRef<string | null>(null);
 
-  const { messages, setMessages, status, send, edit, regenerate, resolve, stop, reset, trace, pending } = useChat(() => {
+  const { messages, setMessages, status, send, edit, regenerate, resolve, stop, reset, trace, pending, contextStatus, setContextStatus } = useChat(() => {
     void queryClient.invalidateQueries({ queryKey: ["conversations"] });
   });
 
@@ -318,6 +325,9 @@ export function ChatPage() {
     if (detail && seededRef.current !== selectedId) {
       seededRef.current = selectedId;
       setMessages(detail.messages.map(toChatMessage));
+      if (detail.context) {
+        setContextStatus(detail.context);
+      }
       setSendError(null);
     }
   }, [selectedId, detail, reset, setMessages]);
@@ -493,6 +503,11 @@ export function ChatPage() {
     conversations?.find((c) => c.id === selectedId) ??
     (detail?.conversation.id === selectedId ? detail.conversation : undefined);
   const running = status === "running";
+
+  const activeEstimatedTokens = contextStatus?.estimatedTokens ?? messages.reduce((acc, m) => acc + Math.round(m.content.length / 4) + 40, 0);
+  const activeThresholdTokens = contextStatus?.thresholdTokens ?? 40000;
+  const activeKeepRecent = contextStatus?.keepRecent ?? 10;
+  const isCompacted = contextStatus?.compacted ?? false;
 
   const activeSettings: ConversationSettings = activeConversation
     ? {
@@ -1076,6 +1091,13 @@ export function ChatPage() {
                   <Bot className="size-3 text-primary" />
                   <span className="hidden sm:inline font-mono">{modelLabel(activeSettings.model)}</span>
                 </Button>
+
+                <ContextStatusMeter
+                  estimatedTokens={activeEstimatedTokens}
+                  thresholdTokens={activeThresholdTokens}
+                  keepRecent={activeKeepRecent}
+                  compacted={isCompacted}
+                />
 
                 {detectedApp && (
                   <Badge

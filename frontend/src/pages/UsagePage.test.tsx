@@ -124,16 +124,15 @@ describe("UsagePage", () => {
     expect(await screen.findByText("Total Spend")).toBeInTheDocument();
     expect(screen.getByText("Tokens Processed")).toBeInTheDocument();
     expect(screen.getByText("API Invocations")).toBeInTheDocument();
-    expect(screen.getByText("AI Search Queries")).toBeInTheDocument();
+    expect(screen.getByText("Web Searches")).toBeInTheDocument();
     expect(screen.getByText("Avg. Cost / Request")).toBeInTheDocument();
 
     // Side panel sections
     expect(screen.getByText("Spend by Category")).toBeInTheDocument();
     expect(screen.getByText("Top Models")).toBeInTheDocument();
-    expect(screen.getByText("AI Search Analysis")).toBeInTheDocument();
+    expect(screen.getByText("Web Search Overview")).toBeInTheDocument();
     expect(screen.getByText("Document Indexing")).toBeInTheDocument();
     expect(screen.getByText("quarterly-report.pdf")).toBeInTheDocument();
-    expect(screen.getByText('"latest AI news"')).toBeInTheDocument();
   });
 
   it("switches time range filter pills (7d, 30d, 90d)", async () => {
@@ -196,18 +195,21 @@ describe("UsagePage", () => {
     expect(screen.getByText("Start a chat")).toBeInTheDocument();
   });
 
-  it("renders AI Search Analysis with provider and query breakdown", async () => {
+  it("renders Web Search Overview with numeric metrics and no query details or rag queries", async () => {
     renderUsagePage();
 
-    expect(await screen.findByText("AI Search Analysis")).toBeInTheDocument();
-    expect(screen.getAllByText("15 queries").length).toBeGreaterThanOrEqual(1);
-    expect(screen.getAllByText("10 web / 5 doc").length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByText("Search Engines & Adapters")).toBeInTheDocument();
-    expect(screen.getAllByText("tavily").length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByText("brave")).toBeInTheDocument();
-    expect(screen.getByText("Recent AI Search Queries")).toBeInTheDocument();
-    expect(screen.getByText('"latest AI news"')).toBeInTheDocument();
-    expect(screen.getByText("5 results found")).toBeInTheDocument();
-    expect(screen.getByText("Frequent Queries")).toBeInTheDocument();
+    expect(await screen.findByText("Web Search Overview")).toBeInTheDocument();
+    expect(screen.getAllByText("10 searches").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText("Total Searches")).toBeInTheDocument();
+    expect(screen.getByText("Avg Results")).toBeInTheDocument();
+    expect(screen.getByText("Avg Latency")).toBeInTheDocument();
+    expect(screen.getByText("Searches / Day")).toBeInTheDocument();
+
+    // Ensures details, rag queries, and internal provider 'wigolo' are not shown
+    expect(screen.queryByText(/5 doc/i)).not.toBeInTheDocument();
+    expect(screen.queryByText('"latest AI news"')).not.toBeInTheDocument();
+    expect(screen.queryByText("Recent AI Search Queries")).not.toBeInTheDocument();
+    expect(screen.queryByText("Frequent Queries")).not.toBeInTheDocument();
+    expect(screen.queryByText("wigolo")).not.toBeInTheDocument();
   });
 });
