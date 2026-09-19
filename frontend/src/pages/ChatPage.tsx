@@ -1,17 +1,17 @@
-import { useEffect, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate, useParams, useSearchParams } from "react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   ArrowUp,
   BookOpen,
   Bot,
+  Calendar,
   Check,
   ChevronDown,
   Copy,
   Download,
   FileCode,
-  Flame,
   Globe,
   HelpCircle,
   Loader2,
@@ -41,6 +41,9 @@ import { cn, fmtTokens } from "@/lib/utils";
 import type { ChatMessage, Conversation, ConversationSettings } from "@/lib/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { useChatApps, extractAppConnectProviders, type ChatApp } from "@/features/chat/useChatApps";
+import { MentionMenu, MentionAppIcon } from "@/features/chat/MentionMenu";
+import { AppConnectCard } from "@/features/chat/AppConnectCard";
 import {
   Dialog,
   DialogContent,
@@ -113,14 +116,15 @@ function CopyMessageButton({ text }: { text: string }) {
 }
 
 const SUGGESTIONS = [
-  { icon: Globe, label: "What's the weather in Tokyo?" },
-  { icon: Flame, label: "Search Hacker News for AI agent developments" },
+  { icon: Calendar, label: "@calendar What meetings do I have scheduled today?" },
+  { icon: Globe, label: "@web What's the latest news in AI agents?" },
   { icon: BookOpen, label: "Explain quantum computing in simple terms" },
   { icon: PenLine, label: "Draft a short launch post for an open source tool" },
 ];
 
 export function ChatPage() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const queryClient = useQueryClient();
   const { conversationId } = useParams();
   const selectedId = conversationId ?? null;
@@ -141,6 +145,103 @@ export function ChatPage() {
   const [extractingFiles, setExtractingFiles] = useState(false);
   const [citeJump, setCiteJump] = useState<(CiteJump & { msgId: string }) | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Tool Apps & Mention Autocomplete
+  const { filterApps, getAppByMention } = useChatApps();
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null);
+  const [mentionSelectedIndex, setMentionSelectedIndex] = useState(0);
+  const filteredApps = filterApps(mentionQuery ?? "");
+
+  useEffect(() => {
+    const connected = searchParams.get("connected");
+    const error = searchParams.get("error");
+    if (connected) {
+      const appName = connected === "google_calendar" ? "Google Calendar" : connected.toUpperCase();
+      toast.success(`${appName} connected successfully! You can now use @${connected === "google_calendar" ? "calendar" : connected}.`);
+      searchParams.delete("connected");
+      setSearchParams(searchParams, { replace: true });
+    } else if (error) {
+      toast.error(`OAuth connection error: ${error}`);
+      searchParams.delete("error");
+      setSearchParams(searchParams, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
+
+  const detectedApp = useMemo(() => {
+    const match = input.match(/@([a-zA-Z0-9_-]+)/);
+    if (match) {
+      return getAppByMention(match[1]);
+    }
+    return undefined;
+  }, [input, getAppByMention]);
+
+  const handleSelectApp = (app: ChatApp) => {
+    if (!textareaRef.current) return;
+    const textarea = textareaRef.current;
+    const val = textarea.value;
+    const cursor = textarea.selectionStart;
+
+    const beforeCursor = val.slice(0, cursor);
+    const atIndex = beforeCursor.lastIndexOf("@");
+    if (atIndex !== -1) {
+      const prefix = val.slice(0, atIndex);
+      const suffix = val.slice(cursor);
+      const newVal = `${prefix}@${app.mention} ${suffix}`;
+      setInput(newVal);
+      setMentionQuery(null);
+      setTimeout(() => {
+        if (textareaRef.current) {
+          const newPos = atIndex + app.mention.length + 2;
+          textareaRef.current.focus();
+          textareaRef.current.setSelectionRange(newPos, newPos);
+        }
+      }, 0);
+    }
+  };
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const val = e.target.value;
+    setInput(val);
+    const cursor = e.target.selectionStart;
+    const textBeforeCursor = val.slice(0, cursor);
+    const atMatch = textBeforeCursor.match(/@([a-zA-Z0-9_-]*)$/);
+    if (atMatch) {
+      setMentionQuery(atMatch[1]);
+      setMentionSelectedIndex(0);
+    } else {
+      setMentionQuery(null);
+    }
+  };
+
+  const handleInputKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (mentionQuery !== null && filteredApps.length > 0) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setMentionSelectedIndex((prev) => (prev + 1) % filteredApps.length);
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setMentionSelectedIndex((prev) => (prev - 1 + filteredApps.length) % filteredApps.length);
+        return;
+      }
+      if (e.key === "Enter" || e.key === "Tab") {
+        e.preventDefault();
+        handleSelectApp(filteredApps[mentionSelectedIndex]);
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setMentionQuery(null);
+        return;
+      }
+    }
+
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      void submit();
+    }
+  };
   const { data: docs } = useDocuments();
   const hasDocs = (docs?.length ?? 0) > 0;
   const [draftSettings, setDraftSettings] = useState<ConversationSettings>({
@@ -705,6 +806,17 @@ export function ChatPage() {
                               jump={citeJump?.msgId === m.id ? citeJump : null}
                             />
                           )}
+                          {!m.streaming && (() => {
+                            const connectProviders = extractAppConnectProviders(m.content);
+                            if (connectProviders.length === 0) return null;
+                            return (
+                              <div className="space-y-2 pt-1">
+                                {connectProviders.map((p) => (
+                                  <AppConnectCard key={p} providerId={p} returnTo={window.location.pathname} />
+                                ))}
+                              </div>
+                            );
+                          })()}
                           {m.error && <p className="text-destructive text-sm">{m.error}</p>}
                           {m.truncated && (
                             <Badge variant="outline" className="text-muted-foreground text-xs">stopped early</Badge>
@@ -843,24 +955,28 @@ export function ChatPage() {
 
           <div
             className={cn(
-              "rounded-2xl border border-border/80 bg-card/95 backdrop-blur-md shadow-md transition-all",
+              "relative rounded-2xl border border-border/80 bg-card/95 backdrop-blur-md shadow-md transition-all",
               "focus-within:border-ring/80 focus-within:ring-[3px] focus-within:ring-ring/20 focus-within:shadow-lg",
               pending.length > 0 && "opacity-60",
             )}
           >
+            {mentionQuery !== null && (
+              <MentionMenu
+                apps={filteredApps}
+                selectedIndex={mentionSelectedIndex}
+                onSelect={handleSelectApp}
+                onHoverIndex={setMentionSelectedIndex}
+                onClose={() => setMentionQuery(null)}
+              />
+            )}
             <div className="p-2.5 pb-1">
               <textarea
                 ref={textareaRef}
                 value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
-                    void submit();
-                  }
-                }}
+                onChange={handleInputChange}
+                onKeyDown={handleInputKeyDown}
                 rows={1}
-                placeholder={pending.length > 0 ? "Waiting for approval…" : "Message Herbie…"}
+                placeholder={pending.length > 0 ? "Waiting for approval…" : "Message Herbie… (type @ for apps & tools)"}
                 disabled={running || pending.length > 0}
                 className="max-h-48 min-h-9 w-full resize-none bg-transparent px-2 py-1 text-sm outline-none placeholder:text-muted-foreground/60 field-sizing-content disabled:cursor-not-allowed"
               />
@@ -900,6 +1016,16 @@ export function ChatPage() {
                   <Bot className="size-3 text-primary" />
                   <span className="hidden sm:inline font-mono">{modelLabel(activeSettings.model)}</span>
                 </Button>
+
+                {detectedApp && (
+                  <Badge
+                    variant="outline"
+                    className="gap-1 border-primary/30 bg-primary/10 text-primary text-[11px] h-6 px-2 font-normal animate-in fade-in zoom-in-95 duration-150"
+                  >
+                    <MentionAppIcon name={detectedApp.iconName} className="size-3" />
+                    <span>@{detectedApp.mention}</span>
+                  </Badge>
+                )}
               </div>
 
               <div className="flex items-center gap-1.5">
