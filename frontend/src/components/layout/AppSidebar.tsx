@@ -109,32 +109,14 @@ function SidebarProject({ project }: { project: Project }) {
           type="button"
           onClick={() => open()}
           title={project.name}
-          className="min-w-0 flex-1 truncate py-1.5 text-left outline-none"
+          className="min-w-0 flex-1 truncate py-1.5 pr-2 text-left outline-none"
         >
           {project.name}
-        </button>
-        <button
-          type="button"
-          onClick={() => open({ conv: "new" })}
-          aria-label={`New chat in ${project.name}`}
-          title="New chat in this project"
-          className="flex shrink-0 p-1.5 pr-2 outline-none text-muted-foreground/70 hover:text-foreground opacity-60 hover:opacity-100 transition-opacity"
-        >
-          <Plus className="size-3" />
         </button>
       </div>
 
       {expanded && (
         <div className="ml-4 pl-2 border-l border-sidebar-border/60 py-1 space-y-0.5 animate-in fade-in duration-150">
-          {/* Direct New Chat button inside the expanded project */}
-          <button
-            type="button"
-            onClick={() => open({ conv: "new" })}
-            className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-[11px] font-medium text-emerald-600 dark:text-emerald-400 hover:bg-sidebar-accent/50 transition-colors"
-          >
-            <Plus className="size-3 shrink-0" />
-            <span>New chat</span>
-          </button>
           {isLoading && (
             <div className="space-y-1.5 px-1 py-1">
               <Skeleton className="h-5 w-4/5 rounded-md" />

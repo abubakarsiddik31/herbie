@@ -41,10 +41,36 @@ const mockConversations = [
   },
 ];
 
+const mockProjects = [
+  {
+    id: "proj-1",
+    name: "Autonomous Agent Project",
+    filesCount: 1,
+    conversationsCount: 1,
+    updatedAt: new Date().toISOString(),
+  },
+];
+
+const mockProjectDetail = {
+  project: {
+    id: "proj-1",
+    name: "Autonomous Agent Project",
+    description: "",
+    customInstructions: "",
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  },
+  files: [],
+  conversations: [
+    { id: "conv-p1", title: "Project Strategy Discussion" },
+  ],
+};
+
 const server = setupServer(
   http.get("*/api/conversations", () => HttpResponse.json(mockConversations)),
   http.get("*/api/tools", () => HttpResponse.json([])),
-  http.get("*/api/projects", () => HttpResponse.json({ projects: [] })),
+  http.get("*/api/projects", () => HttpResponse.json({ projects: mockProjects })),
+  http.get("*/api/projects/proj-1", () => HttpResponse.json(mockProjectDetail)),
   http.get("*/api/workflows", () => HttpResponse.json({ workflows: [] })),
   http.get("*/api/tool-oauth/providers", () => HttpResponse.json([])),
   http.get("*/api/mcp/servers", () => HttpResponse.json({ servers: [] })),
@@ -57,13 +83,13 @@ afterEach(() => {
 });
 afterAll(() => server.close());
 
-function renderSidebar() {
+function renderSidebar(initialPath = "/chat/conv-1") {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
   return render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={["/chat/conv-1"]}>
+      <MemoryRouter initialEntries={[initialPath]}>
         <SidebarProvider>
           <AppSidebar />
         </SidebarProvider>
@@ -156,5 +182,32 @@ describe("AppSidebar", () => {
     // Clicking again expands it
     await user.click(appsBtn);
     expect(await screen.findByText("Web Search")).toBeInTheDocument();
+  });
+
+  it("renders 'New chat' at the top for standard routes, and changes to 'New project chat' in project workspace", async () => {
+    const user = userEvent.setup();
+    const { unmount } = renderSidebar("/chat");
+
+    // Standard chat route: top button says "New chat"
+    expect(screen.getByRole("button", { name: /New chat/i })).toBeInTheDocument();
+    expect(screen.queryByText("New project chat")).not.toBeInTheDocument();
+
+    unmount();
+
+    // In a project workspace route: top button dynamically changes to "New project chat"
+    renderSidebar("/projects/proj-1");
+    expect(await screen.findByText("New project chat")).toBeInTheDocument();
+
+    // The project row should be clean and not have redundant "+ New chat in this project" button
+    expect(await screen.findByText("Autonomous Agent Project")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /New chat in Autonomous Agent Project/i })).not.toBeInTheDocument();
+
+    // Expand the project
+    const expandBtn = screen.getByRole("button", { name: /Expand Autonomous Agent Project/i });
+    await user.click(expandBtn);
+
+    // Should display conversation title and NOT a redundant "New chat" item
+    expect(await screen.findByText("Project Strategy Discussion")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^New chat$/i })).not.toBeInTheDocument();
   });
 });
