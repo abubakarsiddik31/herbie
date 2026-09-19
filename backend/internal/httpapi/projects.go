@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/abubakarsiddik31/golem-chatbot/internal/rag"
 	"github.com/abubakarsiddik31/golem-chatbot/internal/storage"
 	"github.com/google/uuid"
 )
@@ -194,6 +195,18 @@ func (s *Server) handleUploadProjectFile(w http.ResponseWriter, r *http.Request)
 	userID, _ := userIDFrom(r.Context())
 	projectID := r.PathValue("id")
 
+	if s.deps.Projects != nil {
+		_, err := s.deps.Projects.Get(r.Context(), projectID, userID)
+		if errors.Is(err, storage.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "not_found", "project not found")
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "internal", "could not load project")
+			return
+		}
+	}
+
 	maxBytes := s.deps.Cfg.RAG.MaxUploadBytes
 	if maxBytes <= 0 {
 		maxBytes = 20 << 20
@@ -227,7 +240,7 @@ func (s *Server) handleUploadProjectFile(w http.ResponseWriter, r *http.Request)
 		ID:         docID,
 		UserID:     userID,
 		ProjectID:  &projectID,
-		ObjectKey:  docID + "/" + header.Filename,
+		ObjectKey:  rag.ObjectKey(userID, docID, header.Filename),
 		Filename:   header.Filename,
 		Mime:       mime,
 		SizeBytes:  int64(len(content)),

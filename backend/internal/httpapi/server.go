@@ -144,6 +144,7 @@ func newServer(deps ServerDeps) (*Server, http.Handler) {
 	authed.HandleFunc("GET /api/usage/summary", s.handleUsageSummary)
 	authed.HandleFunc("POST /api/documents", s.handleUploadDocument)
 	authed.HandleFunc("GET /api/documents", s.handleListDocuments)
+	authed.HandleFunc("GET /api/documents/{id}/content", s.handleGetDocumentContent)
 	authed.HandleFunc("DELETE /api/documents/{id}", s.handleDeleteDocument)
 	authed.HandleFunc("POST /api/extract-text", s.handleExtractText)
 	authed.HandleFunc("GET /api/projects", s.handleListProjects)

@@ -5,11 +5,17 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"log/slog"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/abubakarsiddik31/golem-chatbot/internal/auth"
+	"github.com/abubakarsiddik31/golem-chatbot/internal/auth/authtest"
+	"github.com/abubakarsiddik31/golem-chatbot/internal/config"
 	"github.com/abubakarsiddik31/golem-chatbot/internal/storage"
 )
 
@@ -151,5 +157,97 @@ func TestProjectsCRUD(t *testing.T) {
 	srv.handleDeleteProject(w, r)
 	if w.Code != http.StatusNoContent {
 		t.Fatalf("status = %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestUploadProjectFileAuth(t *testing.T) {
+	tm, err := auth.NewTokenMaker(testSecret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Config{}
+	cfg.RAG.MaxUploadBytes = 20 << 20
+	cfg.RAG.EmbeddingModel = "gemini-embedding-001"
+	docs, fr, fv, fo := &fakeDocs{}, &fakeRag{}, &fakeVectors{}, &fakeObjects{}
+	pr := newFakeProjects()
+	created, _ := pr.Create(context.Background(), storage.Project{
+		UserID: "u-1",
+		Name:   "Test Project",
+	})
+
+	h := NewServer(ServerDeps{
+		Log:      slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Auth:     authtest.NewService(testSecret),
+		Tokens:   tm,
+		Profiles: newFakeProfiles(),
+		Cfg:      cfg,
+		Usage:    newFakeUsage(),
+		RAG:      fr,
+		Docs:     docs,
+		Vectors:  fv,
+		Objects:  fo,
+		Projects: pr,
+	})
+
+	token, _, err := tm.Issue("u-1", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Without auth header -> 401 Unauthorized
+	var buf strings.Builder
+	mw := multipart.NewWriter(&buf)
+	fw, _ := mw.CreateFormFile("file", "notes.md")
+	_, _ = fw.Write([]byte("hello world"))
+	_ = mw.Close()
+
+	req, _ := http.NewRequest(http.MethodPost, "/api/projects/"+created.ID+"/files", strings.NewReader(buf.String()))
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 unauthorized without auth header, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// 2. With auth header -> 202 Accepted
+	buf.Reset()
+	mw = multipart.NewWriter(&buf)
+	fw, _ = mw.CreateFormFile("file", "notes.md")
+	_, _ = fw.Write([]byte("hello world"))
+	_ = mw.Close()
+
+	req, _ = http.NewRequest(http.MethodPost, "/api/projects/"+created.ID+"/files", strings.NewReader(buf.String()))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 accepted with auth header, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var doc documentJSON
+	if err := json.Unmarshal(rec.Body.Bytes(), &doc); err != nil {
+		t.Fatal(err)
+	}
+	if doc.Filename != "notes.md" {
+		t.Fatalf("expected notes.md, got %q", doc.Filename)
+	}
+
+	// 3. For nonexistent project -> 404 Not Found
+	buf.Reset()
+	mw = multipart.NewWriter(&buf)
+	fw, _ = mw.CreateFormFile("file", "notes.md")
+	_, _ = fw.Write([]byte("hello world"))
+	_ = mw.Close()
+
+	req, _ = http.NewRequest(http.MethodPost, "/api/projects/nonexistent/files", strings.NewReader(buf.String()))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 not found for nonexistent project, got %d: %s", rec.Code, rec.Body.String())
 	}
 }

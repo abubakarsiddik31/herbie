@@ -115,16 +115,40 @@ func (f *fakeVectors) ExpandRange(_ context.Context, _, _ string, _, _ int) ([]r
 	return nil, nil
 }
 
-type fakeObjects struct{ deleted []string }
+type fakeObjects struct {
+	deleted []string
+	stored  map[string][]byte
+}
 
-func (f *fakeObjects) Put(_ context.Context, key, _ string, _ io.Reader, _ int64) error {
+type nopReadSeekCloser struct {
+	*bytes.Reader
+}
+
+func (nopReadSeekCloser) Close() error { return nil }
+
+func (f *fakeObjects) Put(_ context.Context, key, _ string, r io.Reader, _ int64) error {
+	if f.stored == nil {
+		f.stored = make(map[string][]byte)
+	}
+	b, _ := io.ReadAll(r)
+	f.stored[key] = b
 	return nil
 }
 func (f *fakeObjects) Delete(_ context.Context, key string) error {
 	f.deleted = append(f.deleted, key)
+	if f.stored != nil {
+		delete(f.stored, key)
+	}
 	return nil
 }
-func (f *fakeObjects) Get(_ context.Context, key string) (io.ReadSeekCloser, error) { return nil, nil }
+func (f *fakeObjects) Get(_ context.Context, key string) (io.ReadSeekCloser, error) {
+	if f.stored != nil {
+		if b, ok := f.stored[key]; ok {
+			return nopReadSeekCloser{bytes.NewReader(b)}, nil
+		}
+	}
+	return nil, nil
+}
 
 // --- harness ---
 
@@ -371,4 +395,47 @@ func uploadDocToPath(t *testing.T, h http.Handler, path, token, filename, conten
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	return rec
+}
+
+func TestGetDocumentContent(t *testing.T) {
+	h, token, docs, fr, _, fo := newDocsServer(t, 20<<20)
+	fr.chunks = 2
+	uploadRec := uploadDoc(t, h, token, "sample.md", "# Sample Document\n\nThis is parsed markdown.")
+	if uploadRec.Code != http.StatusCreated {
+		t.Fatalf("upload status %d: %s", uploadRec.Code, uploadRec.Body.String())
+	}
+	var uploaded documentJSON
+	_ = json.Unmarshal(uploadRec.Body.Bytes(), &uploaded)
+
+	// Save in fakeObjects so Get can read it
+	_ = fo.Put(context.Background(), docs.rows[0].ObjectKey, "text/markdown", strings.NewReader("# Sample Document\n\nThis is parsed markdown."), 0)
+
+	// Unauthenticated request should fail with 401
+	reqUnauth, _ := http.NewRequest(http.MethodGet, "/api/documents/"+uploaded.ID+"/content", nil)
+	recUnauth := httptest.NewRecorder()
+	h.ServeHTTP(recUnauth, reqUnauth)
+	if recUnauth.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 unauthorized, got %d", recUnauth.Code)
+	}
+
+	// Authenticated request should return content
+	req, _ := http.NewRequest(http.MethodGet, "/api/documents/"+uploaded.ID+"/content", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+	}
+	var res struct {
+		ID       string `json:"id"`
+		Filename string `json:"filename"`
+		Status   string `json:"status"`
+		Text     string `json:"text"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil {
+		t.Fatal(err)
+	}
+	if res.Filename != "sample.md" || !strings.Contains(res.Text, "This is parsed markdown.") {
+		t.Fatalf("unexpected content: %+v", res)
+	}
 }
