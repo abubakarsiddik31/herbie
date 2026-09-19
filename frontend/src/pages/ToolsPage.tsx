@@ -3,13 +3,10 @@ import { toast } from "sonner";
 import {
   ArrowRight,
   BookOpen,
-  CheckCircle2,
   Copy,
   Eye,
   Filter,
-  Globe,
   Layers,
-  Loader2,
   Pencil,
   Plus,
   Search,
@@ -17,7 +14,6 @@ import {
   ShieldCheck,
   Sidebar,
   SlidersHorizontal,
-  Terminal,
   Trash2,
   TriangleAlert,
   Wrench,
@@ -60,8 +56,6 @@ import {
   useTools,
   useUpdateTool,
 } from "@/features/tools/useTools";
-import { useMCPServers } from "@/features/mcp/useMCPServers";
-import { useLinkCatalogApp, useUnlinkCatalogApp } from "@/features/mcp/useMCPCatalog";
 import { ToolDetailsDialog } from "@/features/tools/ToolDetailsDialog";
 import { TemplatePreviewDialog } from "@/features/tools/TemplatePreviewDialog";
 import { ToolEditorDialog } from "@/features/tools/ToolEditorDialog";
@@ -85,60 +79,6 @@ export function ToolsPage() {
   const createTool = useCreateTool();
   const updateTool = useUpdateTool();
   const deleteTool = useDeleteTool();
-
-  // MCP Servers for built-in tools (Code Sandbox, Web Reader)
-  const { data: mcpServers = [] } = useMCPServers();
-  const linkCatalogApp = useLinkCatalogApp();
-  const unlinkCatalogApp = useUnlinkCatalogApp();
-
-  const isCodeRunnerConnected = Boolean(mcpServers?.some((s) => s.appId === "code_runner" && s.enabled));
-  const isWebFetchConnected = Boolean(mcpServers?.some((s) => s.appId === "web_fetch" && s.enabled));
-  const isTogglingAppId =
-    (linkCatalogApp.isPending ? linkCatalogApp.variables?.appId : null) ||
-    (unlinkCatalogApp.isPending ? unlinkCatalogApp.variables : null);
-
-  const builtinTools = useMemo(() => [
-    {
-      id: "code_runner",
-      name: "code_runner",
-      title: "Code Sandbox",
-      mention: "@code_runner",
-      category: "Developer",
-      tagline: "Safe mathematical computations, formatting & expressions",
-      description: "Evaluate mathematical calculations, arithmetic expressions, and format structured data in a safe sandbox with zero external keys.",
-      icon: Terminal,
-      connected: isCodeRunnerConnected,
-      badgeText: "Sandbox",
-      badgeClass: "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400",
-      iconBgClass: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
-    },
-    {
-      id: "web_fetch",
-      name: "web_fetch",
-      title: "Web Reader & Fetch",
-      mention: "@web_fetch",
-      category: "Developer",
-      tagline: "Clean text extraction from web articles & docs",
-      description: "Read and extract clean markdown text and structure from public web articles and documentation.",
-      icon: Globe,
-      connected: isWebFetchConnected,
-      badgeText: "Web Scraper",
-      badgeClass: "border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-400",
-      iconBgClass: "bg-sky-500/10 text-sky-600 dark:text-sky-400",
-    },
-  ], [isCodeRunnerConnected, isWebFetchConnected]);
-
-  async function handleToggleBuiltin(appId: string, currentlyConnected: boolean) {
-    try {
-      if (currentlyConnected) {
-        await unlinkCatalogApp.mutateAsync(appId);
-      } else {
-        await linkCatalogApp.mutateAsync({ appId });
-      }
-    } catch {
-      // Error handled by mutation hook
-    }
-  }
 
   // Top level view tab
   const [activeView, setActiveView] = useState<"tools" | "templates">("tools");
@@ -184,26 +124,6 @@ export function ToolsPage() {
     });
   }, [tools, statusFilter, toolsSearch]);
 
-  const filteredBuiltins = useMemo(() => {
-    return builtinTools.filter((b) => {
-      if (statusFilter === "active" && !b.connected) return false;
-      if (statusFilter === "paused" && b.connected) return false;
-      if (statusFilter === "approval") return false;
-
-      if (toolsSearch.trim() !== "") {
-        const query = toolsSearch.toLowerCase().trim();
-        const matchesName = b.name.toLowerCase().includes(query);
-        const matchesTitle = b.title.toLowerCase().includes(query);
-        const matchesDesc = b.description.toLowerCase().includes(query);
-        const matchesTagline = b.tagline.toLowerCase().includes(query);
-        const matchesMention = b.mention.toLowerCase().includes(query);
-        const matchesCategory = b.category.toLowerCase().includes(query);
-        return matchesName || matchesTitle || matchesDesc || matchesTagline || matchesMention || matchesCategory || "sandbox".includes(query);
-      }
-      return true;
-    });
-  }, [builtinTools, statusFilter, toolsSearch]);
-
   // Filtered templates
   const filteredTemplates = useMemo(() => {
     return TEMPLATES.filter((t) => {
@@ -225,37 +145,16 @@ export function ToolsPage() {
     });
   }, [templateCategory, templateSearch]);
 
-  const filteredTemplateBuiltins = useMemo(() => {
-    return builtinTools.filter((b) => {
-      if (templateCategory !== "All" && b.category !== templateCategory) {
-        return false;
-      }
-      if (templateSearch.trim() !== "") {
-        const query = templateSearch.toLowerCase().trim();
-        const matchesName = b.name.toLowerCase().includes(query);
-        const matchesTitle = b.title.toLowerCase().includes(query);
-        const matchesDesc = b.description.toLowerCase().includes(query);
-        const matchesTagline = b.tagline.toLowerCase().includes(query);
-        const matchesMention = b.mention.toLowerCase().includes(query);
-        const matchesCategory = b.category.toLowerCase().includes(query);
-        return matchesName || matchesTitle || matchesDesc || matchesTagline || matchesMention || matchesCategory || "sandbox".includes(query);
-      }
-      return true;
-    });
-  }, [builtinTools, templateCategory, templateSearch]);
-
   // Statistics
   const stats = useMemo(() => {
-    const customTotal = tools?.length || 0;
-    const customActive = tools?.filter((t) => t.enabled).length || 0;
-    const activeBuiltin = (isCodeRunnerConnected ? 1 : 0) + (isWebFetchConnected ? 1 : 0);
+    if (!tools) return { total: 0, active: 0, paused: 0, approval: 0 };
     return {
-      total: customTotal + 2,
-      active: customActive + activeBuiltin,
-      paused: (tools?.filter((t) => !t.enabled).length || 0) + (2 - activeBuiltin),
-      approval: tools?.filter((t) => t.requireApproval).length || 0,
+      total: tools.length,
+      active: tools.filter((t) => t.enabled).length,
+      paused: tools.filter((t) => !t.enabled).length,
+      approval: tools.filter((t) => t.requireApproval).length,
     };
-  }, [tools, isCodeRunnerConnected, isWebFetchConnected]);
+  }, [tools]);
 
   // Category template count map
   const categoryCounts = useMemo(() => {
@@ -672,40 +571,11 @@ export function ToolsPage() {
                   </div>
 
                   {/* Starter recommendations */}
-                  <div className="space-y-3 max-w-2xl mx-auto text-left">
+                  <div className="space-y-3 max-w-xl mx-auto text-left">
                     <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider text-center">
                       Quick Install Starters (Zero Configuration)
                     </p>
-                    <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-                      {/* Code Sandbox Card */}
-                      <div className="flex flex-col justify-between rounded-xl border bg-card p-3 shadow-xs hover:border-foreground/25 transition-all">
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <span className="flex size-7 items-center justify-center rounded-lg border bg-amber-500/10 text-amber-600 dark:text-amber-400">
-                              <Terminal className="size-3.5" />
-                            </span>
-                            <span className="truncate text-xs font-semibold">Code Sandbox</span>
-                          </div>
-                          <p className="mt-2 line-clamp-2 text-[11px] text-muted-foreground">
-                            Safe mathematical computations & expressions
-                          </p>
-                        </div>
-                        <Button
-                          size="xs"
-                          variant={isCodeRunnerConnected ? "outline" : "brand"}
-                          className="mt-3 w-full text-xs font-medium"
-                          onClick={() => void handleToggleBuiltin("code_runner", isCodeRunnerConnected)}
-                          disabled={isTogglingAppId === "code_runner"}
-                        >
-                          {isTogglingAppId === "code_runner" ? (
-                            <Loader2 className="size-3 animate-spin mr-1" />
-                          ) : (
-                            <Terminal className="size-3 mr-1" />
-                          )}
-                          {isCodeRunnerConnected ? "Connected" : "Enable Sandbox"}
-                        </Button>
-                      </div>
-
+                    <div className="grid gap-2 sm:grid-cols-3">
                       {starterTemplates.map((t) => {
                         const Icon = t.icon;
                         const isAdding = addingTemplateSlug === t.slug;
@@ -761,7 +631,7 @@ export function ToolsPage() {
               )}
 
               {/* Empty state: Tools exist, but search / filter returns 0 */}
-              {!isLoading && !isError && tools && tools.length > 0 && filteredTools.length === 0 && filteredBuiltins.length === 0 && (
+              {!isLoading && !isError && tools && tools.length > 0 && filteredTools.length === 0 && (
                 <div className="flex flex-col items-center justify-center rounded-xl border border-dashed p-12 text-center">
                   <Filter className="size-8 text-muted-foreground/60 mb-2" />
                   <p className="text-sm font-medium text-foreground">No tools match your criteria</p>
@@ -782,115 +652,9 @@ export function ToolsPage() {
                 </div>
               )}
 
-              {/* Section: Built-in Sandbox & System Tools */}
-              {!isLoading && !isError && filteredBuiltins.length > 0 && (
-                <div className="space-y-3 mb-6">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <Terminal className="size-4 text-amber-500" />
-                      <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                        Built-in Sandbox & System Tools
-                      </h2>
-                    </div>
-                    <span className="text-[11px] text-muted-foreground font-mono">
-                      Zero Configuration · Keyless
-                    </span>
-                  </div>
-
-                  <div className="grid gap-3.5 sm:grid-cols-2">
-                    {filteredBuiltins.map((builtin) => {
-                      const Icon = builtin.icon;
-                      const isPending = isTogglingAppId === builtin.id;
-                      return (
-                        <div
-                          key={builtin.id}
-                          className={cn(
-                            "group relative flex flex-col justify-between rounded-xl border bg-card p-4 shadow-2xs transition-all duration-200",
-                            "hover:-translate-y-0.5 hover:shadow-md hover:border-foreground/25",
-                            !builtin.connected && "border-dashed bg-muted/10",
-                          )}
-                        >
-                          <div>
-                            <div className="flex items-start justify-between gap-2">
-                              <div className="flex items-center gap-2.5 min-w-0">
-                                <span className={cn("flex size-9 items-center justify-center rounded-xl border shrink-0", builtin.iconBgClass)}>
-                                  <Icon className="size-4" />
-                                </span>
-                                <div className="min-w-0">
-                                  <div className="flex items-center gap-1.5 min-w-0">
-                                    <h3 className="font-semibold text-xs text-foreground truncate">
-                                      {builtin.title}
-                                    </h3>
-                                    <span className="rounded bg-muted/70 px-1 py-0.2 font-mono text-[9px] text-muted-foreground shrink-0">
-                                      {builtin.mention}
-                                    </span>
-                                  </div>
-                                  <div className="flex items-center gap-1.5 mt-0.5">
-                                    <Badge variant="outline" className={cn("font-normal text-[10px] px-1 py-0 h-4", builtin.badgeClass)}>
-                                      {builtin.badgeText}
-                                    </Badge>
-                                    <span className="rounded bg-muted px-1.5 py-0 font-mono text-[9px] text-muted-foreground">
-                                      Keyless
-                                    </span>
-                                  </div>
-                                </div>
-                              </div>
-
-                              <Badge
-                                variant="outline"
-                                className={cn(
-                                  "text-[10px] gap-1 px-1.5 py-0.5 font-medium shrink-0",
-                                  builtin.connected
-                                    ? "border-emerald-600/30 bg-emerald-600/10 text-emerald-700 dark:text-emerald-400"
-                                    : "border-border text-muted-foreground"
-                                )}
-                              >
-                                {builtin.connected && <CheckCircle2 className="size-2.5" />}
-                                <span>{builtin.connected ? "Active in Agent" : "Disabled"}</span>
-                              </Badge>
-                            </div>
-
-                            <p className="mt-2.5 text-xs leading-relaxed text-muted-foreground">
-                              {builtin.description}
-                            </p>
-                          </div>
-
-                          <div className="mt-4 flex items-center justify-between border-t border-border/50 pt-3 text-xs">
-                            <span className="text-[11px] text-muted-foreground font-mono">
-                              {builtin.connected ? "Ready for chat & @mention" : "Click to enable in chat"}
-                            </span>
-                            <Button
-                              size="xs"
-                              variant={builtin.connected ? "outline" : "brand"}
-                              onClick={() => void handleToggleBuiltin(builtin.id, builtin.connected)}
-                              disabled={isPending}
-                              className="text-xs font-medium"
-                            >
-                              {isPending ? (
-                                <Loader2 className="size-3 animate-spin mr-1" />
-                              ) : null}
-                              {builtin.connected ? "Disconnect" : "Connect"}
-                            </Button>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-
               {/* Tools Grid */}
               {!isLoading && !isError && filteredTools.length > 0 && (
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                      Custom HTTP API Tools
-                    </h2>
-                    <span className="text-[11px] text-muted-foreground font-mono">
-                      {filteredTools.length} configured
-                    </span>
-                  </div>
-                  <div className="grid gap-3.5 sm:grid-cols-2 lg:grid-cols-3">
+                <div className="grid gap-3.5 sm:grid-cols-2 lg:grid-cols-3">
                   {filteredTools.map((tool) => {
                     const host = templateHost(tool.urlTemplate);
                     const isUpdating = updateTool.isPending;
@@ -1032,15 +796,14 @@ export function ToolsPage() {
                     );
                   })}
                 </div>
-              </div>
-            )}
-          </div>
-        )}
+              )}
+            </div>
+          )}
 
-        {/* VIEW 2: TEMPLATE DIRECTORY */}
-        {activeView === "templates" && (
+          {/* VIEW 2: TEMPLATE DIRECTORY */}
+          {activeView === "templates" && (
             <div>
-              {filteredTemplates.length === 0 && filteredTemplateBuiltins.length === 0 ? (
+              {filteredTemplates.length === 0 ? (
                 <div className="flex flex-col items-center justify-center rounded-xl border border-dashed p-12 text-center">
                   <Search className="size-8 text-muted-foreground/60 mb-2" />
                   <p className="text-sm font-medium text-foreground">No templates match “{templateSearch}”</p>
@@ -1061,71 +824,6 @@ export function ToolsPage() {
                 </div>
               ) : (
                 <div className="grid gap-3.5 sm:grid-cols-2 lg:grid-cols-3">
-                  {/* Built-in Sandbox & System Tools in Template Directory */}
-                  {filteredTemplateBuiltins.map((builtin) => {
-                    const Icon = builtin.icon;
-                    const isPending = isTogglingAppId === builtin.id;
-                    return (
-                      <div
-                        key={builtin.id}
-                        className="group flex flex-col justify-between rounded-xl border bg-card p-4 shadow-2xs transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md hover:border-foreground/25"
-                      >
-                        <div>
-                          {/* Template Header */}
-                          <div className="flex items-start justify-between gap-2">
-                            <div className="flex items-center gap-2.5">
-                              <span className={cn("flex size-9 items-center justify-center rounded-xl border text-foreground transition-transform group-hover:scale-105", builtin.iconBgClass)}>
-                                <Icon className="size-4" />
-                              </span>
-                              <div>
-                                <h3 className="text-xs font-semibold tracking-tight text-foreground">
-                                  {builtin.title}
-                                </h3>
-                                <div className="flex items-center gap-1.5 mt-0.5">
-                                  <Badge
-                                    variant="outline"
-                                    className="font-normal text-[10px] px-1 py-0 h-4 text-muted-foreground"
-                                  >
-                                    {builtin.category}
-                                  </Badge>
-                                  <span className="rounded bg-amber-600/10 px-1 py-0 font-mono text-[9px] font-semibold text-amber-700 dark:text-amber-400">
-                                    SANDBOX
-                                  </span>
-                                </div>
-                              </div>
-                            </div>
-                            <span className="rounded bg-muted/70 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
-                              {builtin.mention}
-                            </span>
-                          </div>
-
-                          <p className="mt-2 text-xs font-medium text-foreground/90">
-                            {builtin.tagline}
-                          </p>
-                          <p className="mt-1 line-clamp-3 text-xs leading-relaxed text-muted-foreground">
-                            {builtin.description}
-                          </p>
-                        </div>
-
-                        <div className="mt-4 flex items-center justify-between border-t border-border/50 pt-3 text-xs">
-                          <span className="text-[11px] font-mono text-muted-foreground">
-                            Built-in (Zero Keys)
-                          </span>
-                          <Button
-                            size="xs"
-                            variant={builtin.connected ? "outline" : "brand"}
-                            onClick={() => void handleToggleBuiltin(builtin.id, builtin.connected)}
-                            disabled={isPending}
-                            className="text-xs font-medium gap-1"
-                          >
-                            {isPending ? <Loader2 className="size-3 animate-spin" /> : null}
-                            {builtin.connected ? "Connected" : "Connect Tool"}
-                          </Button>
-                        </div>
-                      </div>
-                    );
-                  })}
-
                   {filteredTemplates.map((template) => {
                     const Icon = template.icon;
                     const host = templateHost(template.tool.urlTemplate);
