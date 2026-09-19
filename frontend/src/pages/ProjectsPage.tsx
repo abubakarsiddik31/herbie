@@ -234,12 +234,20 @@ export function ProjectsPage() {
                     <span>{p.filesCount} {p.filesCount === 1 ? "file" : "files"}</span>
                   </span>
 
-                  <Button size="xs" variant="ghost" asChild className="gap-1 font-medium group-hover:text-primary">
-                    <Link to={`/projects/${p.id}`}>
-                      <span>Open</span>
-                      <ArrowRight className="size-3" />
-                    </Link>
-                  </Button>
+                  <div className="flex items-center gap-1.5">
+                    <Button size="xs" variant="outline" asChild className="gap-1 font-medium h-6 px-2 text-[11px]">
+                      <Link to={`/projects/${p.id}?c=new`}>
+                        <Plus className="size-3 text-emerald-600 dark:text-emerald-400" />
+                        <span>New Chat</span>
+                      </Link>
+                    </Button>
+                    <Button size="xs" variant="ghost" asChild className="gap-1 font-medium group-hover:text-primary h-6 px-2 text-[11px]">
+                      <Link to={`/projects/${p.id}`}>
+                        <span>Open</span>
+                        <ArrowRight className="size-3" />
+                      </Link>
+                    </Button>
+                  </div>
                 </div>
               </div>
             ))}
