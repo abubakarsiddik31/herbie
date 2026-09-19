@@ -236,4 +236,42 @@ describe("UsagePage", () => {
     expect(screen.getByText("95ms")).toBeInTheDocument();
     expect(screen.getByText("Google Calendar")).toBeInTheDocument();
   });
+
+  it("places Tools & Sandbox Overview area after Activity Ledger and excludes tool rows from the ledger table", async () => {
+    server.use(
+      http.get("*/api/usage/summary", () =>
+        HttpResponse.json({
+          ...mockUsageData,
+          totals: [
+            ...mockUsageData.totals,
+            {
+              kind: "tool",
+              model: "code_runner",
+              inputTokens: 0,
+              outputTokens: 0,
+              requests: 6,
+              costUsd: 0,
+            },
+          ],
+        })
+      )
+    );
+
+    renderUsagePage();
+
+    const ledgerTitle = await screen.findByText("Activity Ledger");
+    const toolsTitle = await screen.findByText("Tools & Sandbox Overview");
+
+    // Check DOM position: tools area should appear after Activity Ledger
+    expect(ledgerTitle.compareDocumentPosition(toolsTitle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    // Verify "Manage tools" link is present in the tools card
+    const manageToolsLink = screen.getByRole("link", { name: /manage tools/i });
+    expect(manageToolsLink).toHaveAttribute("href", "/tools");
+
+    // In the ledger table, tool kind badge should not be in the table rows
+    const tableCells = screen.queryAllByRole("cell");
+    const cellTexts = tableCells.map((c) => c.textContent);
+    expect(cellTexts.some((t) => t?.includes("code_runner"))).toBe(false);
+  });
 });

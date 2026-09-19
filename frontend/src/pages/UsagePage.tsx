@@ -229,12 +229,23 @@ export function UsagePage() {
     return Array.from(map.values()).sort((a, b) => b.cost - a.cost);
   }, [data]);
 
-  // Filtered table rows
+  // Filtered table rows (excluding tool runs which are displayed in the dedicated Tools section below)
   const filteredRows = useMemo(() => {
     if (!data) return [];
-    if (!tableFilter.trim()) return data.totals;
+    const nonToolRows = data.totals.filter((t) => {
+      const lowerKind = t.kind.toLowerCase();
+      const lowerModel = t.model.toLowerCase();
+      return (
+        lowerKind !== "tool" &&
+        lowerModel !== "code_runner" &&
+        lowerModel !== "sandbox" &&
+        lowerModel !== "code_sandbox" &&
+        !lowerModel.startsWith("mcp_")
+      );
+    });
+    if (!tableFilter.trim()) return nonToolRows;
     const q = tableFilter.toLowerCase().trim();
-    return data.totals.filter((t) => {
+    return nonToolRows.filter((t) => {
       const friendlyName = formatEngineOrToolName(t.model).toLowerCase();
       return (
         friendlyName.includes(q) ||
@@ -304,10 +315,11 @@ export function UsagePage() {
     }
     const toolRows = data.totals.filter(
       (t) =>
-        t.kind === "tool" ||
+        t.kind.toLowerCase() === "tool" ||
         t.model.toLowerCase() === "code_runner" ||
         t.model.toLowerCase() === "sandbox" ||
-        t.model.toLowerCase() === "code_sandbox"
+        t.model.toLowerCase() === "code_sandbox" ||
+        t.model.toLowerCase().startsWith("mcp_")
     );
     const totalExecutions = toolRows.reduce((a, t) => a + t.requests, 0);
     const sandboxExecutions = toolRows
@@ -731,6 +743,139 @@ export function UsagePage() {
                         </table>
                       </div>
                     </Card>
+
+                    {/* Tools & Sandbox Overview (Placed after Activity Ledger) */}
+                    {(toolsOverview.totalExecutions > 0 || Boolean(data.tools)) && (
+                      <Card className="border border-border/80 bg-card/60 shadow-xs">
+                        <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-border/40">
+                          <div className="flex items-center gap-2">
+                            <Terminal className="size-4 text-emerald-500" />
+                            <div>
+                              <CardTitle className="text-sm font-semibold tracking-tight">
+                                Tools & Sandbox Overview
+                              </CardTitle>
+                              <CardDescription className="text-xs">
+                                Execution metrics for code sandbox and integrations
+                              </CardDescription>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Badge variant="secondary" className="font-mono text-[10px]">
+                              {toolsOverview.totalExecutions} {toolsOverview.totalExecutions === 1 ? "run" : "runs"}
+                            </Badge>
+                            <Button
+                              variant="ghost"
+                              size="xs"
+                              asChild
+                              className="h-7 text-xs text-muted-foreground hover:text-foreground"
+                            >
+                              <Link to="/tools" className="flex items-center gap-1">
+                                <span>Manage tools</span>
+                                <span aria-hidden="true">&rarr;</span>
+                              </Link>
+                            </Button>
+                          </div>
+                        </CardHeader>
+                        <CardContent className="pt-4">
+                          {toolsOverview.totalExecutions === 0 ? (
+                            <p className="text-xs text-muted-foreground">No tool or sandbox executions in this period.</p>
+                          ) : (
+                            <div className="space-y-4">
+                              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                                <div className="rounded-lg border border-border/50 bg-muted/20 p-3 space-y-1">
+                                  <span className="text-[11px] font-medium text-muted-foreground">Total Runs</span>
+                                  <div className="text-xl font-bold font-mono text-foreground">
+                                    {toolsOverview.totalExecutions.toLocaleString()}
+                                  </div>
+                                  <p className="text-[10px] text-muted-foreground">All tool calls</p>
+                                </div>
+
+                                <div className="rounded-lg border border-border/50 bg-muted/20 p-3 space-y-1">
+                                  <span className="text-[11px] font-medium text-muted-foreground">Code Sandbox</span>
+                                  <div className="text-xl font-bold font-mono text-foreground">
+                                    {toolsOverview.sandboxExecutions.toLocaleString()}
+                                  </div>
+                                  <p className="text-[10px] text-muted-foreground">Calculations & code</p>
+                                </div>
+
+                                <div className="rounded-lg border border-border/50 bg-muted/20 p-3 space-y-1">
+                                  <span className="text-[11px] font-medium text-muted-foreground">Success Rate</span>
+                                  <div className="text-xl font-bold font-mono text-foreground">
+                                    {toolsOverview.successRate}%
+                                  </div>
+                                  <p className="text-[10px] text-muted-foreground">Execution reliability</p>
+                                </div>
+
+                                <div className="rounded-lg border border-border/50 bg-muted/20 p-3 space-y-1">
+                                  <span className="text-[11px] font-medium text-muted-foreground">Avg Latency</span>
+                                  <div className="text-xl font-bold font-mono text-foreground">
+                                    {toolsOverview.avgDurationMs > 0 ? `${toolsOverview.avgDurationMs}ms` : "—"}
+                                  </div>
+                                  <p className="text-[10px] text-muted-foreground">Response duration</p>
+                                </div>
+                              </div>
+
+                              {/* Breakdown by tool */}
+                              {toolsOverview.byTool && toolsOverview.byTool.length > 0 && (
+                                <div className="space-y-2 pt-2 border-t border-border/30">
+                                  <div className="flex items-center justify-between">
+                                    <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+                                      Executions by Tool
+                                    </span>
+                                    <span className="text-[11px] text-muted-foreground font-mono">
+                                      {toolsOverview.byTool.length} {toolsOverview.byTool.length === 1 ? "tool" : "tools"} used
+                                    </span>
+                                  </div>
+                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                    {toolsOverview.byTool.map((tc) => {
+                                      const pct =
+                                        toolsOverview.totalExecutions > 0
+                                          ? (tc.count / toolsOverview.totalExecutions) * 100
+                                          : 0;
+                                      const toolDisplayName = formatEngineOrToolName(tc.toolName);
+                                      return (
+                                        <div
+                                          key={tc.toolName}
+                                          className="flex items-center justify-between rounded-lg border border-border/60 bg-muted/20 p-2.5 hover:bg-muted/40 transition-colors"
+                                        >
+                                          <div className="flex items-center gap-2 min-w-0 flex-1 pr-2">
+                                            <div className="flex size-6 items-center justify-center rounded-md bg-muted/80 shrink-0">
+                                              {getEngineIcon(tc.toolName, "tool")}
+                                            </div>
+                                            <div className="min-w-0 flex-1">
+                                              <div
+                                                className="font-mono text-[11px] font-medium text-foreground truncate"
+                                                title={toolDisplayName}
+                                              >
+                                                {toolDisplayName}
+                                              </div>
+                                              <div className="h-1 w-24 overflow-hidden rounded-full bg-muted/60 mt-1">
+                                                <div
+                                                  className="h-full rounded-full bg-emerald-500/80 transition-all duration-300"
+                                                  style={{ width: `${Math.max(pct, 4)}%` }}
+                                                />
+                                              </div>
+                                            </div>
+                                          </div>
+                                          <div className="flex items-center gap-1.5 shrink-0 font-mono">
+                                            <Badge variant="secondary" className="px-1.5 py-0.5 text-[10px] font-mono">
+                                              {tc.count} {tc.count === 1 ? "run" : "runs"}
+                                            </Badge>
+                                            <span className="text-[10px] text-muted-foreground w-9 text-right">
+                                              {pct.toFixed(0)}%
+                                            </span>
+                                          </div>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </CardContent>
+                      </Card>
+                    )}
                   </div>
 
                   {/* SIDE PANEL (4 cols) */}
@@ -889,93 +1034,6 @@ export function UsagePage() {
                                 </div>
                                 <p className="text-[10px] text-muted-foreground">Daily average</p>
                               </div>
-                            </div>
-                          )}
-                        </CardContent>
-                      </Card>
-                    )}
-
-                    {/* Tools & Sandbox Overview */}
-                    {(toolsOverview.totalExecutions > 0 || Boolean(data.tools)) && (
-                      <Card className="border border-border/80 bg-card/60 shadow-xs">
-                        <CardHeader className="pb-3 border-b border-border/40">
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-2">
-                              <Terminal className="size-4 text-emerald-500" />
-                              <CardTitle className="text-sm font-semibold tracking-tight">
-                                Tools & Sandbox Overview
-                              </CardTitle>
-                            </div>
-                            <Badge variant="secondary" className="font-mono text-[10px]">
-                              {toolsOverview.totalExecutions} {toolsOverview.totalExecutions === 1 ? "run" : "runs"}
-                            </Badge>
-                          </div>
-                          <CardDescription className="text-xs">
-                            Execution metrics for code sandbox and integrations
-                          </CardDescription>
-                        </CardHeader>
-                        <CardContent className="pt-4">
-                          {toolsOverview.totalExecutions === 0 ? (
-                            <p className="text-xs text-muted-foreground">No tool or sandbox executions in this period.</p>
-                          ) : (
-                            <div className="space-y-3">
-                              <div className="grid grid-cols-2 gap-2.5">
-                                <div className="rounded-lg border border-border/50 bg-muted/20 p-3 space-y-1">
-                                  <span className="text-[11px] font-medium text-muted-foreground">Total Runs</span>
-                                  <div className="text-xl font-bold font-mono text-foreground">
-                                    {toolsOverview.totalExecutions.toLocaleString()}
-                                  </div>
-                                  <p className="text-[10px] text-muted-foreground">All tool calls</p>
-                                </div>
-
-                                <div className="rounded-lg border border-border/50 bg-muted/20 p-3 space-y-1">
-                                  <span className="text-[11px] font-medium text-muted-foreground">Code Sandbox</span>
-                                  <div className="text-xl font-bold font-mono text-foreground">
-                                    {toolsOverview.sandboxExecutions.toLocaleString()}
-                                  </div>
-                                  <p className="text-[10px] text-muted-foreground">Calculations & code</p>
-                                </div>
-
-                                <div className="rounded-lg border border-border/50 bg-muted/20 p-3 space-y-1">
-                                  <span className="text-[11px] font-medium text-muted-foreground">Success Rate</span>
-                                  <div className="text-xl font-bold font-mono text-foreground">
-                                    {toolsOverview.successRate}%
-                                  </div>
-                                  <p className="text-[10px] text-muted-foreground">Execution reliability</p>
-                                </div>
-
-                                <div className="rounded-lg border border-border/50 bg-muted/20 p-3 space-y-1">
-                                  <span className="text-[11px] font-medium text-muted-foreground">Avg Latency</span>
-                                  <div className="text-xl font-bold font-mono text-foreground">
-                                    {toolsOverview.avgDurationMs > 0 ? `${toolsOverview.avgDurationMs}ms` : "—"}
-                                  </div>
-                                  <p className="text-[10px] text-muted-foreground">Response duration</p>
-                                </div>
-                              </div>
-
-                              {/* Breakdown by tool (just numbers) */}
-                              {toolsOverview.byTool && toolsOverview.byTool.length > 0 && (
-                                <div className="space-y-1.5 pt-2 border-t border-border/30">
-                                  <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
-                                    Executions by Tool
-                                  </span>
-                                  <div className="flex flex-wrap gap-1.5">
-                                    {toolsOverview.byTool.map((tc) => (
-                                      <div
-                                        key={tc.toolName}
-                                        className="flex items-center gap-1.5 rounded-md border border-border/60 bg-muted/40 px-2 py-1 text-xs"
-                                      >
-                                        <span className="font-mono text-[11px] text-foreground font-medium">
-                                          {formatEngineOrToolName(tc.toolName)}
-                                        </span>
-                                        <Badge variant="secondary" className="px-1 py-0 text-[9px] font-mono h-3.5">
-                                          {tc.count}
-                                        </Badge>
-                                      </div>
-                                    ))}
-                                  </div>
-                                </div>
-                              )}
                             </div>
                           )}
                         </CardContent>
