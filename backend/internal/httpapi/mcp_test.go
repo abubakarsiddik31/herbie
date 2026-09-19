@@ -364,3 +364,84 @@ func TestMCPServerAppLinking(t *testing.T) {
 		t.Fatalf("expected appId 'slack', got %v", updateResp.Server.AppID)
 	}
 }
+
+func TestMCPCatalogOneClick(t *testing.T) {
+	store := newFakeMCPServerStore()
+	handler, token := newMCPTestServer(t, store)
+
+	// 1. List Catalog
+	req := httptest.NewRequest(http.MethodGet, "/api/mcp/catalog", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var catResp struct {
+		Catalog []mcp.CatalogApp `json:"catalog"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &catResp)
+	if len(catResp.Catalog) < 4 {
+		t.Fatalf("expected at least 4 catalog apps, got %d", len(catResp.Catalog))
+	}
+	for _, app := range catResp.Catalog {
+		if app.ID == "github" && app.Connected {
+			t.Fatal("expected github to initially be disconnected")
+		}
+	}
+
+	// 2. 1-Click Link GitHub
+	req = httptest.NewRequest(http.MethodPost, "/api/mcp/catalog/github/link", bytes.NewReader([]byte(`{"token":"ghp_123"}`)))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// 3. Query catalog again
+	req = httptest.NewRequest(http.MethodGet, "/api/mcp/catalog", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	_ = json.Unmarshal(rec.Body.Bytes(), &catResp)
+	var ghFound bool
+	for _, app := range catResp.Catalog {
+		if app.ID == "github" {
+			ghFound = true
+			if !app.Connected {
+				t.Fatal("expected github to be connected after 1-click link")
+			}
+		}
+	}
+	if !ghFound {
+		t.Fatal("github not found in catalog")
+	}
+
+	// 4. 1-Click Unlink GitHub
+	req = httptest.NewRequest(http.MethodPost, "/api/mcp/catalog/github/unlink", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// 5. Query catalog again
+	req = httptest.NewRequest(http.MethodGet, "/api/mcp/catalog", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	_ = json.Unmarshal(rec.Body.Bytes(), &catResp)
+	for _, app := range catResp.Catalog {
+		if app.ID == "github" && app.Connected {
+			t.Fatal("expected github to be disconnected after unlink")
+		}
+	}
+}

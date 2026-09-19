@@ -18,6 +18,7 @@ import {
   Power,
   Settings,
   ShieldCheck,
+  Sparkles,
   Sun,
   Trash2,
   User,
@@ -43,6 +44,7 @@ import { useDocuments } from "@/features/documents/useDocuments";
 import { useToolOAuthProviders, useWorkflows } from "@/features/workflows/useWorkflows";
 import { useMCPServers } from "@/features/mcp/useMCPServers";
 import { LinkAppDialog } from "@/features/mcp/LinkAppDialog";
+import { useLinkCatalogApp, useUnlinkCatalogApp } from "@/features/mcp/useMCPCatalog";
 
 export const MAX_INSTRUCTIONS_CHARS = 4000;
 export const MAX_MEMORY_CHARS = 1000;
@@ -87,6 +89,8 @@ export function SettingsDialog({ open, onOpenChange, defaultTab = "general" }: P
   const { data: workflows } = useWorkflows();
   const { data: mcpServers } = useMCPServers();
   const { data: docs } = useDocuments();
+  const linkCatalogApp = useLinkCatalogApp();
+  const unlinkCatalogApp = useUnlinkCatalogApp();
   const [linkAppDialogOpen, setLinkAppDialogOpen] = useState(false);
   const [linkAppInitialId, setLinkAppInitialId] = useState<string>("github");
 
@@ -425,8 +429,20 @@ export function SettingsDialog({ open, onOpenChange, defaultTab = "general" }: P
                 {/* 1-Click Apps & OAuth Section */}
                 <div className="space-y-2.5">
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-semibold text-foreground">Integrated Apps (@ mentions)</span>
-                    <span className="text-[10px] text-muted-foreground">Zero-setup tools</span>
+                    <div>
+                      <span className="text-xs font-semibold text-foreground">Integrated Apps & MCP Tools (@ mentions)</span>
+                      <p className="text-[11px] text-muted-foreground">1-Click connect curated integrations to your AI assistant.</p>
+                    </div>
+                    <Button
+                      size="xs"
+                      variant="outline"
+                      type="button"
+                      onClick={() => openLinkApp("github")}
+                      className="text-xs gap-1 border-purple-500/30 text-purple-600 dark:text-purple-400 hover:bg-purple-500/10"
+                    >
+                      <Sparkles className="size-3" />
+                      <span>MCP Directory</span>
+                    </Button>
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -459,12 +475,12 @@ export function SettingsDialog({ open, onOpenChange, defaultTab = "general" }: P
                             </Badge>
                             <Button
                               size="xs"
-                              variant="ghost"
+                              variant={isConnected ? "ghost" : "default"}
                               type="button"
-                              onClick={() => openLinkApp("google_calendar")}
-                              className="h-6 px-1.5 text-[10px] text-primary hover:bg-primary/10"
+                              onClick={() => isConnected ? unlinkCatalogApp.mutate("google_calendar") : linkCatalogApp.mutate({ appId: "google_calendar" })}
+                              className={cn("h-6 px-2 text-[10px]", isConnected ? "text-destructive hover:bg-destructive/10" : "bg-purple-600 hover:bg-purple-700 text-white")}
                             >
-                              {isConnected ? "Configure" : "Link"}
+                              {isConnected ? "Unlink" : "1-Click Link"}
                             </Button>
                           </div>
                         </div>
@@ -500,12 +516,12 @@ export function SettingsDialog({ open, onOpenChange, defaultTab = "general" }: P
                             </Badge>
                             <Button
                               size="xs"
-                              variant="ghost"
+                              variant={isConnected ? "ghost" : "default"}
                               type="button"
-                              onClick={() => openLinkApp("github")}
-                              className="h-6 px-1.5 text-[10px] text-primary hover:bg-primary/10"
+                              onClick={() => isConnected ? unlinkCatalogApp.mutate("github") : linkCatalogApp.mutate({ appId: "github" })}
+                              className={cn("h-6 px-2 text-[10px]", isConnected ? "text-destructive hover:bg-destructive/10" : "bg-purple-600 hover:bg-purple-700 text-white")}
                             >
-                              {isConnected ? "Configure" : "Link"}
+                              {isConnected ? "Unlink" : "1-Click Link"}
                             </Button>
                           </div>
                         </div>
@@ -541,12 +557,12 @@ export function SettingsDialog({ open, onOpenChange, defaultTab = "general" }: P
                             </Badge>
                             <Button
                               size="xs"
-                              variant="ghost"
+                              variant={isConnected ? "ghost" : "default"}
                               type="button"
-                              onClick={() => openLinkApp("slack")}
-                              className="h-6 px-1.5 text-[10px] text-primary hover:bg-primary/10"
+                              onClick={() => isConnected ? unlinkCatalogApp.mutate("slack") : linkCatalogApp.mutate({ appId: "slack" })}
+                              className={cn("h-6 px-2 text-[10px]", isConnected ? "text-destructive hover:bg-destructive/10" : "bg-purple-600 hover:bg-purple-700 text-white")}
                             >
-                              {isConnected ? "Configure" : "Link"}
+                              {isConnected ? "Unlink" : "1-Click Link"}
                             </Button>
                           </div>
                         </div>

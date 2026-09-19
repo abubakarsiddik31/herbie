@@ -24,6 +24,153 @@ type createMCPServerRequest struct {
 	Headers   map[string]string `json:"headers"`
 }
 
+func (s *Server) handleListMCPCatalog(w http.ResponseWriter, r *http.Request) {
+	userID, _ := userIDFrom(r.Context())
+	if userID == "" {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "login required")
+		return
+	}
+
+	catalog := make([]mcp.CatalogApp, len(mcp.DefaultCatalog))
+	copy(catalog, mcp.DefaultCatalog)
+
+	if s.deps.MCPServers != nil {
+		servers, _ := s.deps.MCPServers.List(r.Context(), userID)
+		for i, app := range catalog {
+			for _, srv := range servers {
+				if srv.Enabled && srv.AppID != nil && *srv.AppID == app.ID {
+					catalog[i].Connected = true
+					catalog[i].ConnectedAt = srv.UpdatedAt.UTC().Format(timeRFC3339)
+					catalog[i].ServerID = srv.ID
+					break
+				}
+			}
+		}
+	}
+
+	if s.deps.Workflows != nil {
+		for i, app := range catalog {
+			if !catalog[i].Connected && app.ID == "google_calendar" {
+				if s.hasCalendarCredential(r.Context(), userID) {
+					catalog[i].Connected = true
+				}
+			}
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"catalog": catalog})
+}
+
+type linkCatalogAppRequest struct {
+	Token string `json:"token,omitempty"`
+}
+
+func (s *Server) handleLinkCatalogApp(w http.ResponseWriter, r *http.Request) {
+	if s.deps.MCPServers == nil {
+		writeError(w, http.StatusNotImplemented, "not_implemented", "mcp servers not configured")
+		return
+	}
+	userID, _ := userIDFrom(r.Context())
+	if userID == "" {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "login required")
+		return
+	}
+	appID := strings.ToLower(r.PathValue("appId"))
+	app, found := mcp.GetCatalogApp(appID)
+	if !found {
+		writeError(w, http.StatusNotFound, "not_found", "app not found in catalog")
+		return
+	}
+
+	var req linkCatalogAppRequest
+	_ = json.NewDecoder(r.Body).Decode(&req)
+
+	headers := make(map[string]string)
+	if req.Token != "" {
+		headers["Authorization"] = "Bearer " + req.Token
+		headers["token"] = req.Token
+	}
+
+	_ = s.deps.MCPServers.UnlinkApp(r.Context(), appID, userID)
+
+	headersBytes, _ := json.Marshal(headers)
+	serverName := app.Name + " MCP"
+	internalURL := "internal://mcp/" + appID
+
+	srv, err := s.deps.MCPServers.Create(r.Context(), storage.MCPServer{
+		UserID:    userID,
+		Name:      serverName,
+		URL:       internalURL,
+		Transport: "http",
+		AppID:     &appID,
+		Enabled:   true,
+		Headers:   headersBytes,
+	})
+	if err != nil {
+		existing, errFind := s.deps.MCPServers.ByApp(r.Context(), appID, userID)
+		if errFind == nil {
+			existing.Enabled = true
+			existing.Headers = headersBytes
+			existing.AppID = &appID
+			srv, _ = s.deps.MCPServers.Update(r.Context(), existing)
+		} else {
+			writeError(w, http.StatusInternalServerError, "internal", "could not link app")
+			return
+		}
+	}
+
+	if s.deps.Audits != nil {
+		_ = s.deps.Audits.RecordToolAudit(r.Context(), storage.ToolAuditLog{
+			UserID:       userID,
+			CallerType:   "manual",
+			ToolName:     appID,
+			Action:       "mcp_link",
+			InputSummary: fmt.Sprintf("1-click linked %s MCP", app.Name),
+			Status:       "success",
+			DurationMs:   0,
+			CreatedAt:    time.Now(),
+		})
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "server": srv})
+}
+
+func (s *Server) handleUnlinkCatalogApp(w http.ResponseWriter, r *http.Request) {
+	if s.deps.MCPServers == nil {
+		writeError(w, http.StatusNotImplemented, "not_implemented", "mcp servers not configured")
+		return
+	}
+	userID, _ := userIDFrom(r.Context())
+	if userID == "" {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "login required")
+		return
+	}
+	appID := strings.ToLower(r.PathValue("appId"))
+
+	_ = s.deps.MCPServers.UnlinkApp(r.Context(), appID, userID)
+
+	if s.deps.Workflows != nil {
+		if cred, err := s.deps.Workflows.GetCredentialByProvider(r.Context(), userID, appID); err == nil && cred.ID != "" {
+			_ = s.deps.Workflows.DeleteCredential(r.Context(), cred.ID, userID)
+		}
+	}
+
+	if s.deps.Audits != nil {
+		_ = s.deps.Audits.RecordToolAudit(r.Context(), storage.ToolAuditLog{
+			UserID:       userID,
+			CallerType:   "manual",
+			ToolName:     appID,
+			Action:       "mcp_unlink",
+			InputSummary: fmt.Sprintf("unlinked %s app", appID),
+			Status:       "success",
+			DurationMs:   0,
+			CreatedAt:    time.Now(),
+		})
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
 func (s *Server) handleListMCPServers(w http.ResponseWriter, r *http.Request) {
 	if s.deps.MCPServers == nil {
 		writeJSON(w, http.StatusOK, map[string]any{"servers": []any{}})

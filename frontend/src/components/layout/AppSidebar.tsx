@@ -18,6 +18,7 @@ import {
   Search,
   Settings,
   Share2,
+  Terminal,
   Trash2,
   Workflow as WorkflowIcon,
   Wrench,
@@ -52,6 +53,7 @@ import { useToolOAuthProviders, useWorkflows } from "@/features/workflows/useWor
 import { useMCPServers } from "@/features/mcp/useMCPServers";
 import { MCPServersDialog } from "@/features/mcp/MCPServersDialog";
 import { LinkAppDialog } from "@/features/mcp/LinkAppDialog";
+import { useLinkCatalogApp, useUnlinkCatalogApp } from "@/features/mcp/useMCPCatalog";
 import { useSidebar } from "./SidebarContext";
 
 const GROUP_ORDER = ["Today", "Yesterday", "Previous 7 days", "Older"] as const;
@@ -102,6 +104,8 @@ export function AppSidebar() {
   const [linkAppInitialId, setLinkAppInitialId] = useState<string>("github");
   const [appsExpanded, setAppsExpanded] = useState(true);
   const deleteConversation = useDeleteConversation();
+  const linkCatalogApp = useLinkCatalogApp();
+  const unlinkCatalogApp = useUnlinkCatalogApp();
 
   const gcalProvider = oauthProviders?.find((p) => p.id === "google_calendar");
   const ghProvider = oauthProviders?.find((p) => p.id === "github");
@@ -110,6 +114,8 @@ export function AppSidebar() {
   const gcalConnected = gcalProvider?.connected;
   const ghConnected = ghProvider?.connected;
   const slackConnected = slackProvider?.connected;
+  const webFetchConnected = mcpServers?.some((s) => s.appId === "web_fetch" && s.enabled);
+  const codeRunnerConnected = mcpServers?.some((s) => s.appId === "code_runner" && s.enabled);
 
   function openLinkApp(appId: string) {
     setLinkAppInitialId(appId);
@@ -367,7 +373,7 @@ export function AppSidebar() {
                 <div className="flex w-full items-center justify-between rounded-md px-2 py-1 text-[11px] text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-foreground group">
                   <button
                     type="button"
-                    onClick={() => (gcalConnected ? handleTriggerApp("calendar") : openLinkApp("google_calendar"))}
+                    onClick={() => (gcalConnected ? handleTriggerApp("calendar") : linkCatalogApp.mutate({ appId: "google_calendar" }))}
                     className="flex items-center gap-2 min-w-0 flex-1 text-left"
                   >
                     <Calendar className="size-3 shrink-0 text-sky-500" />
@@ -385,18 +391,19 @@ export function AppSidebar() {
                         />
                         <button
                           type="button"
-                          onClick={(e) => { e.stopPropagation(); openLinkApp("google_calendar"); }}
-                          className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:text-foreground transition-opacity"
-                          title="Manage Calendar Connection"
+                          onClick={(e) => { e.stopPropagation(); unlinkCatalogApp.mutate("google_calendar"); }}
+                          className="opacity-0 group-hover:opacity-100 p-0.5 rounded text-muted-foreground hover:text-destructive transition-opacity"
+                          title="1-Click Unlink Calendar"
                         >
-                          <Wrench className="size-2.5" />
+                          <Trash2 className="size-2.5" />
                         </button>
                       </>
                     ) : (
                       <button
                         type="button"
-                        onClick={(e) => { e.stopPropagation(); openLinkApp("google_calendar"); }}
+                        onClick={(e) => { e.stopPropagation(); linkCatalogApp.mutate({ appId: "google_calendar" }); }}
                         className="px-1.5 py-0.5 text-[9px] font-medium rounded bg-purple-500/10 text-purple-600 dark:text-purple-400 hover:bg-purple-500/20 border border-purple-500/30 transition-colors"
+                        title="1-Click Link"
                       >
                         Link
                       </button>
@@ -408,7 +415,7 @@ export function AppSidebar() {
                 <div className="flex w-full items-center justify-between rounded-md px-2 py-1 text-[11px] text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-foreground group">
                   <button
                     type="button"
-                    onClick={() => (ghConnected ? handleTriggerApp("github") : openLinkApp("github"))}
+                    onClick={() => (ghConnected ? handleTriggerApp("github") : linkCatalogApp.mutate({ appId: "github" }))}
                     className="flex items-center gap-2 min-w-0 flex-1 text-left"
                   >
                     <GitBranch className="size-3 shrink-0 text-neutral-700 dark:text-neutral-300" />
@@ -426,18 +433,19 @@ export function AppSidebar() {
                         />
                         <button
                           type="button"
-                          onClick={(e) => { e.stopPropagation(); openLinkApp("github"); }}
-                          className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:text-foreground transition-opacity"
-                          title="Manage GitHub Connection"
+                          onClick={(e) => { e.stopPropagation(); unlinkCatalogApp.mutate("github"); }}
+                          className="opacity-0 group-hover:opacity-100 p-0.5 rounded text-muted-foreground hover:text-destructive transition-opacity"
+                          title="1-Click Unlink GitHub"
                         >
-                          <Wrench className="size-2.5" />
+                          <Trash2 className="size-2.5" />
                         </button>
                       </>
                     ) : (
                       <button
                         type="button"
-                        onClick={(e) => { e.stopPropagation(); openLinkApp("github"); }}
+                        onClick={(e) => { e.stopPropagation(); linkCatalogApp.mutate({ appId: "github" }); }}
                         className="px-1.5 py-0.5 text-[9px] font-medium rounded bg-purple-500/10 text-purple-600 dark:text-purple-400 hover:bg-purple-500/20 border border-purple-500/30 transition-colors"
+                        title="1-Click Link"
                       >
                         Link
                       </button>
@@ -449,7 +457,7 @@ export function AppSidebar() {
                 <div className="flex w-full items-center justify-between rounded-md px-2 py-1 text-[11px] text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-foreground group">
                   <button
                     type="button"
-                    onClick={() => (slackConnected ? handleTriggerApp("slack") : openLinkApp("slack"))}
+                    onClick={() => (slackConnected ? handleTriggerApp("slack") : linkCatalogApp.mutate({ appId: "slack" }))}
                     className="flex items-center gap-2 min-w-0 flex-1 text-left"
                   >
                     <MessageSquare className="size-3 shrink-0 text-emerald-500" />
@@ -467,18 +475,19 @@ export function AppSidebar() {
                         />
                         <button
                           type="button"
-                          onClick={(e) => { e.stopPropagation(); openLinkApp("slack"); }}
-                          className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:text-foreground transition-opacity"
-                          title="Manage Slack Connection"
+                          onClick={(e) => { e.stopPropagation(); unlinkCatalogApp.mutate("slack"); }}
+                          className="opacity-0 group-hover:opacity-100 p-0.5 rounded text-muted-foreground hover:text-destructive transition-opacity"
+                          title="1-Click Unlink Slack"
                         >
-                          <Wrench className="size-2.5" />
+                          <Trash2 className="size-2.5" />
                         </button>
                       </>
                     ) : (
                       <button
                         type="button"
-                        onClick={(e) => { e.stopPropagation(); openLinkApp("slack"); }}
+                        onClick={(e) => { e.stopPropagation(); linkCatalogApp.mutate({ appId: "slack" }); }}
                         className="px-1.5 py-0.5 text-[9px] font-medium rounded bg-purple-500/10 text-purple-600 dark:text-purple-400 hover:bg-purple-500/20 border border-purple-500/30 transition-colors"
+                        title="1-Click Link"
                       >
                         Link
                       </button>
@@ -502,18 +511,96 @@ export function AppSidebar() {
                   </div>
                 </button>
 
-                {/* MCP External Servers */}
+                {/* Web Reader & Fetch (MCP) */}
+                <div className="flex w-full items-center justify-between rounded-md px-2 py-1 text-[11px] text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-foreground group">
+                  <button
+                    type="button"
+                    onClick={() => (webFetchConnected ? handleTriggerApp("web_fetch") : linkCatalogApp.mutate({ appId: "web_fetch" }))}
+                    className="flex items-center gap-2 min-w-0 flex-1 text-left"
+                  >
+                    <Globe className="size-3 shrink-0 text-blue-500" />
+                    <span className="truncate">Web Reader</span>
+                  </button>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {webFetchConnected ? (
+                      <>
+                        <Badge variant="outline" className="text-[9px] font-mono px-1 py-0 h-3.5 border-emerald-500/30 text-emerald-600 dark:text-emerald-400">
+                          MCP
+                        </Badge>
+                        <span className="size-1.5 rounded-full bg-emerald-500" title="Connected" />
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); unlinkCatalogApp.mutate("web_fetch"); }}
+                          className="opacity-0 group-hover:opacity-100 p-0.5 rounded text-muted-foreground hover:text-destructive transition-opacity"
+                          title="1-Click Unlink"
+                        >
+                          <Trash2 className="size-2.5" />
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); linkCatalogApp.mutate({ appId: "web_fetch" }); }}
+                        className="px-1.5 py-0.5 text-[9px] font-medium rounded bg-purple-500/10 text-purple-600 dark:text-purple-400 hover:bg-purple-500/20 border border-purple-500/30 transition-colors"
+                        title="1-Click Link"
+                      >
+                        Link
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Code Sandbox (MCP) */}
+                <div className="flex w-full items-center justify-between rounded-md px-2 py-1 text-[11px] text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-foreground group">
+                  <button
+                    type="button"
+                    onClick={() => (codeRunnerConnected ? handleTriggerApp("code_runner") : linkCatalogApp.mutate({ appId: "code_runner" }))}
+                    className="flex items-center gap-2 min-w-0 flex-1 text-left"
+                  >
+                    <Terminal className="size-3 shrink-0 text-amber-500" />
+                    <span className="truncate">Code Sandbox</span>
+                  </button>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {codeRunnerConnected ? (
+                      <>
+                        <Badge variant="outline" className="text-[9px] font-mono px-1 py-0 h-3.5 border-emerald-500/30 text-emerald-600 dark:text-emerald-400">
+                          MCP
+                        </Badge>
+                        <span className="size-1.5 rounded-full bg-emerald-500" title="Connected" />
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); unlinkCatalogApp.mutate("code_runner"); }}
+                          className="opacity-0 group-hover:opacity-100 p-0.5 rounded text-muted-foreground hover:text-destructive transition-opacity"
+                          title="1-Click Unlink"
+                        >
+                          <Trash2 className="size-2.5" />
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); linkCatalogApp.mutate({ appId: "code_runner" }); }}
+                        className="px-1.5 py-0.5 text-[9px] font-medium rounded bg-purple-500/10 text-purple-600 dark:text-purple-400 hover:bg-purple-500/20 border border-purple-500/30 transition-colors"
+                        title="1-Click Link"
+                      >
+                        Link
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* All MCP Apps & Servers Directory */}
                 <button
                   type="button"
-                  onClick={() => setMcpDialogOpen(true)}
-                  className="flex w-full items-center justify-between rounded-md px-2 py-1 text-[11px] text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-foreground group"
+                  onClick={() => openLinkApp("github")}
+                  className="flex w-full items-center justify-between rounded-md px-2 py-1 text-[11px] text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-foreground group pt-1 border-t border-sidebar-border/40 mt-1"
                 >
                   <div className="flex items-center gap-2 min-w-0">
                     <Plug className="size-3 shrink-0 text-purple-500" />
-                    <span className="truncate">MCP Servers</span>
+                    <span className="truncate font-medium text-foreground">Explore MCP Directory</span>
                   </div>
-                  <Badge variant="outline" className="px-1 py-0 text-[9px] font-mono h-3.5">
-                    {mcpServers?.filter((s) => s.enabled).length ?? 0} active
+                  <Badge variant="outline" className="px-1 py-0 text-[9px] font-mono h-3.5 border-purple-500/30 text-purple-600 dark:text-purple-400">
+                    + Add
                   </Badge>
                 </button>
               </div>
