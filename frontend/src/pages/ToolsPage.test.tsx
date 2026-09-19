@@ -13,6 +13,9 @@ let mockTools: UserTool[] = [];
 
 const server = setupServer(
   http.get("*/api/tools", () => HttpResponse.json(mockTools)),
+  http.get("*/api/mcp/servers", () => HttpResponse.json({ servers: [] })),
+  http.post("*/api/mcp/catalog/:appId/link", () => HttpResponse.json({ ok: true })),
+  http.post("*/api/mcp/catalog/:appId/unlink", () => HttpResponse.json({ ok: true })),
   http.post("*/api/tools", async ({ request }) => {
     const body = (await request.json()) as Partial<UserTool>;
     const created: UserTool = {
@@ -203,5 +206,22 @@ describe("ToolsPage UI and UX", () => {
     expect(screen.getByText("Overview & Parameters")).toBeInTheDocument();
     expect(screen.getByText("Agent Schema")).toBeInTheDocument();
     expect(screen.getByText("cURL Example")).toBeInTheDocument();
+  });
+
+  it("displays Code Sandbox tool and allows searching for sandbox", async () => {
+    const user = userEvent.setup();
+    renderToolsPage();
+
+    // In My Tools, Code Sandbox is listed
+    await waitFor(() => {
+      expect(screen.getAllByText("Code Sandbox")[0]).toBeInTheDocument();
+    });
+
+    // In Template Directory, Code Sandbox is listed and searchable
+    await user.click(screen.getByRole("button", { name: /template directory/i }));
+    const templateSearch = screen.getByPlaceholderText(/search templates/i);
+    await user.type(templateSearch, "sandbox");
+
+    expect(screen.getAllByText("Code Sandbox")[0]).toBeInTheDocument();
   });
 });

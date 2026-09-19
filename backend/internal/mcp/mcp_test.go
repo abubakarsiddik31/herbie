@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -135,5 +136,36 @@ func TestMCPClient_ListAndCall(t *testing.T) {
 	}
 	if out != "row count: 42" {
 		t.Fatalf("unexpected output: %s", out)
+	}
+}
+
+func TestExecuteBuiltinTool_CodeRunner(t *testing.T) {
+	ctx := context.Background()
+
+	// 1. Math calculation
+	out, err := ExecuteBuiltinTool(ctx, nil, "code_runner", json.RawMessage(`{"expression":"10000 * (1 + 0.07)^15"}`), nil)
+	if err != nil {
+		t.Fatalf("code_runner math error: %v", err)
+	}
+	if !strings.Contains(out, "27590.315") && !strings.Contains(out, "27590.3") {
+		t.Fatalf("unexpected math result: %s", out)
+	}
+
+	// 2. Division by zero
+	out, err = ExecuteBuiltinTool(ctx, nil, "code_runner", json.RawMessage(`{"expression":"10 / 0"}`), nil)
+	if err != nil {
+		t.Fatalf("code_runner div zero error: %v", err)
+	}
+	if !strings.Contains(out, "executed in sandbox") {
+		t.Fatalf("unexpected div zero result: %s", out)
+	}
+
+	// 3. String expression
+	out, err = ExecuteBuiltinTool(ctx, nil, "code_runner", json.RawMessage(`{"expression":"formatDate(2026-09-19)"}`), nil)
+	if err != nil {
+		t.Fatalf("code_runner string error: %v", err)
+	}
+	if !strings.Contains(out, "executed in sandbox") {
+		t.Fatalf("unexpected string result: %s", out)
 	}
 }

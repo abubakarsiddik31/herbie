@@ -5,10 +5,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -16,6 +21,7 @@ import (
 var (
 	htmlTagRegex = regexp.MustCompile(`<[^>]*>`)
 	wsRegex      = regexp.MustCompile(`\s+`)
+	powerRegex   = regexp.MustCompile(`([a-zA-Z0-9_.]+|\([^\(\)]+\))\s*(?:\^|\*\*)\s*([a-zA-Z0-9_.]+|\([^\(\)]+\))`)
 )
 
 // CleanHTML extracts readable text from raw HTML body.
@@ -315,9 +321,148 @@ func ExecuteBuiltinTool(
 		if err := json.Unmarshal(args, &p); err != nil || strings.TrimSpace(p.Expression) == "" {
 			return "", fmt.Errorf("expression is required")
 		}
+		if res, err := EvalMathExpression(p.Expression); err == nil {
+			return fmt.Sprintf("Result: %g\nStatus: executed in sandbox.", res), nil
+		}
 		return fmt.Sprintf("Evaluated expression: %s\nStatus: executed in sandbox.", p.Expression), nil
 
 	default:
 		return "", fmt.Errorf("unsupported builtin mcp tool: %s", toolName)
 	}
+}
+
+// EvalMathExpression safely evaluates an arithmetic mathematical expression in memory.
+func EvalMathExpression(expr string) (float64, error) {
+	clean := strings.TrimSpace(expr)
+	clean = strings.TrimPrefix(clean, "=")
+	clean = strings.TrimSpace(clean)
+
+	for powerRegex.MatchString(clean) {
+		clean = powerRegex.ReplaceAllString(clean, "pow($1, $2)")
+	}
+
+	tr, err := parser.ParseExpr(clean)
+	if err != nil {
+		return 0, err
+	}
+	return evalMathNode(tr)
+}
+
+func evalMathNode(n ast.Node) (float64, error) {
+	switch v := n.(type) {
+	case *ast.BasicLit:
+		if v.Kind == token.INT || v.Kind == token.FLOAT {
+			return strconv.ParseFloat(v.Value, 64)
+		}
+		return 0, fmt.Errorf("unsupported literal %s", v.Value)
+	case *ast.ParenExpr:
+		return evalMathNode(v.X)
+	case *ast.UnaryExpr:
+		val, err := evalMathNode(v.X)
+		if err != nil {
+			return 0, err
+		}
+		if v.Op == token.SUB {
+			return -val, nil
+		}
+		if v.Op == token.ADD {
+			return val, nil
+		}
+		return 0, fmt.Errorf("unsupported unary operator %s", v.Op)
+	case *ast.BinaryExpr:
+		left, err := evalMathNode(v.X)
+		if err != nil {
+			return 0, err
+		}
+		right, err := evalMathNode(v.Y)
+		if err != nil {
+			return 0, err
+		}
+		switch v.Op {
+		case token.ADD:
+			return left + right, nil
+		case token.SUB:
+			return left - right, nil
+		case token.MUL:
+			return left * right, nil
+		case token.QUO:
+			if right == 0 {
+				return 0, fmt.Errorf("division by zero")
+			}
+			return left / right, nil
+		case token.REM:
+			return math.Mod(left, right), nil
+		case token.XOR:
+			return math.Pow(left, right), nil
+		default:
+			return 0, fmt.Errorf("unsupported operator %s", v.Op)
+		}
+	case *ast.Ident:
+		switch strings.ToLower(v.Name) {
+		case "pi":
+			return math.Pi, nil
+		case "e":
+			return math.E, nil
+		}
+		return 0, fmt.Errorf("unknown identifier %s", v.Name)
+	case *ast.CallExpr:
+		fnIdent, ok := v.Fun.(*ast.Ident)
+		if !ok {
+			return 0, fmt.Errorf("unsupported function call")
+		}
+		fnName := strings.ToLower(fnIdent.Name)
+		args := make([]float64, len(v.Args))
+		for i, a := range v.Args {
+			val, err := evalMathNode(a)
+			if err != nil {
+				return 0, err
+			}
+			args[i] = val
+		}
+		switch fnName {
+		case "sqrt":
+			if len(args) != 1 {
+				return 0, fmt.Errorf("sqrt requires 1 argument")
+			}
+			return math.Sqrt(args[0]), nil
+		case "pow":
+			if len(args) != 2 {
+				return 0, fmt.Errorf("pow requires 2 arguments")
+			}
+			return math.Pow(args[0], args[1]), nil
+		case "abs":
+			if len(args) != 1 {
+				return 0, fmt.Errorf("abs requires 1 argument")
+			}
+			return math.Abs(args[0]), nil
+		case "round":
+			if len(args) != 1 {
+				return 0, fmt.Errorf("round requires 1 argument")
+			}
+			return math.Round(args[0]), nil
+		case "floor":
+			if len(args) != 1 {
+				return 0, fmt.Errorf("floor requires 1 argument")
+			}
+			return math.Floor(args[0]), nil
+		case "ceil":
+			if len(args) != 1 {
+				return 0, fmt.Errorf("ceil requires 1 argument")
+			}
+			return math.Ceil(args[0]), nil
+		case "exp":
+			if len(args) != 1 {
+				return 0, fmt.Errorf("exp requires 1 argument")
+			}
+			return math.Exp(args[0]), nil
+		case "log":
+			if len(args) != 1 {
+				return 0, fmt.Errorf("log requires 1 argument")
+			}
+			return math.Log(args[0]), nil
+		default:
+			return 0, fmt.Errorf("unsupported function %s", fnName)
+		}
+	}
+	return 0, fmt.Errorf("unsupported expression")
 }

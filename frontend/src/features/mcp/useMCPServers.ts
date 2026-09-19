@@ -30,7 +30,7 @@ export function useMCPServers() {
     queryKey: ["mcp-servers"],
     queryFn: async () => {
       const res = await apiFetch<{ servers: MCPServer[] }>("/api/mcp/servers");
-      return res.servers;
+      return res?.servers ?? [];
     },
   });
 }
