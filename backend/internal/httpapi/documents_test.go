@@ -318,7 +318,7 @@ func TestDeleteDocument(t *testing.T) {
 	if len(fv.deleted) != 1 || fv.deleted[0] != "d1" {
 		t.Fatalf("vector deletes: %v", fv.deleted)
 	}
-	if len(fo.deleted) != 1 || fo.deleted[0] != "u-1/d1/a.txt" {
+	if len(fo.deleted) != 2 || fo.deleted[0] != "u-1/d1/a.txt" || fo.deleted[1] != "u-1/d1/parsed.md" {
 		t.Fatalf("object deletes: %v", fo.deleted)
 	}
 	if len(docs.deleted) != 1 || docs.deleted[0] != "d1" {

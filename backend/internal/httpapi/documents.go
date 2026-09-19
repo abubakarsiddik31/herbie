@@ -218,6 +218,7 @@ func (s *Server) handleDeleteDocument(w http.ResponseWriter, r *http.Request) {
 		if err := s.deps.Objects.Delete(r.Context(), doc.ObjectKey); err != nil {
 			s.deps.Log.Error("object delete failed", "key", doc.ObjectKey, "err", err)
 		}
+		_ = s.deps.Objects.Delete(r.Context(), rag.ParsedObjectKey(userID, docID))
 	}
 	if err := s.deps.Docs.Delete(r.Context(), docID, userID); err != nil {
 		writeError(w, http.StatusInternalServerError, "internal", "could not delete document")
@@ -248,13 +249,27 @@ func (s *Server) handleGetDocumentContent(w http.ResponseWriter, r *http.Request
 	}
 
 	var text string
-	if s.deps.Objects != nil && doc.ObjectKey != "" {
-		obj, err := s.deps.Objects.Get(r.Context(), doc.ObjectKey)
-		if err == nil && obj != nil {
-			defer obj.Close()
-			extracted, err := rag.ExtractTextWithFilename(doc.Mime, doc.Filename, obj)
-			if err == nil {
-				text = extracted
+	if s.deps.Objects != nil {
+		// 1. Check MinIO bucket for cached parsed markdown
+		parsedKey := rag.ParsedObjectKey(userID, docID)
+		if obj, err := s.deps.Objects.Get(r.Context(), parsedKey); err == nil && obj != nil {
+			b, readErr := io.ReadAll(obj)
+			_ = obj.Close()
+			if readErr == nil && len(b) > 0 {
+				text = string(b)
+			}
+		}
+
+		// 2. If not yet in MinIO, extract from original file and save parsed.md to MinIO
+		if text == "" && doc.ObjectKey != "" {
+			obj, err := s.deps.Objects.Get(r.Context(), doc.ObjectKey)
+			if err == nil && obj != nil {
+				defer obj.Close()
+				extracted, err := rag.ExtractTextWithFilename(doc.Mime, doc.Filename, obj)
+				if err == nil && extracted != "" {
+					text = extracted
+					_ = s.deps.Objects.Put(r.Context(), parsedKey, "text/markdown", strings.NewReader(text), int64(len(text)))
+				}
 			}
 		}
 	}
