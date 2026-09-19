@@ -50,11 +50,24 @@ export interface SearchAnalysis {
   recent: SearchQueryItem[];
   topQueries: SearchQueryCount[];
 }
+export interface ToolCount {
+  toolName: string;
+  count: number;
+}
+export interface ToolAnalysis {
+  totalExecutions: number;
+  sandboxExecutions: number;
+  successCount: number;
+  failedCount: number;
+  avgDurationMs: number;
+  byTool: ToolCount[];
+}
 export interface UsageSummary {
   totals: UsageTotalsRow[];
   daily: UsageDailyRow[];
   documents?: UsageDocumentRow[];
   searches?: SearchAnalysis;
+  tools?: ToolAnalysis;
 }
 
 export interface ToolParam {

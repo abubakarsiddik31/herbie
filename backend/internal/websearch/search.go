@@ -222,11 +222,11 @@ func (w *wigoloSearcher) searchHTTP(ctx context.Context, query string) ([]Result
 	payload, err := json.Marshal(map[string]any{
 		"query":                 query,
 		"max_results":           5,
-		"include_content":       true,
-		"max_tokens_out":        25000,
-		"content_max_chars":     100000,
-		"max_total_chars":       400000,
-		"include_full_markdown": true,
+		"include_content":       false,
+		"max_tokens_out":        4000,
+		"content_max_chars":     4000,
+		"max_total_chars":       20000,
+		"include_full_markdown": false,
 	})
 	if err != nil {
 		return nil, err
@@ -272,14 +272,16 @@ func (w *wigoloSearcher) searchHTTP(ctx context.Context, query string) ([]Result
 
 	results := make([]Result, 0, len(resp.Results))
 	for _, r := range resp.Results {
-		snip := r.Snippet
-		if r.Markdown != "" && len(r.Markdown) > len(snip) {
-			snip = r.Markdown
-		} else if r.Content != "" && len(r.Content) > len(snip) {
-			snip = r.Content
+		snip := strings.TrimSpace(r.Snippet)
+		if snip == "" {
+			if r.Markdown != "" {
+				snip = strings.TrimSpace(r.Markdown)
+			} else if r.Content != "" {
+				snip = strings.TrimSpace(r.Content)
+			}
 		}
-		if len(snip) > 80000 {
-			snip = strings.TrimSpace(snip[:80000]) + "…"
+		if len(snip) > 2500 {
+			snip = strings.TrimSpace(snip[:2500]) + "…"
 		}
 		results = append(results, Result{
 			Title:   r.Title,

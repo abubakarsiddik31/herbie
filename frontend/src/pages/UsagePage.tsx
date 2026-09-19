@@ -26,12 +26,14 @@ import {
   RotateCw,
   Search,
   Sidebar,
+  Terminal,
   TrendingUp,
+  Wrench,
   Zap,
 } from "lucide-react";
 import { ApiError, apiFetch } from "@/lib/api";
 import type { UsageSummary } from "@/lib/types";
-import { kindDescription, kindLabel } from "@/lib/usageKinds";
+import { formatEngineOrToolName, kindDescription, kindLabel } from "@/lib/usageKinds";
 import { useSidebar } from "@/components/layout/SidebarContext";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -76,6 +78,8 @@ function getKindBadgeClass(kind: string): string {
       return "border-sky-500/30 bg-sky-500/10 text-sky-600 dark:text-sky-400";
     case "document_search":
       return "border-teal-500/30 bg-teal-500/10 text-teal-600 dark:text-teal-400";
+    case "tool":
+      return "border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400";
     default:
       return "border-border bg-muted/60 text-muted-foreground";
   }
@@ -95,9 +99,29 @@ function getKindBarColor(kind: string): string {
       return "#0284c7";
     case "document_search":
       return "#0d9488";
+    case "tool":
+      return "#10b981";
     default:
       return "#6b7280";
   }
+}
+
+function getEngineIcon(name: string, kind?: string) {
+  const lower = (name || "").toLowerCase();
+  const k = (kind || "").toLowerCase();
+  if (k === "web_search" || lower === "web_search" || lower === "wigolo") {
+    return <Globe className="size-3 text-sky-500 shrink-0" />;
+  }
+  if (lower === "code_runner" || lower === "sandbox" || lower === "code_sandbox") {
+    return <Terminal className="size-3 text-emerald-500 shrink-0" />;
+  }
+  if (lower.includes("calendar")) {
+    return <Calendar className="size-3 text-amber-500 shrink-0" />;
+  }
+  if (k === "tool" || lower.startsWith("mcp_") || lower.includes("tool")) {
+    return <Wrench className="size-3 text-emerald-500 shrink-0" />;
+  }
+  return <Cpu className="size-3 text-muted-foreground shrink-0" />;
 }
 
 interface StatCardProps {
@@ -177,12 +201,23 @@ export function UsagePage() {
     return Array.from(map.values()).sort((a, b) => b.cost - a.cost);
   }, [data]);
 
-  // Breakdown by model (excludes web search engines like wigolo)
+  // Breakdown by model (excludes web search engines and tools like code sandbox)
   const modelBreakdown = useMemo(() => {
     if (!data) return [];
     const map = new Map<string, { model: string; cost: number; requests: number; tokens: number }>();
     for (const t of data.totals) {
-      if (t.kind === "web_search" || t.model.toLowerCase() === "wigolo" || t.model.toLowerCase() === "web_search") {
+      const lowerModel = t.model.toLowerCase();
+      const lowerKind = t.kind.toLowerCase();
+      if (
+        lowerKind === "web_search" ||
+        lowerKind === "tool" ||
+        lowerModel === "wigolo" ||
+        lowerModel === "web_search" ||
+        lowerModel === "code_runner" ||
+        lowerModel === "sandbox" ||
+        lowerModel === "code_sandbox" ||
+        lowerModel.startsWith("mcp_")
+      ) {
         continue;
       }
       const cur = map.get(t.model) || { model: t.model, cost: 0, requests: 0, tokens: 0 };
@@ -200,10 +235,10 @@ export function UsagePage() {
     if (!tableFilter.trim()) return data.totals;
     const q = tableFilter.toLowerCase().trim();
     return data.totals.filter((t) => {
-      const isWebSearch = t.kind === "web_search" || t.model.toLowerCase() === "wigolo" || t.model.toLowerCase() === "web_search";
-      const modelDisplayName = isWebSearch ? "web search" : t.model.toLowerCase();
+      const friendlyName = formatEngineOrToolName(t.model).toLowerCase();
       return (
-        modelDisplayName.includes(q) ||
+        friendlyName.includes(q) ||
+        t.model.toLowerCase().includes(q) ||
         t.kind.toLowerCase().includes(q) ||
         kindLabel(t.kind).toLowerCase().includes(q)
       );
@@ -241,7 +276,62 @@ export function UsagePage() {
     };
   }, [data, days]);
 
-  const hasUsage = data && (data.totals.length > 0 || data.daily.length > 0 || ((data.searches?.webQueries ?? 0) > 0));
+  // Code Sandbox & Tools numeric overview
+  const toolsOverview = useMemo(() => {
+    if (data?.tools && (data.tools.totalExecutions > 0 || data.tools.byTool?.length > 0)) {
+      const totalExecutions = data.tools.totalExecutions;
+      const sandboxExecutions = data.tools.sandboxExecutions;
+      const successCount = data.tools.successCount;
+      const successRate = totalExecutions > 0 ? Math.round((successCount / totalExecutions) * 100) : 100;
+      const avgDurationMs = data.tools.avgDurationMs;
+      const byTool = data.tools.byTool || [];
+      return {
+        totalExecutions,
+        sandboxExecutions,
+        successRate,
+        avgDurationMs,
+        byTool,
+      };
+    }
+    if (!data?.totals) {
+      return {
+        totalExecutions: 0,
+        sandboxExecutions: 0,
+        successRate: 100,
+        avgDurationMs: 0,
+        byTool: [] as { toolName: string; count: number }[],
+      };
+    }
+    const toolRows = data.totals.filter(
+      (t) =>
+        t.kind === "tool" ||
+        t.model.toLowerCase() === "code_runner" ||
+        t.model.toLowerCase() === "sandbox" ||
+        t.model.toLowerCase() === "code_sandbox"
+    );
+    const totalExecutions = toolRows.reduce((a, t) => a + t.requests, 0);
+    const sandboxExecutions = toolRows
+      .filter((t) => t.model.toLowerCase().includes("code") || t.model.toLowerCase().includes("sandbox"))
+      .reduce((a, t) => a + t.requests, 0);
+    const byTool = toolRows.map((t) => ({
+      toolName: formatEngineOrToolName(t.model),
+      count: t.requests,
+    }));
+    return {
+      totalExecutions,
+      sandboxExecutions,
+      successRate: 100,
+      avgDurationMs: 0,
+      byTool,
+    };
+  }, [data]);
+
+  const hasUsage =
+    data &&
+    (data.totals.length > 0 ||
+      data.daily.length > 0 ||
+      ((data.searches?.webQueries ?? 0) > 0) ||
+      toolsOverview.totalExecutions > 0);
 
   return (
     <div className="flex h-full flex-col bg-background">
@@ -597,19 +687,14 @@ export function UsagePage() {
                             ) : (
                               filteredRows.map((t) => {
                                 const sharePct = totals.cost > 0 ? (t.costUsd / totals.cost) * 100 : 0;
-                                const isWebSearch = t.kind === "web_search" || t.model.toLowerCase() === "wigolo" || t.model.toLowerCase() === "web_search";
-                                const modelDisplayName = isWebSearch ? "Web Search" : t.model;
+                                const modelDisplayName = formatEngineOrToolName(t.model);
                                 return (
                                   <tr
                                     key={`${t.kind}:${t.model}`}
                                     className="hover:bg-muted/30 transition-colors"
                                   >
                                     <td className="px-4 py-2.5 font-medium text-foreground flex items-center gap-1.5">
-                                      {isWebSearch ? (
-                                        <Globe className="size-3 text-sky-500 shrink-0" />
-                                      ) : (
-                                        <Cpu className="size-3 text-muted-foreground shrink-0" />
-                                      )}
+                                      {getEngineIcon(t.model, t.kind)}
                                       <span className="font-mono text-[11px] truncate max-w-[140px] sm:max-w-[200px]">
                                         {modelDisplayName}
                                       </span>
@@ -804,6 +889,93 @@ export function UsagePage() {
                                 </div>
                                 <p className="text-[10px] text-muted-foreground">Daily average</p>
                               </div>
+                            </div>
+                          )}
+                        </CardContent>
+                      </Card>
+                    )}
+
+                    {/* Tools & Sandbox Overview */}
+                    {(toolsOverview.totalExecutions > 0 || Boolean(data.tools)) && (
+                      <Card className="border border-border/80 bg-card/60 shadow-xs">
+                        <CardHeader className="pb-3 border-b border-border/40">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <Terminal className="size-4 text-emerald-500" />
+                              <CardTitle className="text-sm font-semibold tracking-tight">
+                                Tools & Sandbox Overview
+                              </CardTitle>
+                            </div>
+                            <Badge variant="secondary" className="font-mono text-[10px]">
+                              {toolsOverview.totalExecutions} {toolsOverview.totalExecutions === 1 ? "run" : "runs"}
+                            </Badge>
+                          </div>
+                          <CardDescription className="text-xs">
+                            Execution metrics for code sandbox and integrations
+                          </CardDescription>
+                        </CardHeader>
+                        <CardContent className="pt-4">
+                          {toolsOverview.totalExecutions === 0 ? (
+                            <p className="text-xs text-muted-foreground">No tool or sandbox executions in this period.</p>
+                          ) : (
+                            <div className="space-y-3">
+                              <div className="grid grid-cols-2 gap-2.5">
+                                <div className="rounded-lg border border-border/50 bg-muted/20 p-3 space-y-1">
+                                  <span className="text-[11px] font-medium text-muted-foreground">Total Runs</span>
+                                  <div className="text-xl font-bold font-mono text-foreground">
+                                    {toolsOverview.totalExecutions.toLocaleString()}
+                                  </div>
+                                  <p className="text-[10px] text-muted-foreground">All tool calls</p>
+                                </div>
+
+                                <div className="rounded-lg border border-border/50 bg-muted/20 p-3 space-y-1">
+                                  <span className="text-[11px] font-medium text-muted-foreground">Code Sandbox</span>
+                                  <div className="text-xl font-bold font-mono text-foreground">
+                                    {toolsOverview.sandboxExecutions.toLocaleString()}
+                                  </div>
+                                  <p className="text-[10px] text-muted-foreground">Calculations & code</p>
+                                </div>
+
+                                <div className="rounded-lg border border-border/50 bg-muted/20 p-3 space-y-1">
+                                  <span className="text-[11px] font-medium text-muted-foreground">Success Rate</span>
+                                  <div className="text-xl font-bold font-mono text-foreground">
+                                    {toolsOverview.successRate}%
+                                  </div>
+                                  <p className="text-[10px] text-muted-foreground">Execution reliability</p>
+                                </div>
+
+                                <div className="rounded-lg border border-border/50 bg-muted/20 p-3 space-y-1">
+                                  <span className="text-[11px] font-medium text-muted-foreground">Avg Latency</span>
+                                  <div className="text-xl font-bold font-mono text-foreground">
+                                    {toolsOverview.avgDurationMs > 0 ? `${toolsOverview.avgDurationMs}ms` : "—"}
+                                  </div>
+                                  <p className="text-[10px] text-muted-foreground">Response duration</p>
+                                </div>
+                              </div>
+
+                              {/* Breakdown by tool (just numbers) */}
+                              {toolsOverview.byTool && toolsOverview.byTool.length > 0 && (
+                                <div className="space-y-1.5 pt-2 border-t border-border/30">
+                                  <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+                                    Executions by Tool
+                                  </span>
+                                  <div className="flex flex-wrap gap-1.5">
+                                    {toolsOverview.byTool.map((tc) => (
+                                      <div
+                                        key={tc.toolName}
+                                        className="flex items-center gap-1.5 rounded-md border border-border/60 bg-muted/40 px-2 py-1 text-xs"
+                                      >
+                                        <span className="font-mono text-[11px] text-foreground font-medium">
+                                          {formatEngineOrToolName(tc.toolName)}
+                                        </span>
+                                        <Badge variant="secondary" className="px-1 py-0 text-[9px] font-mono h-3.5">
+                                          {tc.count}
+                                        </Badge>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
                             </div>
                           )}
                         </CardContent>

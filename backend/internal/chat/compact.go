@@ -57,6 +57,9 @@ func EstimateHistoryTokens(msgs []model.Message) int {
 		for _, p := range m.Parts {
 			n += len(p.Data)
 		}
+		for _, tc := range m.ToolCalls {
+			n += len(tc.Name) + len(tc.Args)
+		}
 		total += n/4 + 40
 	}
 	return total
@@ -66,7 +69,11 @@ func EstimateHistoryTokens(msgs []model.Message) int {
 func EstimateStorageTokens(msgs []storage.Message) int {
 	total := 0
 	for _, m := range msgs {
-		total += len(m.Content)/4 + 40
+		n := len(m.Content)
+		if n == 0 && len(m.Data) > 0 {
+			n = len(m.Data)
+		}
+		total += n/4 + 40
 	}
 	return total
 }

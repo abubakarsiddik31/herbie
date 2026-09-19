@@ -77,6 +77,17 @@ const mockUsageData = {
       { query: "latest AI news", count: 3 },
     ],
   },
+  tools: {
+    totalExecutions: 8,
+    sandboxExecutions: 6,
+    successCount: 8,
+    failedCount: 0,
+    avgDurationMs: 95,
+    byTool: [
+      { toolName: "code_runner", count: 6 },
+      { toolName: "google_calendar", count: 2 },
+    ],
+  },
 };
 
 let requestedDays = 30;
@@ -202,7 +213,7 @@ describe("UsagePage", () => {
     expect(screen.getAllByText("10 searches").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("Total Searches")).toBeInTheDocument();
     expect(screen.getByText("Avg Results")).toBeInTheDocument();
-    expect(screen.getByText("Avg Latency")).toBeInTheDocument();
+    expect(screen.getAllByText("Avg Latency").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("Searches / Day")).toBeInTheDocument();
 
     // Ensures details, rag queries, and internal provider 'wigolo' are not shown
@@ -211,5 +222,18 @@ describe("UsagePage", () => {
     expect(screen.queryByText("Recent AI Search Queries")).not.toBeInTheDocument();
     expect(screen.queryByText("Frequent Queries")).not.toBeInTheDocument();
     expect(screen.queryByText("wigolo")).not.toBeInTheDocument();
+  });
+
+  it("renders Tools & Sandbox Overview with numeric metrics and friendly tool names", async () => {
+    renderUsagePage();
+
+    expect(await screen.findByText("Tools & Sandbox Overview")).toBeInTheDocument();
+    expect(screen.getByText("8 runs")).toBeInTheDocument();
+    expect(screen.getByText("Total Runs")).toBeInTheDocument();
+    expect(screen.getAllByText("Code Sandbox").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText("Success Rate")).toBeInTheDocument();
+    expect(screen.getByText("100%")).toBeInTheDocument();
+    expect(screen.getByText("95ms")).toBeInTheDocument();
+    expect(screen.getByText("Google Calendar")).toBeInTheDocument();
   });
 });

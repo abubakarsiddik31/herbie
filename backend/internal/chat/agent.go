@@ -137,12 +137,18 @@ const webSearchGuidance = `
 
 You have a web_search tool to search the live web. Call it whenever the user asks about current events, breaking news, live data, or general external facts not present in your knowledge. Formulate clean, concise search keywords (do not include mention tags like "@web" in your query).
 
+PARALLEL MULTI-QUERY SEARCH (PREFERRED):
+- You can research multiple topics concurrently in a SINGLE call by passing the "queries" array:
+  e.g. {"query": "AI agents news 2025", "queries": ["OpenAI Operator agent", "Google Jarvis agent", "Anthropic Claude computer use"]}
+- All queries execute in parallel at the same time, giving you all the facts in one fast round. Always prefer a single parallel search call over multiple sequential calls!
+
 STRICT EXCLUSION FOR UPLOADED DOCUMENTS:
 - Do NOT use web_search if the user's request is asking to summarize, explain, or query an uploaded document, file, or workspace attachment. Use read_document and search_documents exclusively for files.
 
 Search budget & loop discipline:
-- Be concise and selective with searches: 1 to 3 targeted queries are usually plenty to answer even broad topics.
-- Do NOT run recursive or open-ended search loops. Once you have gathered sufficient key information or initial relevant results, STOP searching immediately and synthesize your final answer.
+- HARD BUDGET: Limit searching to 1 or at most 2 tool calls total per turn.
+- Do NOT run recursive or open-ended sequential search loops across minor sub-details.
+- Once you obtain initial search results, STOP searching immediately and synthesize your final answer using the retrieved facts.
 - Prioritize delivering a clear, well-structured answer with what you found rather than continuously searching for further sub-details.
 
 When answering based on web search results:

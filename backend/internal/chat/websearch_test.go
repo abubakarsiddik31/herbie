@@ -114,6 +114,28 @@ func TestWebSearchToolRecordsSearch(t *testing.T) {
 	}
 }
 
+func TestWebSearchToolParallelQueries(t *testing.T) {
+	mock := &mockSearcher{results: []websearch.Result{{Title: "Test", URL: "http://example.com", Snippet: "Test snippet"}}}
+	tl := WebSearchTool(mock, false)
+
+	recorded := []string{}
+	deps := Deps{
+		RecordSearch: func(_ context.Context, query, kind, _ string, _ int, _ int64) {
+			recorded = append(recorded, query)
+		},
+	}
+	res, err := tl.Exec(context.Background(), deps, json.RawMessage(`{"queries":["topic one","topic two"]}`))
+	if err != nil {
+		t.Fatalf("exec: %v", err)
+	}
+	if len(recorded) != 2 {
+		t.Fatalf("expected 2 recorded queries, got %d", len(recorded))
+	}
+	if !strings.Contains(res.Text, "Topic: \"topic one\"") || !strings.Contains(res.Text, "Topic: \"topic two\"") {
+		t.Fatalf("missing topic headers: %s", res.Text)
+	}
+}
+
 func TestWebSearchGuidanceAppended(t *testing.T) {
 	spec := RunSpec{SystemPrompt: "base"}
 	got := promptFor(spec, []tool.Tool[Deps]{WebSearchTool(nil, false)})

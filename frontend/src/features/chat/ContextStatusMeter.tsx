@@ -154,6 +154,11 @@ export function ContextStatusMeter({
                   ✓ Older context has been compacted into a concise summary to preserve performance.
                 </div>
               )}
+
+              <div className="pt-2 border-t border-border/30 text-[10px] text-muted-foreground/80">
+                <span className="font-semibold text-foreground/90">Note: </span>
+                This meter tracks active thread memory. Multi-step agent turns may accumulate higher billed input tokens across iterative round trips.
+              </div>
             </div>
 
             <TooltipPrimitive.Arrow className="fill-popover" width={10} height={5} />
