@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"sync"
 )
 
 // Scored pairs a chunk with its retrieval score (hybrid BM25+vector).
@@ -158,6 +159,12 @@ func (s *Service) Ingest(ctx context.Context, userID, documentID, docTitle, mime
 	if err := s.vs.UpsertChunks(ctx, userID, documentID, docTitle, chunks, res.Vectors); err != nil {
 		return 0, EmbedUsage{}, fmt.Errorf("index chunks: %w", err)
 	}
+
+	// Cache the full parsed markdown in the object store (MinIO) alongside the original file
+	if parsedText, err := ExtractTextWithFilename(mime, docTitle, bytes.NewReader(content)); err == nil && parsedText != "" {
+		_ = s.objects.Put(ctx, ParsedObjectKey(userID, documentID), "text/markdown", strings.NewReader(parsedText), int64(len(parsedText)))
+	}
+
 	total := strings.Join(chunkTexts(chunks), "")
 	return len(chunks), embedUsage(res.Usage.InputTokens, total), nil
 }
@@ -191,6 +198,11 @@ func (s *Service) Search(ctx context.Context, userID, query string, opts SearchO
 	if err != nil {
 		return nil, rep, fmt.Errorf("search index: %w", err)
 	}
+	// When no reranker is attached, hybrid RRF from Weaviate is the final ranking.
+	// Trim to TopK immediately to avoid expanding unneeded candidate windows.
+	if s.ranker == nil && len(rows) > k {
+		rows = rows[:k]
+	}
 	rows, err = s.expand(ctx, userID, rows)
 	if err != nil {
 		return nil, rep, fmt.Errorf("expand windows: %w", err)
@@ -211,6 +223,7 @@ func (s *Service) Search(ctx context.Context, userID, query string, opts SearchO
 // expand widens each hit with neighbor chunks (small-to-big): one range
 // read per document, windows sliced locally, overlapping windows share
 // reads. The core Chunk stays the citation unit; Context carries the window.
+// Goroutines run range expansions concurrently across distinct documents.
 func (s *Service) expand(ctx context.Context, userID string, rows []Scored) ([]Scored, error) {
 	before, after := s.searchCfg.ExpandBefore, s.searchCfg.ExpandAfter
 	if before <= 0 && after <= 0 || len(rows) == 0 {
@@ -227,17 +240,35 @@ func (s *Service) expand(ctx context.Context, userID string, rows []Scored) ([]S
 		}
 	}
 	byDoc := map[string]map[int]Chunk{}
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	var firstErr error
+
 	for docID := range lo {
-		chunks, err := s.vs.ExpandRange(ctx, userID, docID, lo[docID], hi[docID])
-		if err != nil {
-			return nil, err
-		}
-		m := map[int]Chunk{}
-		for _, c := range chunks {
-			m[c.Index] = c
-		}
-		byDoc[docID] = m
+		wg.Add(1)
+		go func(dID string) {
+			defer wg.Done()
+			chunks, err := s.vs.ExpandRange(ctx, userID, dID, lo[dID], hi[dID])
+			mu.Lock()
+			defer mu.Unlock()
+			if err != nil {
+				if firstErr == nil {
+					firstErr = err
+				}
+				return
+			}
+			m := map[int]Chunk{}
+			for _, c := range chunks {
+				m[c.Index] = c
+			}
+			byDoc[dID] = m
+		}(docID)
 	}
+	wg.Wait()
+	if firstErr != nil {
+		return nil, firstErr
+	}
+
 	for i, r := range rows {
 		m := byDoc[r.Chunk.DocumentID]
 		var parts []string
@@ -281,4 +312,9 @@ func ObjectKey(userID, documentID, filename string) string {
 		filename = filename[:maxKeyBytes]
 	}
 	return userID + "/" + documentID + "/" + filename
+}
+
+// ParsedObjectKey builds the object-store key for the extracted markdown text in MinIO.
+func ParsedObjectKey(userID, documentID string) string {
+	return userID + "/" + documentID + "/parsed.md"
 }

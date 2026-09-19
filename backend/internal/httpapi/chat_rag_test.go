@@ -261,8 +261,8 @@ func TestUserToolsRespectConversationRagToggle(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, tl := range off {
-		if tl.Name == chat.SearchToolName {
-			t.Fatal("search_documents offered to a RAG-disabled conversation")
+		if tl.Name == chat.SearchToolName || tl.Name == chat.ListDocumentsToolName {
+			t.Fatalf("%s offered to a RAG-disabled conversation", tl.Name)
 		}
 	}
 
@@ -270,14 +270,21 @@ func TestUserToolsRespectConversationRagToggle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	found := false
+	foundSearch := false
+	foundList := false
 	for _, tl := range on {
 		if tl.Name == chat.SearchToolName {
-			found = true
+			foundSearch = true
+		}
+		if tl.Name == chat.ListDocumentsToolName {
+			foundList = true
 		}
 	}
-	if !found {
+	if !foundSearch {
 		t.Fatal("search_documents missing for a RAG-enabled conversation")
+	}
+	if !foundList {
+		t.Fatal("list_documents missing for a RAG-enabled conversation")
 	}
 }
 
@@ -462,6 +469,51 @@ func TestSendMessageWithoutRagHasNoSearchTool(t *testing.T) {
 	rec := postMessage(t, h, token, conv.ID, "hi")
 	if strings.Contains(rec.Body.String(), "search_documents") {
 		t.Fatal("search tool must not be registered when RAG is disabled")
+	}
+	if strings.Contains(rec.Body.String(), "list_documents") {
+		t.Fatal("list tool must not be registered when RAG is disabled")
+	}
+}
+
+func TestListDocsDepsScoping(t *testing.T) {
+	docs := &fakeDocs{
+		rows: []storage.Document{
+			{ID: "d1", UserID: "u-1", Filename: "user_doc.txt", Status: "ready", ChunkCount: 3, SizeBytes: 1024},
+		},
+	}
+	msgs := newFakeMsgs()
+	convs := newFakeConvos(msgs)
+	srv := &Server{deps: ServerDeps{Docs: docs, Convos: convs}}
+
+	// 1. Regular conversation -> returns user docs
+	conv1 := convs.mustCreate("u-1", "")
+	fn1 := srv.listDocsDeps("u-1", conv1.ID)
+	res1, err := fn1(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res1) != 1 || res1[0].ID != "d1" {
+		t.Fatalf("expected 1 user doc, got %+v", res1)
+	}
+
+	// 2. Project conversation -> returns project docs
+	projID := "p-123"
+	conv2, err := convs.Create(context.Background(), "u-1", "Project Chat", storage.ConversationPatch{
+		ProjectID: &projID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	docs.rows = append(docs.rows, storage.Document{
+		ID: "d2", UserID: "u-1", ProjectID: &projID, Filename: "project_doc.pdf", Status: "ready", ChunkCount: 10, SizeBytes: 50000,
+	})
+	fn2 := srv.listDocsDeps("u-1", conv2.ID)
+	res2, err := fn2(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res2) != 1 || res2[0].ID != "d2" {
+		t.Fatalf("expected 1 project doc, got %+v", res2)
 	}
 }
 

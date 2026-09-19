@@ -167,8 +167,12 @@ func TestIngestHappy(t *testing.T) {
 		t.Fatalf("section order not preserved: %q / %q", call.Chunks[0].Content[:32], call.Chunks[1].Content[:32])
 	}
 	wantKey := ObjectKey("u1", "d1", "notes.md")
-	if len(objs.puts) != 1 || objs.puts[0] != wantKey {
-		t.Fatalf("object key: %v", objs.puts)
+	wantParsedKey := ParsedObjectKey("u1", "d1")
+	if len(objs.puts) < 1 || objs.puts[0] != wantKey {
+		t.Fatalf("object key: %v, want at least %s", objs.puts, wantKey)
+	}
+	if len(objs.puts) > 1 && objs.puts[1] != wantParsedKey {
+		t.Fatalf("parsed object key: %v, want %s", objs.puts[1], wantParsedKey)
 	}
 }
 

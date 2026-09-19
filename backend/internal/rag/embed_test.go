@@ -124,6 +124,33 @@ func TestEmbedQuerySingle(t *testing.T) {
 	}
 }
 
+func TestEmbedQueryCache(t *testing.T) {
+	var batches []int
+	srv := fakeGemini(t, 4, &batches)
+	defer srv.Close()
+
+	e, err := newEmbedderAt(srv.URL, 96)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// First call hits the mock server
+	res1, err := e.EmbedQuery(context.Background(), "repeated query")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Second call with same text should hit cache
+	res2, err := e.EmbedQuery(context.Background(), "  repeated query  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(res1.Vectors, res2.Vectors) {
+		t.Fatalf("vectors should match: %v vs %v", res1.Vectors, res2.Vectors)
+	}
+	if len(batches) != 1 {
+		t.Fatalf("expected 1 HTTP call due to cache, got %d", len(batches))
+	}
+}
+
 func TestEmbedDocumentsEmpty(t *testing.T) {
 	srv := fakeGemini(t, 4, &[]int{})
 	defer srv.Close()

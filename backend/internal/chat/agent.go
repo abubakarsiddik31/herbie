@@ -19,6 +19,7 @@ type Deps struct {
 	UserID         string
 	ConversationID string
 	Search         SearchFunc
+	ListDocs       ListDocsFunc
 	SaveMemory     func(ctx context.Context, fact string) error
 }
 
@@ -103,7 +104,10 @@ func (a *Agent) build(spec RunSpec, tools []tool.Tool[Deps]) (*golem.Agent[Deps,
 
 const retrievalGuidance = `
 
-You have a search_documents tool over the user's uploaded files. Use it when queries may relate to the user's uploaded documents. Drive retrieval yourself: start with a focused query; if results look thin or off-topic, call again with a refined query or narrow documentIds (limit to 1-3 searches total). Once relevant evidence is found, immediately synthesize your answer. Never attribute claims to uploaded documents if they were not in the search results.
+You have retrieval tools over the user's uploaded files:
+- list_documents: lists all uploaded files with their document IDs, filenames, chunk counts, sizes, and statuses. Use this when you need an overview of available documents or want to find specific document IDs.
+- search_documents: searches for passages relevant to a query across all files or filtered by documentIds.
+Drive retrieval yourself: start by listing documents or formulating a focused query; if results look thin or off-topic, call again with a refined query or narrow documentIds (limit to 1-3 searches total). Once relevant evidence is found, immediately synthesize your answer. Never attribute claims to uploaded documents if they were not in the search results.
 Citation discipline (hard rules): cite EVERY claim that comes from documents with its bracket number, e.g. [1]; cite ONLY bracket numbers shown in tool results — numbers are cumulative across calls ([1], [2], [3]...); never invent numbers not present in results. If the question specifically asks about the user's uploaded documents and the evidence does not support an answer, say what is missing instead of guessing; for general knowledge questions or external tools, answer normally using that information.`
 
 const webSearchGuidance = `
@@ -131,7 +135,7 @@ func promptFor(spec RunSpec, tools []tool.Tool[Deps]) string {
 	hasDocSearch := false
 	hasWebSearch := false
 	for _, t := range tools {
-		if t.Name == SearchToolName {
+		if t.Name == SearchToolName || t.Name == ListDocumentsToolName {
 			hasDocSearch = true
 		}
 		if t.Name == WebSearchToolName {

@@ -3,6 +3,8 @@ package rag
 import (
 	"context"
 	"fmt"
+	"strings"
+	"sync"
 
 	"github.com/abubakarsiddik31/golem/embedding"
 	"github.com/abubakarsiddik31/golem/model"
@@ -10,15 +12,15 @@ import (
 )
 
 const defaultEmbedBatch = 96
+const maxQueryCacheEntries = 1000
 
-// Embedder wraps golem's Gemini embedder with app-side batching. Golem's
-// EmbedDocuments is one provider call per invocation; the ingestion
-// pipeline bounds the batch size here so a large document never rides a
-// single request. Task types (RETRIEVAL_DOCUMENT / RETRIEVAL_QUERY) are
-// the adapter's contract, applied by golem on each side of the split.
+// Embedder wraps golem's Gemini embedder with app-side batching and an
+// in-memory query embedding cache to eliminate remote roundtrips on repeat queries.
 type Embedder struct {
-	inner embedding.Embedder
-	batch int
+	inner   embedding.Embedder
+	batch   int
+	cacheMu sync.RWMutex
+	cache   map[string]embedding.Result
 }
 
 // NewEmbedder builds the Gemini-backed embedder (golem v0.7.5 port).
@@ -38,14 +40,34 @@ func embedderWith(inner embedding.Embedder, batch int) *Embedder {
 	if batch <= 0 {
 		batch = defaultEmbedBatch
 	}
-	return &Embedder{inner: inner, batch: batch}
+	return &Embedder{
+		inner: inner,
+		batch: batch,
+		cache: make(map[string]embedding.Result),
+	}
 }
 
 func (e *Embedder) EmbedQuery(ctx context.Context, text string) (embedding.Result, error) {
+	clean := strings.TrimSpace(text)
+	e.cacheMu.RLock()
+	cached, ok := e.cache[clean]
+	e.cacheMu.RUnlock()
+	if ok {
+		return cached, nil
+	}
+
 	res, err := e.inner.EmbedQuery(ctx, text)
 	if err != nil {
 		return embedding.Result{}, fmt.Errorf("embed query: %w", err)
 	}
+
+	e.cacheMu.Lock()
+	if len(e.cache) >= maxQueryCacheEntries {
+		e.cache = make(map[string]embedding.Result)
+	}
+	e.cache[clean] = res
+	e.cacheMu.Unlock()
+
 	return res, nil
 }
 

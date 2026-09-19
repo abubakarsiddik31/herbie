@@ -211,6 +211,7 @@ func (s *Server) runTurn(ctx context.Context, userID, convID string, spec chat.R
 		UserID:         userID,
 		ConversationID: convID,
 		Search:         s.searchDeps(userID, convID, &sources),
+		ListDocs:       s.listDocsDeps(userID, convID),
 		SaveMemory:     s.saveMemoryFunc(userID),
 	}, history, prompt, parts, sink, tools, spec)
 	if err != nil {
@@ -372,7 +373,7 @@ func (s *Server) userTools(ctx context.Context, userID string, ragEnabled bool) 
 			}
 		}
 		if hasDocs {
-			tools = append(tools, chat.SearchTool())
+			tools = append(tools, chat.SearchTool(), chat.ListDocumentsTool())
 		}
 	}
 	if s.deps.WebSearch != nil {
@@ -579,6 +580,39 @@ func (s *Server) calendarClient(ctx context.Context, userID string) chat.Calenda
 				})
 			}
 		},
+	}
+}
+
+func (s *Server) listDocsDeps(userID, convID string) chat.ListDocsFunc {
+	if s.deps.Docs == nil {
+		return nil
+	}
+	return func(ctx context.Context) ([]chat.DocumentInfo, error) {
+		var docs []storage.Document
+		var err error
+		if s.deps.Convos != nil && convID != "" {
+			if conv, cerr := s.deps.Convos.ByID(ctx, convID, userID); cerr == nil && conv.ProjectID != nil {
+				docs, err = s.deps.Docs.ListByProject(ctx, *conv.ProjectID, userID)
+			}
+		}
+		if docs == nil && err == nil {
+			docs, err = s.deps.Docs.List(ctx, userID)
+		}
+		if err != nil {
+			return nil, err
+		}
+		out := make([]chat.DocumentInfo, len(docs))
+		for i, d := range docs {
+			out[i] = chat.DocumentInfo{
+				ID:         d.ID,
+				Filename:   d.Filename,
+				Mime:       d.Mime,
+				SizeBytes:  d.SizeBytes,
+				Status:     d.Status,
+				ChunkCount: d.ChunkCount,
+			}
+		}
+		return out, nil
 	}
 }
 

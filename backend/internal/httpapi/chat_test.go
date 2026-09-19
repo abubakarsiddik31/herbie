@@ -112,6 +112,10 @@ func (f *fakeConvos) Create(_ context.Context, userID, title string, patch stora
 	if patch.RagEnabled != nil {
 		conv.RagEnabled = *patch.RagEnabled
 	}
+	if patch.ProjectID != nil {
+		p := *patch.ProjectID
+		conv.ProjectID = &p
+	}
 	f.convs[conv.ID] = conv
 	return conv, nil
 }

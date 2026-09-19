@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/abubakarsiddik31/golem/model"
 )
@@ -61,7 +62,9 @@ func (r *Ranker) Rerank(ctx context.Context, query string, in []Scored, topN int
 		fmt.Fprintf(&sb, "[%d] (%s) %s\n\n", i, in[i].Chunk.DocTitle, p)
 	}
 	sb.WriteString("Rank all passages best-first. JSON only.")
-	resp, err := r.model.Generate(ctx, model.Request{
+	rerankCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
+	defer cancel()
+	resp, err := r.model.Generate(rerankCtx, model.Request{
 		Messages: []model.Message{
 			{Role: model.RoleSystem, Content: rerankSystem},
 			{Role: model.RoleUser, Content: sb.String()},
