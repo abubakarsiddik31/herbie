@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"path"
 	"strings"
 	"sync"
 )
@@ -123,11 +124,15 @@ func (s *Service) WithTuning(alpha float64, mult, maxCand, before, after, chunkT
 	return s
 }
 
-// Ingest keeps the original bytes in the object store, then indexes the
-// extracted text. Idempotent per document: stale vectors are deleted
+// Ingest keeps the original bytes in the object store at the canonical key,
+// then indexes the extracted text. Idempotent per document: stale vectors are deleted
 // before the fresh upsert. Returns the chunk count.
 func (s *Service) Ingest(ctx context.Context, userID, documentID, docTitle, mime string, content []byte, contentType string) (int, EmbedUsage, error) {
-	key := ObjectKey(userID, documentID, docTitle)
+	return s.IngestWithKey(ctx, ObjectKey(userID, documentID, docTitle), userID, documentID, docTitle, mime, content, contentType)
+}
+
+// IngestWithKey allows specifying a custom object storage key (e.g. project-scoped folder key).
+func (s *Service) IngestWithKey(ctx context.Context, key, userID, documentID, docTitle, mime string, content []byte, contentType string) (int, EmbedUsage, error) {
 	if err := s.objects.Put(ctx, key, contentType, bytes.NewReader(content), int64(len(content))); err != nil {
 		return 0, EmbedUsage{}, fmt.Errorf("store original: %w", err)
 	}
@@ -160,7 +165,7 @@ func (s *Service) Ingest(ctx context.Context, userID, documentID, docTitle, mime
 		return 0, EmbedUsage{}, fmt.Errorf("index chunks: %w", err)
 	}
 
-	// Cache the full parsed markdown in the object store (MinIO) alongside the original file
+	// Cache the full parsed markdown in the object store (MinIO) in the same folder
 	if parsedText, err := ExtractTextWithFilename(mime, docTitle, bytes.NewReader(content)); err == nil && parsedText != "" {
 		_ = s.objects.Put(ctx, ParsedObjectKey(userID, documentID), "text/markdown", strings.NewReader(parsedText), int64(len(parsedText)))
 	}
@@ -305,8 +310,7 @@ func chunkTexts(chunks []Chunk) []string {
 	return texts
 }
 
-// ObjectKey builds the canonical object-store key. Only the filename's
-// length is bounded here; the HTTP layer validates the name itself.
+// ObjectKey builds the legacy object-store key: userID/documentID/filename.
 func ObjectKey(userID, documentID, filename string) string {
 	if len(filename) > maxKeyBytes {
 		filename = filename[:maxKeyBytes]
@@ -314,7 +318,37 @@ func ObjectKey(userID, documentID, filename string) string {
 	return userID + "/" + documentID + "/" + filename
 }
 
+// ProjectObjectKey builds the folder-structured object key for project files:
+// userID/projects/projectID/documentID/filename.
+func ProjectObjectKey(userID, projectID, documentID, filename string) string {
+	if len(filename) > maxKeyBytes {
+		filename = filename[:maxKeyBytes]
+	}
+	return userID + "/projects/" + projectID + "/" + documentID + "/" + filename
+}
+
+// DocumentObjectKey builds the folder-structured object key for global documents:
+// userID/documents/documentID/filename.
+func DocumentObjectKey(userID, documentID, filename string) string {
+	if len(filename) > maxKeyBytes {
+		filename = filename[:maxKeyBytes]
+	}
+	return userID + "/documents/" + documentID + "/" + filename
+}
+
 // ParsedObjectKey builds the object-store key for the extracted markdown text in MinIO.
-func ParsedObjectKey(userID, documentID string) string {
-	return userID + "/" + documentID + "/parsed.md"
+// When called with 1 argument (objectKey), it places parsed.md in the same folder as objectKey.
+// When called with 2 arguments (userID, documentID), it defaults to userID/documentID/parsed.md.
+func ParsedObjectKey(args ...string) string {
+	if len(args) == 1 {
+		dir := path.Dir(args[0])
+		if dir == "." || dir == "" {
+			return "parsed.md"
+		}
+		return dir + "/parsed.md"
+	}
+	if len(args) >= 2 {
+		return args[0] + "/" + args[1] + "/parsed.md"
+	}
+	return "parsed.md"
 }

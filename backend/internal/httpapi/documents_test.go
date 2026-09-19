@@ -99,6 +99,11 @@ func (f *fakeRag) Ingest(_ context.Context, _, _, _, _ string, _ []byte, _ strin
 	return f.chunks, f.usage, f.err
 }
 
+func (f *fakeRag) IngestWithKey(_ context.Context, _, _, _, _, _ string, _ []byte, _ string) (int, rag.EmbedUsage, error) {
+	f.calls++
+	return f.chunks, f.usage, f.err
+}
+
 type fakeVectors struct{ deleted []string }
 
 func (f *fakeVectors) UpsertChunks(_ context.Context, _, _, _ string, _ []rag.Chunk, _ [][]float32) error {

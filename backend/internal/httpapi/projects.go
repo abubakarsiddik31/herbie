@@ -236,11 +236,12 @@ func (s *Server) handleUploadProjectFile(w http.ResponseWriter, r *http.Request)
 	}
 
 	docID := uuid.NewString()
+	objectKey := rag.ProjectObjectKey(userID, projectID, docID, header.Filename)
 	doc, err := s.deps.Docs.Create(r.Context(), storage.Document{
 		ID:         docID,
 		UserID:     userID,
 		ProjectID:  &projectID,
-		ObjectKey:  rag.ObjectKey(userID, docID, header.Filename),
+		ObjectKey:  objectKey,
 		Filename:   header.Filename,
 		Mime:       mime,
 		SizeBytes:  int64(len(content)),
@@ -254,7 +255,7 @@ func (s *Server) handleUploadProjectFile(w http.ResponseWriter, r *http.Request)
 
 	go func() {
 		ctx := context.Background()
-		chunks, rep, ingestErr := s.deps.RAG.Ingest(ctx, userID, docID, header.Filename, mime, content, mime)
+		chunks, rep, ingestErr := s.deps.RAG.IngestWithKey(ctx, objectKey, userID, docID, header.Filename, mime, content, mime)
 		status := "ready"
 		errMsg := ""
 		if ingestErr != nil {

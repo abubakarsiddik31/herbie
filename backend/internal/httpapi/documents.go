@@ -30,6 +30,7 @@ type DocStore interface {
 // Nil ServerDeps fields of this shape mean RAG is disabled.
 type RagRunner interface {
 	Ingest(ctx context.Context, userID, documentID, docTitle, mime string, content []byte, contentType string) (int, rag.EmbedUsage, error)
+	IngestWithKey(ctx context.Context, key, userID, documentID, docTitle, mime string, content []byte, contentType string) (int, rag.EmbedUsage, error)
 }
 
 // allowedUploadTypes maps the filename extension to the extraction mime.
@@ -126,7 +127,7 @@ func (s *Server) handleUploadDocument(w http.ResponseWriter, r *http.Request) {
 	// The id is generated here so the object key can carry it; Ingest
 	// derives the identical key from the same inputs.
 	docID := uuid.NewString()
-	objectKey := rag.ObjectKey(userID, docID, header.Filename)
+	objectKey := rag.DocumentObjectKey(userID, docID, header.Filename)
 	doc, err := s.deps.Docs.Create(r.Context(), storage.Document{
 		ID: docID, UserID: userID, ObjectKey: objectKey,
 		Filename: header.Filename, Mime: mime, SizeBytes: int64(len(content)),
@@ -138,7 +139,7 @@ func (s *Server) handleUploadDocument(w http.ResponseWriter, r *http.Request) {
 	// Row created (status=processing), now run the pipeline; a failure
 	// marks the row failed and keeps object and row so the upload is
 	// diagnosable and re-ingestion stays possible.
-	chunks, embedUsage, ingestErr := s.deps.RAG.Ingest(r.Context(), userID, docID, header.Filename, mime, content, mime)
+	chunks, embedUsage, ingestErr := s.deps.RAG.IngestWithKey(r.Context(), objectKey, userID, docID, header.Filename, mime, content, mime)
 	if ingestErr == nil && embedUsage.InputTokens > 0 {
 		model := s.deps.Cfg.RAG.EmbeddingModel
 		docIDRef := docID
@@ -218,7 +219,7 @@ func (s *Server) handleDeleteDocument(w http.ResponseWriter, r *http.Request) {
 		if err := s.deps.Objects.Delete(r.Context(), doc.ObjectKey); err != nil {
 			s.deps.Log.Error("object delete failed", "key", doc.ObjectKey, "err", err)
 		}
-		_ = s.deps.Objects.Delete(r.Context(), rag.ParsedObjectKey(userID, docID))
+		_ = s.deps.Objects.Delete(r.Context(), rag.ParsedObjectKey(doc.ObjectKey))
 	}
 	if err := s.deps.Docs.Delete(r.Context(), docID, userID); err != nil {
 		writeError(w, http.StatusInternalServerError, "internal", "could not delete document")
@@ -249,9 +250,9 @@ func (s *Server) handleGetDocumentContent(w http.ResponseWriter, r *http.Request
 	}
 
 	var text string
-	if s.deps.Objects != nil {
-		// 1. Check MinIO bucket for cached parsed markdown
-		parsedKey := rag.ParsedObjectKey(userID, docID)
+	if s.deps.Objects != nil && doc.ObjectKey != "" {
+		// 1. Check MinIO bucket for cached parsed markdown in the same document/project folder
+		parsedKey := rag.ParsedObjectKey(doc.ObjectKey)
 		if obj, err := s.deps.Objects.Get(r.Context(), parsedKey); err == nil && obj != nil {
 			b, readErr := io.ReadAll(obj)
 			_ = obj.Close()
@@ -260,8 +261,8 @@ func (s *Server) handleGetDocumentContent(w http.ResponseWriter, r *http.Request
 			}
 		}
 
-		// 2. If not yet in MinIO, extract from original file and save parsed.md to MinIO
-		if text == "" && doc.ObjectKey != "" {
+		// 2. If not yet in MinIO, extract from original file and save parsed.md to MinIO in the same folder
+		if text == "" {
 			obj, err := s.deps.Objects.Get(r.Context(), doc.ObjectKey)
 			if err == nil && obj != nil {
 				defer obj.Close()
