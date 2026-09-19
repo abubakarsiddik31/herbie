@@ -42,6 +42,7 @@ import { useTools, useUpdateTool } from "@/features/tools/useTools";
 import { useDocuments } from "@/features/documents/useDocuments";
 import { useToolOAuthProviders, useWorkflows } from "@/features/workflows/useWorkflows";
 import { useMCPServers } from "@/features/mcp/useMCPServers";
+import { LinkAppDialog } from "@/features/mcp/LinkAppDialog";
 
 export const MAX_INSTRUCTIONS_CHARS = 4000;
 export const MAX_MEMORY_CHARS = 1000;
@@ -86,6 +87,13 @@ export function SettingsDialog({ open, onOpenChange, defaultTab = "general" }: P
   const { data: workflows } = useWorkflows();
   const { data: mcpServers } = useMCPServers();
   const { data: docs } = useDocuments();
+  const [linkAppDialogOpen, setLinkAppDialogOpen] = useState(false);
+  const [linkAppInitialId, setLinkAppInitialId] = useState<string>("github");
+
+  function openLinkApp(id: string) {
+    setLinkAppInitialId(id);
+    setLinkAppDialogOpen(true);
+  }
 
   useEffect(() => {
     if (open) {
@@ -437,13 +445,28 @@ export function SettingsDialog({ open, onOpenChange, defaultTab = "general" }: P
                                 <span className="font-semibold text-foreground truncate">Google Calendar</span>
                                 <span className="font-mono text-[10px] text-muted-foreground">@calendar</span>
                               </div>
-                              <p className="text-[10px] text-muted-foreground truncate">Agenda & event creation</p>
+                              <p className="text-[10px] text-muted-foreground truncate">
+                                {isConnected
+                                  ? (cal?.connectedVia === "mcp" ? "Linked via MCP Server" : "Connected via OAuth")
+                                  : "Agenda & event creation"}
+                              </p>
                             </div>
                           </div>
-                          <Badge variant="outline" className={cn("text-[10px] gap-1 px-1.5 py-0 font-normal shrink-0", isConnected ? "border-emerald-600/30 bg-emerald-600/10 text-emerald-700 dark:text-emerald-400" : "text-muted-foreground")}>
-                            {isConnected && <CheckCircle2 className="size-2.5" />}
-                            <span>{isConnected ? "Connected" : "Not Linked"}</span>
-                          </Badge>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <Badge variant="outline" className={cn("text-[10px] gap-1 px-1.5 py-0 font-normal shrink-0", isConnected ? "border-emerald-600/30 bg-emerald-600/10 text-emerald-700 dark:text-emerald-400" : "text-muted-foreground")}>
+                              {isConnected && <CheckCircle2 className="size-2.5" />}
+                              <span>{isConnected ? (cal?.connectedVia === "mcp" ? "MCP" : "OAuth") : "Not Linked"}</span>
+                            </Badge>
+                            <Button
+                              size="xs"
+                              variant="ghost"
+                              type="button"
+                              onClick={() => openLinkApp("google_calendar")}
+                              className="h-6 px-1.5 text-[10px] text-primary hover:bg-primary/10"
+                            >
+                              {isConnected ? "Configure" : "Link"}
+                            </Button>
+                          </div>
                         </div>
                       );
                     })()}
@@ -463,13 +486,28 @@ export function SettingsDialog({ open, onOpenChange, defaultTab = "general" }: P
                                 <span className="font-semibold text-foreground truncate">GitHub</span>
                                 <span className="font-mono text-[10px] text-muted-foreground">@github</span>
                               </div>
-                              <p className="text-[10px] text-muted-foreground truncate">Repos, PRs & issues</p>
+                              <p className="text-[10px] text-muted-foreground truncate">
+                                {isConnected
+                                  ? (gh?.connectedVia === "mcp" ? "Linked via MCP Server" : "Connected via OAuth")
+                                  : "Repos, PRs & issues"}
+                              </p>
                             </div>
                           </div>
-                          <Badge variant="outline" className={cn("text-[10px] gap-1 px-1.5 py-0 font-normal shrink-0", isConnected ? "border-emerald-600/30 bg-emerald-600/10 text-emerald-700 dark:text-emerald-400" : "text-muted-foreground")}>
-                            {isConnected && <CheckCircle2 className="size-2.5" />}
-                            <span>{isConnected ? "Connected" : "Not Linked"}</span>
-                          </Badge>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <Badge variant="outline" className={cn("text-[10px] gap-1 px-1.5 py-0 font-normal shrink-0", isConnected ? "border-emerald-600/30 bg-emerald-600/10 text-emerald-700 dark:text-emerald-400" : "text-muted-foreground")}>
+                              {isConnected && <CheckCircle2 className="size-2.5" />}
+                              <span>{isConnected ? (gh?.connectedVia === "mcp" ? "MCP" : "OAuth") : "Not Linked"}</span>
+                            </Badge>
+                            <Button
+                              size="xs"
+                              variant="ghost"
+                              type="button"
+                              onClick={() => openLinkApp("github")}
+                              className="h-6 px-1.5 text-[10px] text-primary hover:bg-primary/10"
+                            >
+                              {isConnected ? "Configure" : "Link"}
+                            </Button>
+                          </div>
                         </div>
                       );
                     })()}
@@ -489,13 +527,28 @@ export function SettingsDialog({ open, onOpenChange, defaultTab = "general" }: P
                                 <span className="font-semibold text-foreground truncate">Slack</span>
                                 <span className="font-mono text-[10px] text-muted-foreground">@slack</span>
                               </div>
-                              <p className="text-[10px] text-muted-foreground truncate">Channel notifications</p>
+                              <p className="text-[10px] text-muted-foreground truncate">
+                                {isConnected
+                                  ? (slk?.connectedVia === "mcp" ? "Linked via MCP Server" : "Connected via OAuth")
+                                  : "Channel notifications"}
+                              </p>
                             </div>
                           </div>
-                          <Badge variant="outline" className={cn("text-[10px] gap-1 px-1.5 py-0 font-normal shrink-0", isConnected ? "border-emerald-600/30 bg-emerald-600/10 text-emerald-700 dark:text-emerald-400" : "text-muted-foreground")}>
-                            {isConnected && <CheckCircle2 className="size-2.5" />}
-                            <span>{isConnected ? "Connected" : "Not Linked"}</span>
-                          </Badge>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <Badge variant="outline" className={cn("text-[10px] gap-1 px-1.5 py-0 font-normal shrink-0", isConnected ? "border-emerald-600/30 bg-emerald-600/10 text-emerald-700 dark:text-emerald-400" : "text-muted-foreground")}>
+                              {isConnected && <CheckCircle2 className="size-2.5" />}
+                              <span>{isConnected ? (slk?.connectedVia === "mcp" ? "MCP" : "OAuth") : "Not Linked"}</span>
+                            </Badge>
+                            <Button
+                              size="xs"
+                              variant="ghost"
+                              type="button"
+                              onClick={() => openLinkApp("slack")}
+                              className="h-6 px-1.5 text-[10px] text-primary hover:bg-primary/10"
+                            >
+                              {isConnected ? "Configure" : "Link"}
+                            </Button>
+                          </div>
                         </div>
                       );
                     })()}
@@ -698,6 +751,12 @@ export function SettingsDialog({ open, onOpenChange, defaultTab = "general" }: P
           </div>
         </div>
       </DialogContent>
+
+      <LinkAppDialog
+        open={linkAppDialogOpen}
+        onOpenChange={setLinkAppDialogOpen}
+        initialAppId={linkAppInitialId}
+      />
     </Dialog>
   );
 }

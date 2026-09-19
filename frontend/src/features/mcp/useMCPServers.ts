@@ -8,6 +8,7 @@ export interface MCPServer {
   name: string;
   url: string;
   transport: string;
+  appId?: string | null;
   enabled: boolean;
   headers?: Record<string, string>;
   createdAt: string;
@@ -37,17 +38,55 @@ export function useMCPServers() {
 export function useCreateMCPServer() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: { name: string; url: string; headers?: Record<string, string> }) =>
+    mutationFn: (body: { name: string; url: string; appId?: string | null; headers?: Record<string, string> }) =>
       apiFetch<{ server: MCPServer }>("/api/mcp/servers", {
         method: "POST",
         json: body,
       }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["mcp-servers"] });
+      void qc.invalidateQueries({ queryKey: ["tool-oauth-providers"] });
       toast.success("MCP server registered successfully");
     },
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : "Failed to add MCP server");
+    },
+  });
+}
+
+export function useUpdateMCPServer() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...body }: { id: string; name?: string; url?: string; appId?: string | null; headers?: Record<string, string> }) =>
+      apiFetch<{ server: MCPServer }>(`/api/mcp/servers/${id}`, {
+        method: "PUT",
+        json: body,
+      }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["mcp-servers"] });
+      void qc.invalidateQueries({ queryKey: ["tool-oauth-providers"] });
+      toast.success("MCP server updated");
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : "Failed to update MCP server");
+    },
+  });
+}
+
+export function useUnlinkAppMCPServer() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      apiFetch<{ server: MCPServer }>(`/api/mcp/servers/${id}/unlink-app`, {
+        method: "POST",
+      }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["mcp-servers"] });
+      void qc.invalidateQueries({ queryKey: ["tool-oauth-providers"] });
+      toast.success("App unlinked from MCP server");
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : "Failed to unlink app from MCP server");
     },
   });
 }
@@ -61,6 +100,7 @@ export function useToggleMCPServer() {
       }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["mcp-servers"] });
+      void qc.invalidateQueries({ queryKey: ["tool-oauth-providers"] });
     },
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : "Failed to toggle MCP server");
@@ -77,6 +117,7 @@ export function useDeleteMCPServer() {
       }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["mcp-servers"] });
+      void qc.invalidateQueries({ queryKey: ["tool-oauth-providers"] });
       toast.success("MCP server deleted");
     },
     onError: (err) => {

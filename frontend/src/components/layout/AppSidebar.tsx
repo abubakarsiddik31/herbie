@@ -51,6 +51,7 @@ import { useProjects } from "@/features/projects/useProjects";
 import { useToolOAuthProviders, useWorkflows } from "@/features/workflows/useWorkflows";
 import { useMCPServers } from "@/features/mcp/useMCPServers";
 import { MCPServersDialog } from "@/features/mcp/MCPServersDialog";
+import { LinkAppDialog } from "@/features/mcp/LinkAppDialog";
 import { useSidebar } from "./SidebarContext";
 
 const GROUP_ORDER = ["Today", "Yesterday", "Previous 7 days", "Older"] as const;
@@ -97,12 +98,23 @@ export function AppSidebar() {
   const { data: oauthProviders } = useToolOAuthProviders();
   const { data: mcpServers } = useMCPServers();
   const [mcpDialogOpen, setMcpDialogOpen] = useState(false);
+  const [linkAppDialogOpen, setLinkAppDialogOpen] = useState(false);
+  const [linkAppInitialId, setLinkAppInitialId] = useState<string>("github");
   const [appsExpanded, setAppsExpanded] = useState(true);
   const deleteConversation = useDeleteConversation();
 
-  const gcalConnected = oauthProviders?.find((p) => p.id === "google_calendar")?.connected;
-  const ghConnected = oauthProviders?.find((p) => p.id === "github")?.connected;
-  const slackConnected = oauthProviders?.find((p) => p.id === "slack")?.connected;
+  const gcalProvider = oauthProviders?.find((p) => p.id === "google_calendar");
+  const ghProvider = oauthProviders?.find((p) => p.id === "github");
+  const slackProvider = oauthProviders?.find((p) => p.id === "slack");
+
+  const gcalConnected = gcalProvider?.connected;
+  const ghConnected = ghProvider?.connected;
+  const slackConnected = slackProvider?.connected;
+
+  function openLinkApp(appId: string) {
+    setLinkAppInitialId(appId);
+    setLinkAppDialogOpen(true);
+  }
 
   function handleTriggerApp(mention: string) {
     setMobileOpen(false);
@@ -352,70 +364,127 @@ export function AppSidebar() {
             {appsExpanded && (
               <div className="ml-3 pl-2.5 border-l border-sidebar-border/60 py-1 space-y-0.5 animate-in fade-in duration-150">
                 {/* Google Calendar */}
-                <button
-                  type="button"
-                  onClick={() => handleTriggerApp("calendar")}
-                  className="flex w-full items-center justify-between rounded-md px-2 py-1 text-[11px] text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-foreground group"
-                >
-                  <div className="flex items-center gap-2 min-w-0">
+                <div className="flex w-full items-center justify-between rounded-md px-2 py-1 text-[11px] text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-foreground group">
+                  <button
+                    type="button"
+                    onClick={() => (gcalConnected ? handleTriggerApp("calendar") : openLinkApp("google_calendar"))}
+                    className="flex items-center gap-2 min-w-0 flex-1 text-left"
+                  >
                     <Calendar className="size-3 shrink-0 text-sky-500" />
                     <span className="truncate">Google Calendar</span>
+                  </button>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {gcalConnected ? (
+                      <>
+                        <Badge variant="outline" className="text-[9px] font-mono px-1 py-0 h-3.5 border-emerald-500/30 text-emerald-600 dark:text-emerald-400">
+                          {gcalProvider?.connectedVia === "mcp" ? "MCP" : "OAuth"}
+                        </Badge>
+                        <span
+                          className="size-1.5 rounded-full bg-emerald-500 shadow-[0_0_4px_rgba(16,185,129,0.5)]"
+                          title="Connected"
+                        />
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); openLinkApp("google_calendar"); }}
+                          className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:text-foreground transition-opacity"
+                          title="Manage Calendar Connection"
+                        >
+                          <Wrench className="size-2.5" />
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); openLinkApp("google_calendar"); }}
+                        className="px-1.5 py-0.5 text-[9px] font-medium rounded bg-purple-500/10 text-purple-600 dark:text-purple-400 hover:bg-purple-500/20 border border-purple-500/30 transition-colors"
+                      >
+                        Link
+                      </button>
+                    )}
                   </div>
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-[10px] font-mono text-muted-foreground opacity-0 group-hover:opacity-100">@calendar</span>
-                    <span
-                      className={cn(
-                        "size-1.5 rounded-full",
-                        gcalConnected ? "bg-emerald-500 shadow-[0_0_4px_rgba(16,185,129,0.5)]" : "bg-muted-foreground/40"
-                      )}
-                      title={gcalConnected ? "Connected" : "Not connected"}
-                    />
-                  </div>
-                </button>
+                </div>
 
                 {/* GitHub */}
-                <button
-                  type="button"
-                  onClick={() => handleTriggerApp("github")}
-                  className="flex w-full items-center justify-between rounded-md px-2 py-1 text-[11px] text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-foreground group"
-                >
-                  <div className="flex items-center gap-2 min-w-0">
+                <div className="flex w-full items-center justify-between rounded-md px-2 py-1 text-[11px] text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-foreground group">
+                  <button
+                    type="button"
+                    onClick={() => (ghConnected ? handleTriggerApp("github") : openLinkApp("github"))}
+                    className="flex items-center gap-2 min-w-0 flex-1 text-left"
+                  >
                     <GitBranch className="size-3 shrink-0 text-neutral-700 dark:text-neutral-300" />
                     <span className="truncate">GitHub</span>
+                  </button>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {ghConnected ? (
+                      <>
+                        <Badge variant="outline" className="text-[9px] font-mono px-1 py-0 h-3.5 border-emerald-500/30 text-emerald-600 dark:text-emerald-400">
+                          {ghProvider?.connectedVia === "mcp" ? "MCP" : "OAuth"}
+                        </Badge>
+                        <span
+                          className="size-1.5 rounded-full bg-emerald-500 shadow-[0_0_4px_rgba(16,185,129,0.5)]"
+                          title="Connected"
+                        />
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); openLinkApp("github"); }}
+                          className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:text-foreground transition-opacity"
+                          title="Manage GitHub Connection"
+                        >
+                          <Wrench className="size-2.5" />
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); openLinkApp("github"); }}
+                        className="px-1.5 py-0.5 text-[9px] font-medium rounded bg-purple-500/10 text-purple-600 dark:text-purple-400 hover:bg-purple-500/20 border border-purple-500/30 transition-colors"
+                      >
+                        Link
+                      </button>
+                    )}
                   </div>
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-[10px] font-mono text-muted-foreground opacity-0 group-hover:opacity-100">@github</span>
-                    <span
-                      className={cn(
-                        "size-1.5 rounded-full",
-                        ghConnected ? "bg-emerald-500 shadow-[0_0_4px_rgba(16,185,129,0.5)]" : "bg-muted-foreground/40"
-                      )}
-                      title={ghConnected ? "Connected" : "Not connected"}
-                    />
-                  </div>
-                </button>
+                </div>
 
                 {/* Slack */}
-                <button
-                  type="button"
-                  onClick={() => handleTriggerApp("slack")}
-                  className="flex w-full items-center justify-between rounded-md px-2 py-1 text-[11px] text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-foreground group"
-                >
-                  <div className="flex items-center gap-2 min-w-0">
+                <div className="flex w-full items-center justify-between rounded-md px-2 py-1 text-[11px] text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-foreground group">
+                  <button
+                    type="button"
+                    onClick={() => (slackConnected ? handleTriggerApp("slack") : openLinkApp("slack"))}
+                    className="flex items-center gap-2 min-w-0 flex-1 text-left"
+                  >
                     <MessageSquare className="size-3 shrink-0 text-emerald-500" />
                     <span className="truncate">Slack</span>
+                  </button>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {slackConnected ? (
+                      <>
+                        <Badge variant="outline" className="text-[9px] font-mono px-1 py-0 h-3.5 border-emerald-500/30 text-emerald-600 dark:text-emerald-400">
+                          {slackProvider?.connectedVia === "mcp" ? "MCP" : "OAuth"}
+                        </Badge>
+                        <span
+                          className="size-1.5 rounded-full bg-emerald-500 shadow-[0_0_4px_rgba(16,185,129,0.5)]"
+                          title="Connected"
+                        />
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); openLinkApp("slack"); }}
+                          className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:text-foreground transition-opacity"
+                          title="Manage Slack Connection"
+                        >
+                          <Wrench className="size-2.5" />
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); openLinkApp("slack"); }}
+                        className="px-1.5 py-0.5 text-[9px] font-medium rounded bg-purple-500/10 text-purple-600 dark:text-purple-400 hover:bg-purple-500/20 border border-purple-500/30 transition-colors"
+                      >
+                        Link
+                      </button>
+                    )}
                   </div>
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-[10px] font-mono text-muted-foreground opacity-0 group-hover:opacity-100">@slack</span>
-                    <span
-                      className={cn(
-                        "size-1.5 rounded-full",
-                        slackConnected ? "bg-emerald-500 shadow-[0_0_4px_rgba(16,185,129,0.5)]" : "bg-muted-foreground/40"
-                      )}
-                      title={slackConnected ? "Connected" : "Not connected"}
-                    />
-                  </div>
-                </button>
+                </div>
 
                 {/* Web Search */}
                 <button
@@ -663,6 +732,13 @@ export function AppSidebar() {
 
       {/* MCP Servers Dialog */}
       <MCPServersDialog open={mcpDialogOpen} onOpenChange={setMcpDialogOpen} />
+
+      {/* Link App Dialog */}
+      <LinkAppDialog
+        open={linkAppDialogOpen}
+        onOpenChange={setLinkAppDialogOpen}
+        initialAppId={linkAppInitialId}
+      />
 
       {/* Share Dialog */}
       <ShareDialog conversation={sharing} onOpenChange={(open) => { if (!open) setSharing(null); }} />

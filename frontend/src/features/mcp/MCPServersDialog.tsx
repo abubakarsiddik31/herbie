@@ -23,6 +23,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { cn } from "@/lib/utils";
 import {
   useCreateMCPServer,
   useDeleteMCPServer,
@@ -47,6 +48,7 @@ export function MCPServersDialog({ open, onOpenChange }: MCPServersDialogProps) 
   const [isAdding, setIsAdding] = useState(false);
   const [name, setName] = useState("");
   const [url, setUrl] = useState("");
+  const [appId, setAppId] = useState<string>("none");
   const [testResult, setTestResult] = useState<MCPTestResult | null>(null);
 
   async function handleTest() {
@@ -70,11 +72,16 @@ export function MCPServersDialog({ open, onOpenChange }: MCPServersDialogProps) 
       return;
     }
     createServer.mutate(
-      { name: name.trim().toLowerCase().replace(/\s+/g, "_"), url: url.trim() },
+      {
+        name: name.trim().toLowerCase().replace(/\s+/g, "_"),
+        url: url.trim(),
+        appId: appId !== "none" ? appId : null,
+      },
       {
         onSuccess: () => {
           setName("");
           setUrl("");
+          setAppId("none");
           setTestResult(null);
           setIsAdding(false);
         },
@@ -144,6 +151,32 @@ export function MCPServersDialog({ open, onOpenChange }: MCPServersDialogProps) 
                   onChange={(e) => setUrl(e.target.value)}
                   className="h-8 text-xs font-mono"
                 />
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <Label className="text-xs">Link to App (Optional)</Label>
+              <div className="flex flex-wrap gap-1.5 pt-0.5">
+                {[
+                  { id: "none", label: "General / Standalone" },
+                  { id: "github", label: "GitHub (@github)" },
+                  { id: "slack", label: "Slack (@slack)" },
+                  { id: "google_calendar", label: "Google Calendar (@calendar)" },
+                ].map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => setAppId(item.id)}
+                    className={cn(
+                      "px-2 py-1 text-[11px] rounded-md border font-medium transition-colors",
+                      appId === item.id
+                        ? "bg-purple-600/15 border-purple-500/40 text-purple-700 dark:text-purple-300 font-semibold"
+                        : "border-border/70 text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+                    )}
+                  >
+                    {item.label}
+                  </button>
+                ))}
               </div>
             </div>
 
@@ -228,6 +261,11 @@ export function MCPServersDialog({ open, onOpenChange }: MCPServersDialogProps) 
                         >
                           {srv.enabled ? "Active" : "Disabled"}
                         </Badge>
+                        {srv.appId && (
+                          <Badge variant="secondary" className="font-mono text-[10px] px-1.5 py-0 bg-purple-500/10 text-purple-700 dark:text-purple-300 border-purple-500/30">
+                            Linked: @{srv.appId}
+                          </Badge>
+                        )}
                       </div>
                       <p className="font-mono text-[10px] text-muted-foreground truncate">{srv.url}</p>
                     </div>
