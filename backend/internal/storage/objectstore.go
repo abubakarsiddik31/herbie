@@ -35,6 +35,20 @@ func NewMinIOStore(endpoint, accessKey, secretKey, bucket string, useSSL bool) (
 	return &MinIOStore{client: client, bucket: bucket}, nil
 }
 
+// EnsureBucket checks if the configured bucket exists, creating it if needed.
+func (s *MinIOStore) EnsureBucket(ctx context.Context) error {
+	exists, err := s.client.BucketExists(ctx, s.bucket)
+	if err != nil {
+		return fmt.Errorf("check bucket %s: %w", s.bucket, err)
+	}
+	if !exists {
+		if err := s.client.MakeBucket(ctx, s.bucket, minio.MakeBucketOptions{}); err != nil {
+			return fmt.Errorf("make bucket %s: %w", s.bucket, err)
+		}
+	}
+	return nil
+}
+
 func (s *MinIOStore) Put(ctx context.Context, key, contentType string, r io.Reader, size int64) error {
 	_, err := s.client.PutObject(ctx, s.bucket, key, r, size, minio.PutObjectOptions{ContentType: contentType})
 	if err != nil {

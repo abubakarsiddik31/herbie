@@ -105,6 +105,10 @@ func main() {
 			log.Error("rag minio", "err", err)
 			os.Exit(1)
 		}
+		if err := objs.EnsureBucket(ctx); err != nil {
+			log.Error("rag minio bucket", "err", err)
+			os.Exit(1)
+		}
 		svc := rag.NewService(embedder, vs, objs)
 		svc.WithTuning(cfg.RAG.RetrievalAlpha, cfg.RAG.RetrieveMult, cfg.RAG.MaxCandidates, cfg.RAG.ExpandBefore, cfg.RAG.ExpandAfter, cfg.RAG.ChunkTargetTokens, cfg.RAG.ChunkOverlapTokens)
 		if cfg.RAG.RerankEnabled {

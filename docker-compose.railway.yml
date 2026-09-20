@@ -14,6 +14,39 @@ services:
       retries: 10
     restart: unless-stopped
 
+  wigolo:
+    image: ghcr.io/knockoutez/wigolo:latest
+    command: ["serve", "--host", "0.0.0.0", "--port", "3333"]
+    volumes:
+      - wigolo_data:/data
+    environment:
+      WIGOLO_DATA_DIR: /data
+      WIGOLO_SERVE_ALLOW_UNAUTHENTICATED: "1"
+    restart: unless-stopped
+
+  weaviate:
+    image: semitechnologies/weaviate:1.28.4
+    environment:
+      PERSISTENCE_DATA_PATH: /var/lib/weaviate
+      AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED: "true"
+      DEFAULT_VECTORIZER_MODULE: none
+      ENABLE_MODULES: ""
+      QUERY_DEFAULTS_LIMIT: 20
+      CLUSTER_HOSTNAME: node1
+    volumes:
+      - weaviate_data:/var/lib/weaviate
+    restart: unless-stopped
+
+  minio:
+    image: quay.io/minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-golem}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-golem1234}
+    volumes:
+      - minio_data:/data
+    restart: unless-stopped
+
   backend:
     build:
       context: .
@@ -25,11 +58,23 @@ services:
       DATABASE_URL: ${DATABASE_URL:-postgres://${POSTGRES_USER:-golem}:${POSTGRES_PASSWORD:-golem}@postgres.railway.internal:5432/${POSTGRES_DB:-golem_chatbot}}
       JWT_SECRET: ${JWT_SECRET:-0123456789abcdef0123456789abcdef}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
-      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.5-flash}
       FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost:5173}
-      RAG_ENABLED: "false"
-      WEB_SEARCH_PROVIDER: ${WEB_SEARCH_PROVIDER:-}
       PORT: "8080"
+      # Web Search
+      WEB_SEARCH_PROVIDER: wigolo
+      WIGOLO_URL: http://wigolo.railway.internal:3333
+      # RAG & Document Pipeline
+      RAG_ENABLED: "true"
+      WEAVIATE_URL: http://weaviate.railway.internal:8080
+      MINIO_ENDPOINT: minio.railway.internal:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-golem}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-golem1234}
+      MINIO_USE_SSL: "false"
+      # Embeddings & Reranking
+      EMBEDDING_MODEL: gemini-embedding-001
+      RERANK_ENABLED: "true"
+      RERANK_MODEL: gemini-3.5-flash-lite
     restart: unless-stopped
 
   frontend:
@@ -44,3 +89,6 @@ services:
 
 volumes:
   pgdata:
+  wigolo_data:
+  weaviate_data:
+  minio_data:
