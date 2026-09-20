@@ -63,6 +63,7 @@ import { StreamingText } from "@/components/ai/StreamingText";
 import { ThinkingTrace } from "@/components/ai/ThinkingTrace";
 import { useSidebar } from "@/components/layout/SidebarContext";
 import { CommandPalette } from "@/features/chat/CommandPalette";
+import { extractCitationsFromContent } from "@/features/chat/citations";
 import { ConversationSettingsDialog } from "@/features/chat/ConversationSettingsDialog";
 import { conversationFilename, downloadMarkdown, toMarkdown } from "@/features/chat/exportMarkdown";
 import { ShareDialog } from "@/features/chat/ShareDialog";
@@ -848,24 +849,44 @@ export function ChatPage() {
                           {m.streaming && trace.length > 0 && <ThinkingTrace rows={trace} />}
                           {m.streaming && m.content === "" ? (
                             <RunLoader trace={trace} />
-                          ) : (
-                            <StreamingText
-                              content={m.content}
-                              streaming={m.streaming}
-                              citations={
-                                m.sources && m.sources.length > 0
-                                  ? {
-                                      sources: m.sources,
-                                      // Citation click opens the indexed source document.
-                                      onCite: (n) => {
-                                        const s = m.sources?.[n - 1];
-                                        if (s) setViewingFile({ title: s.title, documentId: s.documentId });
-                                      },
-                                    }
-                                  : undefined
-                              }
-                            />
-                          )}
+                          ) : (() => {
+                            const activeSources =
+                              m.sources && m.sources.length > 0
+                                ? m.sources
+                                : extractCitationsFromContent(m.content);
+                            return (
+                              <StreamingText
+                                content={m.content}
+                                streaming={m.streaming}
+                                citations={
+                                  activeSources.length > 0
+                                    ? {
+                                        sources: activeSources,
+                                        // Citation click opens the indexed source document or web link.
+                                        onCite: (n) => {
+                                          const s = activeSources[n - 1];
+                                          if (s) {
+                                            const url =
+                                              s.url ||
+                                              (s.documentId?.startsWith("http://") || s.documentId?.startsWith("https://")
+                                                ? s.documentId
+                                                : undefined) ||
+                                              (s.heading?.startsWith("http://") || s.heading?.startsWith("https://")
+                                                ? s.heading
+                                                : undefined);
+                                            if (url) {
+                                              window.open(url, "_blank", "noopener,noreferrer");
+                                            } else if (s.documentId) {
+                                              setViewingFile({ title: s.title, documentId: s.documentId });
+                                            }
+                                          }
+                                        },
+                                      }
+                                    : undefined
+                                }
+                              />
+                            );
+                          })()}
                           {!m.streaming && (() => {
                             const connectProviders = extractAppConnectProviders(m.content);
                             if (connectProviders.length === 0) return null;

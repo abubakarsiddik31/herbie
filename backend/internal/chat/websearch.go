@@ -107,6 +107,9 @@ func WebSearchTool(searcher websearch.Searcher, requireApproval bool) tool.Tool[
 				if len(results) == 0 {
 					return tool.Text(fmt.Sprintf("No web results found for %q.", query)), nil
 				}
+				if deps.AddWebSources != nil {
+					deps.AddWebSources(results)
+				}
 				var sb strings.Builder
 				for i, r := range results {
 					fmt.Fprintf(&sb, "[%d] %s\nURL: %s\n%s\n\n", i+1, r.Title, r.URL, r.Snippet)
@@ -147,6 +150,7 @@ func WebSearchTool(searcher websearch.Searcher, requireApproval bool) tool.Tool[
 			}
 
 			var sb strings.Builder
+			var allResults []websearch.Result
 			sourceNum := 1
 			hasAny := false
 			for _, ir := range itemResults {
@@ -158,10 +162,14 @@ func WebSearchTool(searcher websearch.Searcher, requireApproval bool) tool.Tool[
 				for _, r := range ir.results {
 					fmt.Fprintf(&sb, "[%d] %s\nURL: %s\n%s\n\n", sourceNum, r.Title, r.URL, r.Snippet)
 					sourceNum++
+					allResults = append(allResults, r)
 				}
 			}
 			if !hasAny {
 				return tool.Text(fmt.Sprintf("No web results found for %s.", strings.Join(allQueries, ", "))), nil
+			}
+			if deps.AddWebSources != nil && len(allResults) > 0 {
+				deps.AddWebSources(allResults)
 			}
 			return tool.Text("Web search results:\n\n" + strings.TrimSpace(sb.String())), nil
 		},

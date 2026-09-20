@@ -7,6 +7,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"regexp"
 	"strings"
 	"unicode/utf8"
 
@@ -171,14 +172,54 @@ type msgDTO struct {
 	Sources   *json.RawMessage `json:"sources,omitempty"`
 }
 
+var webSearchResultRe = regexp.MustCompile(`\[(\d+)\]\s*([^\n]+)\nURL:\s*([^\n]+)`)
+
+func extractWebSourcesFromToolMsgs(toolMsgs []string) []map[string]any {
+	var rows []map[string]any
+	for _, content := range toolMsgs {
+		if !strings.Contains(content, "Web search results:") {
+			continue
+		}
+		matches := webSearchResultRe.FindAllStringSubmatchIndex(content, -1)
+		for i, match := range matches {
+			title := strings.TrimSpace(content[match[4]:match[5]])
+			rawURL := strings.TrimSpace(content[match[6]:match[7]])
+			snippetStart := match[1]
+			snippetEnd := len(content)
+			if i+1 < len(matches) {
+				snippetEnd = matches[i+1][0]
+			}
+			snippet := strings.TrimSpace(content[snippetStart:snippetEnd])
+			if len(snippet) > 160 {
+				snippet = strings.TrimSpace(snippet[:160]) + "…"
+			}
+			rows = append(rows, map[string]any{
+				"documentId": rawURL,
+				"title":      title,
+				"heading":    rawURL,
+				"page":       0,
+				"snippet":    snippet,
+				"score":      1.0,
+				"url":        rawURL,
+			})
+		}
+	}
+	return rows
+}
+
 // transcriptMessages renders stored rows for display, skipping tool
 // plumbing (tool-result rows and empty assistant tool-call rows are history
 // replay data only). Usage/cost ride along unless public is set — shared
 // threads never leak spend.
 func transcriptMessages(msgs []storage.Message, includeUsage bool) []msgDTO {
 	out := make([]msgDTO, 0, len(msgs))
+	var pendingToolContents []string
 	for _, m := range msgs {
-		if m.Role == string(model.RoleTool) || (m.Content == "" && !userHasImages(m.Data)) {
+		if m.Role == string(model.RoleTool) {
+			pendingToolContents = append(pendingToolContents, m.Content)
+			continue
+		}
+		if m.Content == "" && !userHasImages(m.Data) {
 			continue
 		}
 		var usage *usageDTO
@@ -190,10 +231,22 @@ func transcriptMessages(msgs []storage.Message, includeUsage bool) []msgDTO {
 				Model:        m.Model,
 			}
 		}
+		sources := storedSources(m.Sources)
+		if sources == nil && m.Role == string(model.RoleAssistant) && len(pendingToolContents) > 0 {
+			if extracted := extractWebSourcesFromToolMsgs(pendingToolContents); len(extracted) > 0 {
+				if b, err := json.Marshal(extracted); err == nil {
+					raw := json.RawMessage(b)
+					sources = &raw
+				}
+			}
+		}
+		if m.Role == string(model.RoleAssistant) || m.Role == string(model.RoleUser) {
+			pendingToolContents = nil
+		}
 		out = append(out, msgDTO{
 			ID: m.ID, Role: m.Role, Content: m.Content, Truncated: m.Truncated,
 			CreatedAt: m.CreatedAt.UTC().Format(timeRFC3339), Usage: usage,
-			Images: imagesOf(m.Data), Sources: storedSources(m.Sources),
+			Images: imagesOf(m.Data), Sources: sources,
 		})
 	}
 	return out

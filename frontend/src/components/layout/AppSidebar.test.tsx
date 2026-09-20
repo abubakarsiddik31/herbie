@@ -210,4 +210,15 @@ describe("AppSidebar", () => {
     expect(await screen.findByText("Project Strategy Discussion")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^New chat$/i })).not.toBeInTheDocument();
   });
+
+  it("does not permanently show hover options on selected conversation, keeping options hidden until hover/focus", async () => {
+    renderSidebar("/chat/conv-1");
+
+    await screen.findByText("2026-q3-forecast.pdf");
+
+    const optionsBtn = screen.getByRole("button", { name: "Options for 2026-q3-forecast.pdf" });
+    const optionsContainer = optionsBtn.parentElement;
+    expect(optionsContainer?.className).toContain("opacity-0");
+    expect(optionsContainer?.className).toContain("group-hover:opacity-100");
+  });
 });

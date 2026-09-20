@@ -131,23 +131,33 @@ function SidebarProject({ project }: { project: Project }) {
                 detail.conversations.map((c) => {
                   const title = cleanConversationTitle(c.title);
                   const isFile = isFileTitle(c.title);
+                  const isActive = activeConv === c.id;
                   return (
                     <button
                       key={c.id}
                       type="button"
                       onClick={() => open({ conv: c.id })}
-                      title={title}
                       className={cn(
                         "flex w-full items-center gap-2 rounded-md px-2 py-1 text-[11px] transition-colors",
-                        activeConv === c.id
+                        isActive
                           ? "bg-sidebar-accent/60 text-sidebar-accent-foreground font-medium"
                           : "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
                       )}
                     >
                       {isFile ? (
-                        <FileText className="size-3 shrink-0 text-primary/70" />
+                        <FileText
+                          className={cn(
+                            "size-3 shrink-0 transition-colors",
+                            isActive ? "text-primary" : "text-primary/70"
+                          )}
+                        />
                       ) : (
-                        <MessageSquare className="size-3 shrink-0 opacity-70" />
+                        <MessageSquare
+                          className={cn(
+                            "size-3 shrink-0 transition-opacity",
+                            isActive ? "opacity-100 text-sidebar-accent-foreground" : "opacity-70"
+                          )}
+                        />
                       )}
                       <span className="min-w-0 flex-1 truncate text-left">{title}</span>
                     </button>
@@ -196,6 +206,7 @@ export function AppSidebar() {
   const [renameTitle, setRenameTitle] = useState("");
   const [sharing, setSharing] = useState<Conversation | null>(null);
   const [pendingDelete, setPendingDelete] = useState<Conversation | null>(null);
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
   const { data: conversations, isLoading: conversationsLoading } = useConversations(debouncedFilter.trim());
   const { data: tools } = useTools();
@@ -736,31 +747,46 @@ export function AppSidebar() {
                       <button
                         type="button"
                         onClick={() => selectConversation(c.id)}
-                        title={displayTitle}
                         className="flex items-center gap-2 min-w-0 flex-1 truncate text-left outline-none py-1 pr-7"
                       >
                         {isFile ? (
-                          <FileText className="size-3.5 shrink-0 text-primary/70 group-hover:text-primary transition-colors" />
+                          <FileText
+                            className={cn(
+                              "size-3.5 shrink-0 transition-colors",
+                              isSelected
+                                ? "text-primary"
+                                : "text-primary/70 group-hover:text-primary"
+                            )}
+                          />
                         ) : (
-                          <MessageSquare className="size-3.5 shrink-0 opacity-60 group-hover:opacity-100 transition-opacity" />
+                          <MessageSquare
+                            className={cn(
+                              "size-3.5 shrink-0 transition-opacity",
+                              isSelected
+                                ? "opacity-100 text-sidebar-accent-foreground"
+                                : "opacity-60 group-hover:opacity-100"
+                            )}
+                          />
                         )}
                         <span className="truncate">{displayTitle}</span>
                       </button>
                       <div
                         className={cn(
                           "absolute right-1 top-1/2 -translate-y-1/2 flex items-center z-10 transition-opacity",
-                          isSelected
+                          openMenuId === c.id
                             ? "opacity-100"
                             : "opacity-0 group-hover:opacity-100 focus-within:opacity-100 max-md:opacity-75"
                         )}
                       >
-                        <DropdownMenu>
+                        <DropdownMenu
+                          open={openMenuId === c.id}
+                          onOpenChange={(open) => setOpenMenuId(open ? c.id : null)}
+                        >
                           <DropdownMenuTrigger asChild>
                             <Button
                               variant="ghost"
                               size="icon-xs"
                               aria-label={`Options for ${displayTitle}`}
-                              title="Conversation options"
                               className={cn(
                                 "size-6 rounded-md hover:bg-background/80 hover:text-foreground text-muted-foreground transition-all",
                                 isSelected ? "text-sidebar-accent-foreground" : ""

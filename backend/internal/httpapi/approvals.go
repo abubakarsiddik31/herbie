@@ -148,6 +148,7 @@ func (s *Server) handleApprovals(w http.ResponseWriter, r *http.Request) {
 			ReadDoc:        s.readDocDeps(userID, convID, &sources, &sourcesMu),
 			SaveMemory:     s.saveMemoryFunc(userID),
 			RecordSearch:   s.recordSearchFunc(userID, convID),
+			AddWebSources:  s.webSourcesDeps(&sources, &sourcesMu),
 		},
 		history, golem.DeferredResults{Approvals: resolutions},
 		sink, tools, spec)

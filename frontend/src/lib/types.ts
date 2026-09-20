@@ -25,6 +25,8 @@ export interface Source {
   page: number;
   snippet: string;
   score: number;
+  url?: string;
+  kind?: string;
 }
 export interface UsageTotalsRow { kind: string; model: string; inputTokens: number; outputTokens: number; requests: number; costUsd: number }
 export interface UsageDailyRow { day: string; inputTokens: number; outputTokens: number; costUsd: number }

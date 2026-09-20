@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { BrandMark } from "@/components/BrandMark";
 import { HarveyAvatar } from "@/components/HarveyAvatar";
 import { StreamingText } from "@/components/ai/StreamingText";
+import { extractCitationsFromContent } from "@/features/chat/citations";
 
 export function SharedPage() {
   const { token } = useParams();
@@ -80,13 +81,21 @@ export function SharedPage() {
             <div key={m.id} className="flex gap-2.5">
               <HarveyAvatar className="mt-0.5 size-7.5 shrink-0" />
               <div className="min-w-0 flex-1 space-y-1 pt-0.5">
-                <StreamingText
-                  content={m.content}
-                  streaming={false}
-                  citations={
-                    m.sources && m.sources.length > 0 ? { sources: m.sources } : undefined
-                  }
-                />
+                {(() => {
+                  const activeSources =
+                    m.sources && m.sources.length > 0
+                      ? m.sources
+                      : extractCitationsFromContent(m.content);
+                  return (
+                    <StreamingText
+                      content={m.content}
+                      streaming={false}
+                      citations={
+                        activeSources.length > 0 ? { sources: activeSources } : undefined
+                      }
+                    />
+                  );
+                })()}
                 {m.truncated && (
                   <Badge variant="outline" className="text-muted-foreground text-xs">
                     stopped early

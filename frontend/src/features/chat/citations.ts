@@ -1,3 +1,5 @@
+import type { Source } from "@/lib/types";
+
 // remarkCitations turns bracket citations ([1], [2, 5]) in assistant answers
 // into one cite:N link per number, which the UI renders as a chip with a
 // hover preview (file name + page). It only rewrites plain text nodes —
@@ -24,6 +26,30 @@ interface ParentNode {
 type MdNode = TextNode | LinkNode | ParentNode;
 
 const CITATION_RE = /\[(\d+(?:\s*,\s*\d+)*)\]/g;
+
+export function extractCitationsFromContent(content: string): Source[] {
+  if (!content) return [];
+  const matches = [...content.matchAll(CITATION_RE)];
+  if (matches.length === 0) return [];
+  let maxN = 0;
+  for (const m of matches) {
+    const nums = m[1].split(",").map((s) => parseInt(s.trim(), 10));
+    for (const n of nums) {
+      if (Number.isInteger(n) && n > maxN && n <= 100) {
+        maxN = n;
+      }
+    }
+  }
+  if (maxN === 0) return [];
+  return Array.from({ length: maxN }, (_, i) => ({
+    documentId: "",
+    title: `Source ${i + 1}`,
+    heading: "",
+    page: 0,
+    snippet: "",
+    score: 0,
+  }));
+}
 
 function isParent(node: MdNode): node is ParentNode {
   return "children" in node && Array.isArray((node as ParentNode).children);

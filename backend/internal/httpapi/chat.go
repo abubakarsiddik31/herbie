@@ -21,6 +21,7 @@ import (
 	"github.com/abubakarsiddik31/golem-chatbot/internal/mcp"
 	"github.com/abubakarsiddik31/golem-chatbot/internal/rag"
 	"github.com/abubakarsiddik31/golem-chatbot/internal/storage"
+	"github.com/abubakarsiddik31/golem-chatbot/internal/websearch"
 	"github.com/abubakarsiddik31/golem-chatbot/internal/workflow"
 	"github.com/abubakarsiddik31/golem/model"
 	"github.com/abubakarsiddik31/golem/tool"
@@ -248,6 +249,7 @@ func (s *Server) runTurn(ctx context.Context, userID, convID string, spec chat.R
 		ReadDoc:        s.readDocDeps(userID, convID, &sources, &sourcesMu),
 		SaveMemory:     s.saveMemoryFunc(userID),
 		RecordSearch:   s.recordSearchFunc(userID, convID),
+		AddWebSources:  s.webSourcesDeps(&sources, &sourcesMu),
 	}, history, prompt, parts, sink, tools, spec)
 	if err != nil {
 		s.persistFailure(ctx, userID, convID, spec, err, sink)
@@ -320,7 +322,7 @@ func sourceRows(sources []rag.Scored) []map[string]any {
 		if len(snippet) > 160 {
 			snippet = strings.TrimSpace(snippet[:160]) + "…"
 		}
-		rows[i] = map[string]any{
+		row := map[string]any{
 			"documentId": sc.Chunk.DocumentID,
 			"title":      sc.Chunk.DocTitle,
 			"heading":    sc.Chunk.Heading,
@@ -328,6 +330,12 @@ func sourceRows(sources []rag.Scored) []map[string]any {
 			"snippet":    snippet,
 			"score":      sc.Score,
 		}
+		if strings.HasPrefix(sc.Chunk.DocumentID, "http://") || strings.HasPrefix(sc.Chunk.DocumentID, "https://") {
+			row["url"] = sc.Chunk.DocumentID
+		} else if strings.HasPrefix(sc.Chunk.Heading, "http://") || strings.HasPrefix(sc.Chunk.Heading, "https://") {
+			row["url"] = sc.Chunk.Heading
+		}
+		rows[i] = row
 	}
 	return rows
 }
@@ -825,6 +833,34 @@ func (s *Server) searchDeps(userID, convID string, sources *[]rag.Scored, mu ...
 			})
 		}
 		return scored, offset, nil
+	}
+}
+
+func (s *Server) webSourcesDeps(sources *[]rag.Scored, mu ...*sync.Mutex) func(results []websearch.Result) {
+	var lock *sync.Mutex
+	if len(mu) > 0 && mu[0] != nil {
+		lock = mu[0]
+	}
+	return func(results []websearch.Result) {
+		if sources == nil || len(results) == 0 {
+			return
+		}
+		if lock != nil {
+			lock.Lock()
+			defer lock.Unlock()
+		}
+		for _, r := range results {
+			*sources = append(*sources, rag.Scored{
+				Chunk: rag.Chunk{
+					DocumentID: r.URL,
+					DocTitle:   r.Title,
+					Heading:    r.URL,
+					Content:    r.Snippet,
+				},
+				Context: r.Snippet,
+				Score:   1.0,
+			})
+		}
 	}
 }
 

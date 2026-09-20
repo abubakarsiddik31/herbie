@@ -136,6 +136,25 @@ func TestWebSearchToolParallelQueries(t *testing.T) {
 	}
 }
 
+func TestWebSearchToolAddsWebSources(t *testing.T) {
+	mock := &mockSearcher{results: []websearch.Result{{Title: "Web Result 1", URL: "https://example.com/1", Snippet: "Snippet 1"}}}
+	tl := WebSearchTool(mock, false)
+
+	var addedSources []websearch.Result
+	deps := Deps{
+		AddWebSources: func(results []websearch.Result) {
+			addedSources = append(addedSources, results...)
+		},
+	}
+	_, err := tl.Exec(context.Background(), deps, json.RawMessage(`{"query":"test query"}`))
+	if err != nil {
+		t.Fatalf("exec: %v", err)
+	}
+	if len(addedSources) != 1 || addedSources[0].Title != "Web Result 1" || addedSources[0].URL != "https://example.com/1" {
+		t.Fatalf("unexpected added sources: %+v", addedSources)
+	}
+}
+
 func TestWebSearchGuidanceAppended(t *testing.T) {
 	spec := RunSpec{SystemPrompt: "base"}
 	got := promptFor(spec, []tool.Tool[Deps]{WebSearchTool(nil, false)})

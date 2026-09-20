@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/abubakarsiddik31/golem"
+	"github.com/abubakarsiddik31/golem-chatbot/internal/websearch"
 	"github.com/abubakarsiddik31/golem/model"
 	"github.com/abubakarsiddik31/golem/tool"
 )
@@ -23,6 +24,7 @@ type Deps struct {
 	ReadDoc        ReadDocFunc
 	SaveMemory     func(ctx context.Context, fact string) error
 	RecordSearch   func(ctx context.Context, query, kind, provider string, resultsCount int, durationMs int64)
+	AddWebSources  func(results []websearch.Result)
 }
 
 // PendingApproval is one deferred tool call waiting on the user's decision.
