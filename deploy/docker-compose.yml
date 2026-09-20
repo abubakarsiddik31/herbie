@@ -95,6 +95,17 @@ services:
       FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost:5173}
     restart: unless-stopped
 
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:8090}
+    profiles: [full]
+    ports:
+      - "5173:80"
+    restart: unless-stopped
+
 volumes:
   pgdata:
   weaviate_data:

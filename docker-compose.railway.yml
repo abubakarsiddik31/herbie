@@ -1,0 +1,46 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-golem_chatbot}
+      POSTGRES_USER: ${POSTGRES_USER:-golem}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-golem}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-golem}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgres://${POSTGRES_USER:-golem}:${POSTGRES_PASSWORD:-golem}@postgres.railway.internal:5432/${POSTGRES_DB:-golem_chatbot}}
+      JWT_SECRET: ${JWT_SECRET:-0123456789abcdef0123456789abcdef}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
+      FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost:5173}
+      RAG_ENABLED: "false"
+      WEB_SEARCH_PROVIDER: ${WEB_SEARCH_PROVIDER:-}
+      PORT: "8080"
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:8080}
+    environment:
+      PORT: "80"
+    restart: unless-stopped
+
+volumes:
+  pgdata:

@@ -250,7 +250,7 @@ func Load() (Config, error) {
 	}
 
 	cfg := Config{
-		Port:             env("APP_PORT", "8080"),
+		Port:             env("PORT", env("APP_PORT", "8080")),
 		DatabaseURL:      os.Getenv("DATABASE_URL"),
 		GeminiAPIKey:     os.Getenv("GEMINI_API_KEY"),
 		GeminiModel:      env("GEMINI_MODEL", "gemini-2.5-flash"),

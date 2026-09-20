@@ -58,6 +58,13 @@ func TestLoadRequiresSecrets(t *testing.T) {
 	if cfg.Port != "8080" || cfg.GeminiModel != "gemini-2.5-flash" {
 		t.Fatalf("defaults not applied: %+v", cfg)
 	}
+
+	t.Setenv("PORT", "3000")
+	cfgWithPort, err := Load()
+	if err != nil || cfgWithPort.Port != "3000" {
+		t.Fatalf("PORT not respected: port=%s err=%v", cfgWithPort.Port, err)
+	}
+	t.Setenv("PORT", "")
 	if cfg.ChatInputRate != 0.30 || cfg.ChatOutputRate != 2.50 {
 		t.Fatalf("rate defaults: %+v", cfg)
 	}
