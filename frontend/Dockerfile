@@ -28,6 +28,7 @@ COPY --from=builder /app/dist .
 COPY nginx.conf.template /etc/nginx/templates/default.conf.template
 
 ENV PORT=80
+ENV BACKEND_URL=http://backend.railway.internal:8080
 EXPOSE 80
 
 CMD ["nginx", "-g", "daemon off;"]

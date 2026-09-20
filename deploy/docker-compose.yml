@@ -5,6 +5,7 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-golem_chatbot}
       POSTGRES_USER: ${POSTGRES_USER:-golem}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-golem}
+      PGDATA: /var/lib/postgresql/data/pgdata
     ports:
       - "5433:5432"
     volumes:

@@ -1,7 +1,7 @@
 import { useAuth } from "@/stores/auth";
 import type { User } from "@/lib/types";
 
-const BASE = import.meta.env.VITE_API_URL ?? "http://localhost:8080";
+const BASE = import.meta.env.VITE_API_URL ?? (import.meta.env.DEV ? "http://localhost:8080" : "");
 
 export class ApiError extends Error {
   status: number;

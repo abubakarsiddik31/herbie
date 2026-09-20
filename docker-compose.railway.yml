@@ -5,6 +5,7 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-golem_chatbot}
       POSTGRES_USER: ${POSTGRES_USER:-golem}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-golem}
+      PGDATA: /var/lib/postgresql/data/pgdata
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -17,10 +18,8 @@ services:
   wigolo:
     image: ghcr.io/knockoutez/wigolo:latest
     command: ["serve", "--host", "0.0.0.0", "--port", "3333"]
-    volumes:
-      - wigolo_data:/data
     environment:
-      WIGOLO_DATA_DIR: /data
+      WIGOLO_DATA_DIR: /home/node/.wigolo
       WIGOLO_SERVE_ALLOW_UNAUTHENTICATED: "1"
     restart: unless-stopped
 
@@ -89,6 +88,5 @@ services:
 
 volumes:
   pgdata:
-  wigolo_data:
   weaviate_data:
   minio_data:
