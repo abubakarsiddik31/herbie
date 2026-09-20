@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <!-- Herbie: the bubble-bot. Luminous mineral sage variant for dark surfaces. -->
+  <g transform="translate(0,22)" fill="#739B86">
+    <!-- Antenna -->
+    <rect x="248" y="44" width="16" height="68" rx="8"/>
+    <circle cx="256" cy="36" r="17"/>
+    <!-- Ear nodes -->
+    <rect x="56" y="196" width="40" height="80" rx="20"/>
+    <rect x="416" y="196" width="40" height="80" rx="20"/>
+    <!-- Head: speech bubble with tail; eyes and smile are cutouts -->
+    <path
+      fill-rule="evenodd"
+      clip-rule="evenodd"
+      d="M 172 104
+         H 340
+         A 84 84 0 0 1 424 188
+         V 284
+         A 84 84 0 0 1 340 368
+         H 240
+         C 234 402 222 432 178 448
+         C 190 430 186 400 188 368
+         H 172
+         A 84 84 0 0 1 88 284
+         V 188
+         A 84 84 0 0 1 172 104
+         Z
+         M 168 224
+         A 28 28 0 0 1 224 224
+         L 224 252
+         A 28 28 0 0 1 168 252
+         Z
+         M 288 224
+         A 28 28 0 0 1 344 224
+         L 344 252
+         A 28 28 0 0 1 288 252
+         Z
+         M 218 308
+         Q 256 348 294 308
+         Q 256 322 218 308
+         Z"
+    />
+  </g>
+</svg>

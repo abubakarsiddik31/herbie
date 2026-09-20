@@ -226,7 +226,7 @@ export function WorkflowsPage() {
               <span>Workflows</span>
             </h1>
             <p className="text-xs text-muted-foreground mt-1">
-              Visual automation pipelines like n8n with AI nodes, webhooks, and external tool integrations.
+              Visual automation pipelines with AI nodes, webhooks, and external tool integrations.
             </p>
           </div>
           <Button variant="brand" onClick={() => setCreateOpen(true)} className="gap-2 self-start sm:self-auto shadow-xs">

@@ -262,3 +262,109 @@
   animation: harvey-shadow 0.85s cubic-bezier(0.34, 1.56, 0.64, 1) infinite;
   transform-origin: 18px 33.5px;
 }
+
+/* ==========================================================================
+   ENHANCED HERBIE / HARBEY ANIMATIONS (LANDING & SHOWCASE)
+   ========================================================================== */
+@keyframes herbie-float {
+  0%, 100% {
+    transform: translateY(0px) rotate(0deg);
+  }
+  25% {
+    transform: translateY(-7px) rotate(0.6deg);
+  }
+  75% {
+    transform: translateY(-3px) rotate(-0.6deg);
+  }
+}
+
+@keyframes herbie-float-shadow {
+  0%, 100% {
+    transform: scaleX(1) scaleY(1);
+    opacity: 0.28;
+  }
+  50% {
+    transform: scaleX(0.85) scaleY(0.75);
+    opacity: 0.12;
+  }
+}
+
+@keyframes herbie-pulse-ring {
+  0% {
+    r: 8px;
+    opacity: 0.85;
+  }
+  100% {
+    r: 36px;
+    opacity: 0;
+  }
+}
+
+@keyframes herbie-wave {
+  0%, 100% {
+    transform: rotate(0deg);
+  }
+  20% {
+    transform: rotate(14deg) translateY(-2px);
+  }
+  40% {
+    transform: rotate(-8deg);
+  }
+  60% {
+    transform: rotate(12deg);
+  }
+  80% {
+    transform: rotate(-4deg);
+  }
+}
+
+@keyframes herbie-blink {
+  0%, 90%, 100% {
+    transform: scaleY(1);
+  }
+  95% {
+    transform: scaleY(0.12);
+  }
+}
+
+@keyframes herbie-visor-scan {
+  0% {
+    transform: translateY(-100%);
+    opacity: 0.05;
+  }
+  50% {
+    opacity: 0.35;
+  }
+  100% {
+    transform: translateY(220%);
+    opacity: 0.05;
+  }
+}
+
+.animate-herbie-float {
+  animation: herbie-float 3.8s ease-in-out infinite;
+  transform-origin: center bottom;
+}
+
+.animate-herbie-float-shadow {
+  animation: herbie-float-shadow 3.8s ease-in-out infinite;
+  transform-origin: center center;
+}
+
+.animate-herbie-pulse-ring {
+  animation: herbie-pulse-ring 2.2s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
+}
+
+.animate-herbie-wave {
+  animation: herbie-wave 1.4s ease-in-out infinite;
+  transform-origin: 56px 236px;
+}
+
+.animate-herbie-blink {
+  animation: herbie-blink 3.6s ease-in-out infinite;
+  transform-origin: center;
+}
+
+.animate-herbie-visor-scan {
+  animation: herbie-visor-scan 3s ease-in-out infinite;
+}

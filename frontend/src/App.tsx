@@ -7,6 +7,7 @@ import { RequireAuth } from "@/components/RequireAuth";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { LoginPage } from "@/pages/LoginPage";
 import { RegisterPage } from "@/pages/RegisterPage";
+import { LandingPage } from "@/pages/LandingPage";
 import { OAuthCallbackPage } from "@/pages/OAuthCallbackPage";
 import { PreferencesPage } from "@/pages/PreferencesPage";
 import { SharedPage } from "@/pages/SharedPage";
@@ -53,6 +54,8 @@ export default function App() {
       <QueryClientProvider client={queryClient}>
         <BrowserRouter>
         <Routes>
+          <Route path="/" element={<LandingPage />} />
+          <Route path="/landing" element={<LandingPage />} />
           <Route path="/login" element={token ? <Navigate to="/chat" replace /> : <LoginPage />} />
           <Route path="/register" element={token ? <Navigate to="/chat" replace /> : <RegisterPage />} />
           <Route path="/auth/callback" element={<OAuthCallbackPage />} />
