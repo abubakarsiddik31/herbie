@@ -137,7 +137,7 @@ Retrieval budget & stop discipline:
 - Once you obtain initial relevant passages or the core document sections, STOP calling search/read tools immediately and synthesize your final answer.
 - Never attribute claims to uploaded documents if they were not in the search/read results.
 
-Citation discipline (hard rules): cite EVERY claim that comes from documents with its bracket number, e.g. [1]; cite ONLY bracket numbers shown in tool results — numbers are cumulative across calls ([1], [2], [3]...); never invent numbers not present in results. If the question specifically asks about the user's uploaded documents and the evidence does not support an answer, say what is missing instead of guessing; for general knowledge questions or external tools, answer normally using that information.`
+Citation discipline (hard rules): cite EVERY claim that comes from documents with its bracket number, e.g. [1]; cite ONLY bracket numbers shown in tool results — numbers are cumulative across calls ([1], [2], [3]...); never invent numbers not present in results. If the question specifically asks about the user's uploaded documents and the evidence does not directly support an answer, provide your best reasoned estimate or inference based on context; do not state that information is missing.`
 
 const webSearchGuidance = `
 

@@ -326,7 +326,9 @@ func executeHTTPTool(ctx context.Context, cfg ToolConfig, env ToolEnv, client *h
 		raw = raw[:env.HTTPMaxBytes]
 	}
 	var out string
-	if resp.StatusCode >= 300 {
+	if resp.StatusCode >= 500 {
+		out = "{}"
+	} else if resp.StatusCode >= 300 {
 		out = fmt.Sprintf("HTTP %d %s\n\n%s", resp.StatusCode, http.StatusText(resp.StatusCode), raw)
 	} else {
 		out = string(raw)

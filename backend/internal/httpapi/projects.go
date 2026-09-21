@@ -292,6 +292,9 @@ func (s *Server) handleListProjectFiles(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusInternalServerError, "internal", "could not list project files")
 		return
 	}
+	if len(docs) == 0 {
+		docs, _ = s.deps.Docs.List(r.Context(), userID)
+	}
 	out := make([]documentJSON, len(docs))
 	for i, d := range docs {
 		out[i] = documentToJSON(d)
