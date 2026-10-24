@@ -210,6 +210,10 @@ table "conversations" {
     null    = false
     default = sql("now()")
   }
+  column "bot_id" {
+    type = uuid
+    null = true
+  }
   primary_key {
     columns = [column.id]
   }
@@ -217,6 +221,11 @@ table "conversations" {
     columns     = [column.user_id]
     ref_columns = [table.users.column.id]
     on_delete   = CASCADE
+  }
+  foreign_key "conversations_bot_id_fkey" {
+    columns     = [column.bot_id]
+    ref_columns = [table.bots.column.id]
+    on_delete   = SET_NULL
   }
   index "idx_conversations_user" {
     on {
@@ -226,6 +235,9 @@ table "conversations" {
       column = column.updated_at
       desc   = true
     }
+  }
+  index "idx_conversations_bot" {
+    columns = [column.bot_id]
   }
 }
 
@@ -1083,6 +1095,137 @@ table "search_queries" {
   }
   index "idx_search_queries_user_kind" {
     columns = [column.user_id, column.kind, column.created_at]
+  }
+}
+
+table "bots" {
+  schema = schema.public
+  column "id" {
+    type    = uuid
+    null    = false
+    default = sql("gen_random_uuid()")
+  }
+  column "user_id" {
+    type = uuid
+    null = false
+  }
+  column "name" {
+    type = text
+    null = false
+  }
+  column "emoji" {
+    type    = text
+    null    = false
+    default = "🤖"
+  }
+  column "color" {
+    type    = text
+    null    = false
+    default = "sage"
+  }
+  column "instructions" {
+    type    = text
+    null    = false
+    default = ""
+  }
+  column "model" {
+    type    = text
+    null    = false
+    default = ""
+  }
+  column "temperature" {
+    type = real
+    null = true
+  }
+  column "rag_enabled" {
+    type    = boolean
+    null    = false
+    default = true
+  }
+  column "is_archived" {
+    type    = boolean
+    null    = false
+    default = false
+  }
+  column "created_at" {
+    type    = timestamptz
+    null    = false
+    default = sql("now()")
+  }
+  column "updated_at" {
+    type    = timestamptz
+    null    = false
+    default = sql("now()")
+  }
+  primary_key {
+    columns = [column.id]
+  }
+  foreign_key "bots_user_id_fkey" {
+    columns     = [column.user_id]
+    ref_columns = [table.users.column.id]
+    on_delete   = CASCADE
+  }
+  index "idx_bots_user" {
+    on {
+      column = column.user_id
+    }
+    on {
+      column = column.updated_at
+      desc   = true
+    }
+  }
+}
+
+table "bot_memories" {
+  schema = schema.public
+  column "id" {
+    type    = uuid
+    null    = false
+    default = sql("gen_random_uuid()")
+  }
+  column "bot_id" {
+    type = uuid
+    null = false
+  }
+  column "user_id" {
+    type = uuid
+    null = false
+  }
+  column "content" {
+    type = text
+    null = false
+  }
+  column "created_at" {
+    type    = timestamptz
+    null    = false
+    default = sql("now()")
+  }
+  column "updated_at" {
+    type    = timestamptz
+    null    = false
+    default = sql("now()")
+  }
+  primary_key {
+    columns = [column.id]
+  }
+  foreign_key "bot_memories_bot_id_fkey" {
+    columns     = [column.bot_id]
+    ref_columns = [table.bots.column.id]
+    on_delete   = CASCADE
+  }
+  foreign_key "bot_memories_user_id_fkey" {
+    columns     = [column.user_id]
+    ref_columns = [table.users.column.id]
+    on_delete   = CASCADE
+  }
+  index "idx_bot_memories_bot" {
+    on {
+      column = column.bot_id
+    }
+    on {
+      column = column.created_at
+      desc   = true
+    }
   }
 }
 
