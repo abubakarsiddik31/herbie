@@ -159,7 +159,7 @@ func main() {
 		ByModel: byModel,
 	}
 
-	handler := httpapi.NewServer(httpapi.ServerDeps{
+	botSrv, handler := httpapi.NewServerWithRunner(httpapi.ServerDeps{
 		Cfg:         cfg,
 		Log:         log,
 		Auth:        svc,
@@ -176,6 +176,7 @@ func main() {
 		Pending:     storage.NewPendingCalls(pool),
 		Bots:        storage.NewBots(pool),
 		BotMemories: storage.NewBotMemories(pool),
+		BotRuns:     storage.NewBotRuns(pool),
 		Agent:       agent,
 		Rates:       rates,
 		ModelKeys:   modelKeys,
@@ -196,6 +197,15 @@ func main() {
 	errCh := make(chan error, 1)
 	go func() { errCh <- srv.ListenAndServe() }()
 	log.Info("listening", "port", cfg.Port)
+
+	// The bot runner shares the signal context: SIGINT/SIGTERM stops
+	// claiming, cancels in-flight runs (parked ones keep their rows for
+	// the next boot's recovery), then the HTTP shutdown below follows.
+	if cfg.BotRunnerEnabled {
+		botSrv.StartBotRunner(ctx)
+		log.Info("bot runner started", "concurrency", cfg.BotRunnerConcurrency,
+			"poll_interval", cfg.BotRunnerPollInterval.String())
+	}
 
 	select {
 	case err := <-errCh:

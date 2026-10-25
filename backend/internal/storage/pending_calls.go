@@ -87,3 +87,43 @@ func (p *PendingCalls) SetStatus(ctx context.Context, userID, callID, status str
 	}
 	return nil
 }
+
+// ListAll returns the conversation's tool-call rows regardless of status.
+// A resumed background bot run reads the user's decisions from rows the
+// approvals endpoint already flipped — ForConversation only surfaces
+// undecided ones. Oldest first, so the newest pause cycle's calls land last.
+func (p *PendingCalls) ListAll(ctx context.Context, convID, userID string) ([]PendingToolCall, error) {
+	rows, err := p.pool.Query(ctx,
+		`SELECT call_id, conversation_id::text, user_id::text, tool_name, args, reason, status, created_at
+		 FROM pending_tool_calls
+		 WHERE conversation_id = $1 AND user_id = $2
+		 ORDER BY created_at, call_id`, convID, userID)
+	if err != nil {
+		return nil, fmt.Errorf("pending calls list all: %w", err)
+	}
+	defer rows.Close()
+	var out []PendingToolCall
+	for rows.Next() {
+		var c PendingToolCall
+		if err := rows.Scan(&c.CallID, &c.ConversationID, &c.UserID, &c.ToolName, &c.Args, &c.Reason, &c.Status, &c.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+// DeletePendingFor drops the conversation's still-undecided calls. A bot run
+// that starts fresh from the queue (a restarted server requeues its
+// waiting_approval runs) must not inherit stale approval rows: the fresh run
+// re-asks as needed, and leftover rows would block the conversation's live
+// send path.
+func (p *PendingCalls) DeletePendingFor(ctx context.Context, convID, userID string) error {
+	_, err := p.pool.Exec(ctx,
+		`DELETE FROM pending_tool_calls WHERE conversation_id = $1 AND user_id = $2 AND status = 'pending'`,
+		convID, userID)
+	if err != nil {
+		return fmt.Errorf("delete pending calls: %w", err)
+	}
+	return nil
+}

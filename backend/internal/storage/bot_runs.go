@@ -191,11 +191,14 @@ func (r *BotRuns) UpdateActivity(ctx context.Context, id string, activity []byte
 	return err
 }
 
-// RecoverRunning requeues runs stranded in running at startup (crashed
-// runner) so they are claimed again; started_at is cleared because the
-// previous start no longer describes a live attempt.
+// RecoverRunning requeues runs stranded in running OR waiting_approval at
+// startup (crashed runner, or a restart while a run was parked on approvals)
+// so they are claimed again; started_at is cleared because the previous
+// start no longer describes a live attempt. Requeued waiting_approval runs
+// restart FRESH: the runner drops the conversation's still-pending calls and
+// re-asks from persisted history (see httpapi's bot runner).
 func (r *BotRuns) RecoverRunning(ctx context.Context) error {
-	_, err := r.pool.Exec(ctx, `UPDATE bot_runs SET status='queued', started_at=NULL WHERE status='running'`)
+	_, err := r.pool.Exec(ctx, `UPDATE bot_runs SET status='queued', started_at=NULL WHERE status IN ('running','waiting_approval')`)
 	return err
 }
 

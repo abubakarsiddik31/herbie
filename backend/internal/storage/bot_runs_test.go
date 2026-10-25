@@ -97,6 +97,33 @@ func TestBotRunsLifecycle(t *testing.T) {
 		t.Fatalf("cancel recovered: %v", err)
 	}
 
+	// RecoverRunning also requeues waiting_approval: a restart while a run
+	// was parked on approvals must not strand it — the next boot requeues it
+	// for a fresh start (the runner drops the stale pending calls).
+	parked, err := store.Create(ctx, BotRun{BotID: bot.ID, ConversationID: conv.ID, UserID: user.ID, Task: "parked sweep"})
+	if err != nil {
+		t.Fatalf("create parked: %v", err)
+	}
+	if _, err := store.ClaimNext(ctx); err != nil {
+		t.Fatalf("claim parked: %v", err)
+	}
+	if err := store.SetWaitingApproval(ctx, parked.ID); err != nil {
+		t.Fatalf("park: %v", err)
+	}
+	if err := store.RecoverRunning(ctx); err != nil {
+		t.Fatalf("recover parked: %v", err)
+	}
+	got, err = store.Get(ctx, user.ID, parked.ID)
+	if err != nil || got.Status != "queued" || got.StartedAt != nil {
+		t.Fatalf("after recover parked: %v %+v", err, got)
+	}
+	if again, err := store.ClaimNext(ctx); err != nil || again == nil || again.ID != parked.ID {
+		t.Fatalf("claim recovered parked: %v %+v", err, again)
+	}
+	if err := store.SetFinished(ctx, parked.ID, "cancelled", 0, 0, 0, 0, ""); err != nil {
+		t.Fatalf("cancel recovered parked: %v", err)
+	}
+
 	// Cascade cleanup: deleting the bot wipes its runs (bot_runs.bot_id ON
 	// DELETE CASCADE), so a re-run against this database starts from an empty
 	// queue and LatestPerBot sees no leftovers.

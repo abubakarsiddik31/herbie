@@ -41,6 +41,7 @@ type ServerDeps struct {
 	Pending     PendingStore
 	Bots        BotStore
 	BotMemories BotMemoryStore
+	BotRuns     BotRunStore
 	Agent       *chat.Agent
 	Rates       cost.Table
 	ModelKeys   chat.ProviderKeys
@@ -84,6 +85,12 @@ type RagSearchFunc func(ctx context.Context, userID, query string, k int, docIDs
 type Server struct {
 	deps ServerDeps
 	mux  *http.ServeMux
+	// runner drains the bot run queue once StartBotRunner boots it; nil
+	// until then, so the cancel/wake/resume plumbing is a no-op.
+	runner *botRunner
+	// botAgent is the Agent narrowed to the run surface the background
+	// runner calls; defaulted to deps.Agent and swapped by runner tests.
+	botAgent botAgentAPI
 }
 
 // NewServer builds the root handler, CORS outermost. Auth endpoints are
@@ -94,8 +101,14 @@ func NewServer(deps ServerDeps) http.Handler {
 	return h
 }
 
+// NewServerWithRunner is NewServer for callers that also drive the
+// background bot runner and need the *Server (StartBotRunner).
+func NewServerWithRunner(deps ServerDeps) (*Server, http.Handler) {
+	return newServer(deps)
+}
+
 func newServer(deps ServerDeps) (*Server, http.Handler) {
-	s := &Server{deps: deps, mux: http.NewServeMux()}
+	s := &Server{deps: deps, mux: http.NewServeMux(), botAgent: deps.Agent}
 	s.mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))

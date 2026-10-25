@@ -140,16 +140,7 @@ func (s *Server) handleApprovals(w http.ResponseWriter, r *http.Request) {
 		_ = sink.event("meta", map[string]any{"type": "compacted"})
 	}
 	outcome, err := s.deps.Agent.RunDeferred(ctx,
-		chat.Deps{
-			UserID:         userID,
-			ConversationID: convID,
-			Search:         s.searchDeps(userID, convID, &sources, &sourcesMu),
-			ListDocs:       s.listDocsDeps(userID, convID),
-			ReadDoc:        s.readDocDeps(userID, convID, &sources, &sourcesMu),
-			SaveMemory:     s.saveMemoryFor(userID, conv.BotID),
-			RecordSearch:   s.recordSearchFunc(userID, convID),
-			AddWebSources:  s.webSourcesDeps(&sources, &sourcesMu),
-		},
+		s.buildDeps(userID, convID, &sources, &sourcesMu, conv.BotID),
 		history, golem.DeferredResults{Approvals: resolutions},
 		sink, tools, spec)
 	if err != nil {

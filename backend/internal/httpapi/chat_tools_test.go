@@ -50,6 +50,27 @@ func (f *fakePending) SetStatus(_ context.Context, userID, callID, status string
 	return storage.ErrNotFound
 }
 
+func (f *fakePending) ListAll(_ context.Context, convID, userID string) ([]storage.PendingToolCall, error) {
+	var out []storage.PendingToolCall
+	for _, c := range f.rows {
+		if c.ConversationID == convID && c.UserID == userID {
+			out = append(out, c)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakePending) DeletePendingFor(_ context.Context, convID, userID string) error {
+	var kept []storage.PendingToolCall
+	for _, c := range f.rows {
+		if !(c.ConversationID == convID && c.UserID == userID && c.Status == "pending") {
+			kept = append(kept, c)
+		}
+	}
+	f.rows = kept
+	return nil
+}
+
 // newHandlerServerFull is the complete harness: tools + pending stores and a
 // config that allows the httptest loopback endpoints the stub tools hit.
 func newHandlerServerFull(t *testing.T, agent *chat.Agent, convs ConvoStore, msgs MsgStore, usage UsageStore, tools ToolStore, pending PendingStore) (http.Handler, string) {

@@ -42,6 +42,14 @@ type Config struct {
 	// bots do not count toward the limit).
 	MaxBotsPerUser int
 
+	// Bot runner: the in-process worker that drains the bot_runs queue.
+	// Enabled defaults on (the queue is simply never drained when off);
+	// Concurrency caps runs executing or parked-for-approval at once;
+	// PollInterval is the fallback claim cadence when no wake arrives.
+	BotRunnerEnabled      bool
+	BotRunnerConcurrency  int
+	BotRunnerPollInterval time.Duration
+
 	// RAGConfig gates the retrieval stack. Enabled is an explicit opt-in
 	// so a running stack never requires the rag compose profile.
 	RAG RAGConfig
@@ -147,6 +155,20 @@ func Load() (Config, error) {
 	maxBots, err := envInt("MAX_BOTS_PER_USER", 20)
 	if err != nil {
 		return Config{}, err
+	}
+	botConc, err := envInt("BOT_RUNNER_CONCURRENCY", 2)
+	if err != nil {
+		return Config{}, err
+	}
+	if botConc <= 0 {
+		botConc = 2
+	}
+	botPollMs, err := envInt("BOT_RUNNER_POLL_MS", 2000)
+	if err != nil {
+		return Config{}, err
+	}
+	if botPollMs <= 0 {
+		botPollMs = 2000
 	}
 	dims, err := envInt("EMBEDDING_DIMS", 768)
 	if err != nil {
@@ -319,6 +341,10 @@ func Load() (Config, error) {
 		ToolAllowPrivateHosts: envBool("TOOL_ALLOW_PRIVATE_HOSTS", false),
 		MaxToolsPerUser:       maxTools,
 		MaxBotsPerUser:        maxBots,
+
+		BotRunnerEnabled:      envBool("BOT_RUNNER_ENABLED", true),
+		BotRunnerConcurrency:  botConc,
+		BotRunnerPollInterval: time.Duration(botPollMs) * time.Millisecond,
 
 		RAG: RAGConfig{
 			Enabled:            envBool("RAG_ENABLED", false),
