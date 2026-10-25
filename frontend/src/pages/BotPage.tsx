@@ -8,16 +8,39 @@ import {
   Loader2,
   MessageSquare,
   Pencil,
+  Play,
+  Plus,
   Sidebar,
+  Trash2,
 } from "lucide-react";
 import { ApiError } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import type { BotRoutine } from "@/lib/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Switch } from "@/components/ui/switch";
 import { useSidebar } from "@/components/layout/SidebarContext";
-import { isRunActive, useBot, useBotRuns, useStartBotChat } from "@/features/bots/useBots";
+import {
+  isRunActive,
+  useBot,
+  useBotRoutines,
+  useBotRuns,
+  useDeleteRoutine,
+  useRunRoutineNow,
+  useStartBotChat,
+  useUpdateRoutine,
+} from "@/features/bots/useBots";
 import { BotFormDialog } from "@/features/bots/BotFormDialog";
+import { RoutineFormDialog } from "@/features/bots/RoutineFormDialog";
 import { TaskComposer } from "@/features/bots/TaskComposer";
 import { RunCard, RUN_STATUS_LABELS, RUN_STATUS_STYLES } from "@/features/bots/RunCard";
 
@@ -29,8 +52,194 @@ const TABS: Array<{ id: Tab; label: string }> = [
   { id: "workspace", label: "Workspace" },
 ];
 
-// BotPage is the bot detail shell (header + placeholder sections); Tasks 9,
-// 12 and 16 fill Runs, Routines and Workspace with real content.
+// RoutinesPanel lists the bot's cron routines with enable toggles, manual
+// runs and deletes. The runs they produce are shown in the Runs tab.
+function RoutinesPanel({ botId, botName }: { botId: string; botName: string }) {
+  const routines = useBotRoutines(botId);
+  const updateRoutine = useUpdateRoutine(botId);
+  const deleteRoutine = useDeleteRoutine(botId);
+  const runNow = useRunRoutineNow(botId);
+
+  const [formOpen, setFormOpen] = useState(false);
+  const [editing, setEditing] = useState<BotRoutine | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<BotRoutine | null>(null);
+
+  function handleToggle(routine: BotRoutine, enabled: boolean) {
+    updateRoutine.mutate(
+      { routineId: routine.id, enabled },
+      {
+        onError: (err) =>
+          toast.error(err instanceof ApiError ? err.message : "Failed to update routine"),
+      }
+    );
+  }
+
+  function handleRunNow(routine: BotRoutine) {
+    runNow.mutate(routine.id, {
+      onSuccess: () => toast.success(`Queued "${routine.name}"`),
+      onError: (err) =>
+        toast.error(err instanceof ApiError ? err.message : "Failed to queue run"),
+    });
+  }
+
+  function handleDelete() {
+    if (!pendingDelete) return;
+    deleteRoutine.mutate(pendingDelete.id, {
+      onSuccess: () => {
+        setPendingDelete(null);
+        toast.success("Routine deleted");
+      },
+      onError: (err) =>
+        toast.error(err instanceof ApiError ? err.message : "Failed to delete routine"),
+    });
+  }
+
+  const list = routines.data?.routines ?? [];
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <p className="text-xs text-muted-foreground">
+          Routines run {botName}'s prompt on a cron schedule.
+        </p>
+        <Button
+          size="sm"
+          variant="brand"
+          className="gap-1.5"
+          onClick={() => {
+            setEditing(null);
+            setFormOpen(true);
+          }}
+        >
+          <Plus className="size-3.5" />
+          New routine
+        </Button>
+      </div>
+
+      {routines.isLoading && <Skeleton className="h-44 rounded-2xl" />}
+
+      {list.map((routine) => (
+        <div
+          key={routine.id}
+          className="flex flex-col gap-3 rounded-2xl border border-border/60 bg-card p-4 sm:flex-row sm:items-center"
+        >
+          <div className="min-w-0 flex-1 space-y-1">
+            <div className="flex items-center gap-2">
+              <h3 className="truncate text-sm font-semibold">{routine.name}</h3>
+              <Badge variant="outline" className="text-[10px] text-muted-foreground">
+                {routine.timezone}
+              </Badge>
+            </div>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
+              <code className="font-mono">{routine.schedule}</code>
+              <span>
+                Next run:{" "}
+                {routine.nextRunAt
+                  ? new Date(routine.nextRunAt).toLocaleString()
+                  : "—"}
+              </span>
+              {routine.lastRunAt && (
+                <span>Last run: {new Date(routine.lastRunAt).toLocaleString()}</span>
+              )}
+            </div>
+          </div>
+
+          <div className="flex items-center gap-1.5 shrink-0">
+            <Switch
+              checked={routine.enabled}
+              onCheckedChange={(checked) => handleToggle(routine, checked)}
+              disabled={updateRoutine.isPending}
+              aria-label={`Enable ${routine.name}`}
+            />
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              onClick={() => handleRunNow(routine)}
+              disabled={runNow.isPending}
+              aria-label={`Run ${routine.name} now`}
+              title="Run now"
+            >
+              {runNow.isPending ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <Play className="size-4" />
+              )}
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              onClick={() => {
+                setEditing(routine);
+                setFormOpen(true);
+              }}
+              aria-label={`Edit ${routine.name}`}
+              title="Edit routine"
+            >
+              <Pencil className="size-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              className="text-muted-foreground hover:text-destructive"
+              onClick={() => setPendingDelete(routine)}
+              aria-label={`Delete ${routine.name}`}
+              title="Delete routine"
+            >
+              <Trash2 className="size-4" />
+            </Button>
+          </div>
+        </div>
+      ))}
+
+      {!routines.isLoading && list.length === 0 && (
+        <div className="flex flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-border/80 p-12 text-center">
+          <div className="flex size-12 items-center justify-center rounded-2xl bg-muted text-muted-foreground">
+            <CalendarClock className="size-6" />
+          </div>
+          <div className="space-y-1">
+            <h3 className="text-sm font-semibold">No routines yet</h3>
+            <p className="max-w-sm text-xs text-muted-foreground">
+              Routines let {botName} work on a schedule — daily digests, weekly reports, and
+              more.
+            </p>
+          </div>
+        </div>
+      )}
+
+      <RoutineFormDialog
+        open={formOpen}
+        onOpenChange={setFormOpen}
+        botId={botId}
+        routine={editing ?? undefined}
+      />
+
+      <Dialog
+        open={pendingDelete !== null}
+        onOpenChange={(open) => !open && setPendingDelete(null)}
+      >
+        <DialogContent showCloseButton={false} className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Delete routine?</DialogTitle>
+            <DialogDescription>
+              “{pendingDelete?.name}” will stop running and be permanently removed.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPendingDelete(null)}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={handleDelete} disabled={deleteRoutine.isPending}>
+              {deleteRoutine.isPending ? "Deleting…" : "Delete"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+
+// BotPage is the bot detail shell (header + tabs); Task 16 fills Workspace.
 export function BotPage() {
   const { botId } = useParams<{ botId: string }>();
   const navigate = useNavigate();
@@ -208,19 +417,8 @@ export function BotPage() {
             </div>
           )}
 
-          {activeTab === "routines" && (
-            <div className="flex flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-border/80 p-12 text-center">
-              <div className="flex size-12 items-center justify-center rounded-2xl bg-muted text-muted-foreground">
-                <CalendarClock className="size-6" />
-              </div>
-              <div className="space-y-1">
-                <h3 className="text-sm font-semibold">No routines yet</h3>
-                <p className="max-w-sm text-xs text-muted-foreground">
-                  Routines let {bot.name} work on a schedule — daily digests, weekly reports, and
-                  more.
-                </p>
-              </div>
-            </div>
+          {activeTab === "routines" && bot && (
+            <RoutinesPanel botId={bot.id} botName={bot.name} />
           )}
 
           {activeTab === "workspace" && (

@@ -250,6 +250,23 @@ export interface PendingCall {
   reason: string;
 }
 
+/** A cron-scheduled prompt the bot runs on its own; times are ISO strings. */
+export interface BotRoutine {
+  id: string;
+  botId: string;
+  name: string;
+  /** 5-field cron: "m h dom mon dow". */
+  schedule: string;
+  /** IANA timezone the schedule is evaluated in, e.g. "Asia/Dhaka". */
+  timezone: string;
+  prompt: string;
+  enabled: boolean;
+  lastRunAt: string | null;
+  nextRunAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface ToolOAuthProvider {
   id: string;
   name: string;

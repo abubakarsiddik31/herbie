@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { ApiError, apiFetch } from "@/lib/api";
-import type { Bot, BotRun, BotRunStatus, Conversation, PendingCall } from "@/lib/types";
+import type { Bot, BotRoutine, BotRun, BotRunStatus, Conversation, PendingCall } from "@/lib/types";
 
 export interface BotMemory {
   id: string;
@@ -182,6 +182,85 @@ export function useResolveRunApprovals(botId: string) {
     onSuccess: (_data, vars) => {
       void queryClient.invalidateQueries({ queryKey: ["bot-runs", botId] });
       void queryClient.invalidateQueries({ queryKey: ["bot-run", vars.runId] });
+    },
+  });
+}
+
+export interface BotRoutinesResponse {
+  routines: BotRoutine[];
+}
+
+/** Body for POST /api/bots/{id}/routines; PATCH also accepts `enabled`. */
+export interface RoutineInput {
+  name: string;
+  schedule: string;
+  timezone: string;
+  prompt: string;
+}
+
+export function useBotRoutines(botId: string | null) {
+  return useQuery({
+    queryKey: ["bot-routines", botId],
+    queryFn: () => apiFetch<BotRoutinesResponse>(`/api/bots/${botId}/routines`),
+    enabled: botId !== null,
+  });
+}
+
+export function useCreateRoutine(botId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: RoutineInput) =>
+      apiFetch<{ routine: BotRoutine }>(`/api/bots/${botId}/routines`, {
+        method: "POST",
+        json: body,
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["bot-routines", botId] });
+    },
+  });
+}
+
+export function useUpdateRoutine(botId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { routineId: string } & Partial<RoutineInput> & { enabled?: boolean }) =>
+      apiFetch<{ routine: BotRoutine }>(`/api/bots/routines/${vars.routineId}`, {
+        method: "PATCH",
+        json: {
+          ...(vars.name !== undefined && { name: vars.name }),
+          ...(vars.schedule !== undefined && { schedule: vars.schedule }),
+          ...(vars.timezone !== undefined && { timezone: vars.timezone }),
+          ...(vars.prompt !== undefined && { prompt: vars.prompt }),
+          ...(vars.enabled !== undefined && { enabled: vars.enabled }),
+        },
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["bot-routines", botId] });
+    },
+  });
+}
+
+export function useDeleteRoutine(botId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (routineId: string) =>
+      apiFetch<void>(`/api/bots/routines/${routineId}`, { method: "DELETE" }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["bot-routines", botId] });
+    },
+  });
+}
+
+/** Enqueues a manual run of the routine now; the run itself shows up in the
+ *  Runs tab via the existing run polling. */
+export function useRunRoutineNow(botId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (routineId: string) =>
+      apiFetch<{ run: BotRun }>(`/api/bots/routines/${routineId}/run`, { method: "POST" }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["bot-routines", botId] });
+      void queryClient.invalidateQueries({ queryKey: ["bot-runs", botId] });
     },
   });
 }
