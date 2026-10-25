@@ -16,8 +16,10 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useSidebar } from "@/components/layout/SidebarContext";
-import { useBot, useStartBotChat } from "@/features/bots/useBots";
+import { isRunActive, useBot, useBotRuns, useStartBotChat } from "@/features/bots/useBots";
 import { BotFormDialog } from "@/features/bots/BotFormDialog";
+import { TaskComposer } from "@/features/bots/TaskComposer";
+import { RunCard, RUN_STATUS_LABELS, RUN_STATUS_STYLES } from "@/features/bots/RunCard";
 
 type Tab = "runs" | "routines" | "workspace";
 
@@ -35,11 +37,16 @@ export function BotPage() {
   const { toggleSidebar, setMobileOpen } = useSidebar();
   const { data, isLoading, isError } = useBot(botId ?? null);
   const startChat = useStartBotChat(botId ?? "");
+  // Runs are polled here so the header chip and the Runs tab stay live; the
+  // query stops refetching on its own once every run has settled.
+  const runs = useBotRuns(botId ?? null);
 
   const [activeTab, setActiveTab] = useState<Tab>("runs");
   const [editOpen, setEditOpen] = useState(false);
 
   const bot = data?.bot;
+  const latestRun = runs.data?.runs[0] ?? null;
+  const runActive = runs.data?.runs.some((r) => isRunActive(r.status)) ?? false;
 
   async function handleChat() {
     try {
@@ -114,10 +121,21 @@ export function BotPage() {
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
-          {/* Status placeholder — wired to real run status in Task 9. */}
-          <Badge variant="outline" className="text-[10px] text-muted-foreground">
-            Idle
-          </Badge>
+          {latestRun ? (
+            <Badge
+              variant="outline"
+              className={cn("gap-1.5 text-[10px]", RUN_STATUS_STYLES[latestRun.status])}
+            >
+              {latestRun.status === "waiting_approval" && (
+                <span className="size-1.5 animate-pulse rounded-full bg-amber-500" />
+              )}
+              {RUN_STATUS_LABELS[latestRun.status]}
+            </Badge>
+          ) : (
+            <Badge variant="outline" className="text-[10px] text-muted-foreground">
+              Idle
+            </Badge>
+          )}
           <Button
             size="sm"
             variant="outline"
@@ -160,17 +178,33 @@ export function BotPage() {
           </div>
 
           {activeTab === "runs" && (
-            <div className="flex flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-border/80 p-12 text-center">
-              <div className="flex size-12 items-center justify-center rounded-2xl bg-muted text-muted-foreground">
-                <CalendarClock className="size-6" />
-              </div>
-              <div className="space-y-1">
-                <h3 className="text-sm font-semibold">No runs yet</h3>
-                <p className="max-w-sm text-xs text-muted-foreground">
-                  Scheduled and background runs will appear here. Chat with {bot.name} to get
-                  started.
-                </p>
-              </div>
+            <div className="space-y-4">
+              <TaskComposer bot={bot} runActive={runActive} />
+
+              {runs.isLoading && <Skeleton className="h-44 rounded-2xl" />}
+
+              {!runs.isLoading && runs.data && runs.data.runs.length > 0 && (
+                <div className="space-y-3">
+                  {runs.data.runs.map((r) => (
+                    <RunCard key={r.id} run={r} />
+                  ))}
+                </div>
+              )}
+
+              {!runs.isLoading && runs.data && runs.data.runs.length === 0 && (
+                <div className="flex flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-border/80 p-12 text-center">
+                  <div className="flex size-12 items-center justify-center rounded-2xl bg-muted text-muted-foreground">
+                    <CalendarClock className="size-6" />
+                  </div>
+                  <div className="space-y-1">
+                    <h3 className="text-sm font-semibold">No runs yet</h3>
+                    <p className="max-w-sm text-xs text-muted-foreground">
+                      Scheduled and background runs will appear here. Give {bot.name} a task above
+                      to get started.
+                    </p>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

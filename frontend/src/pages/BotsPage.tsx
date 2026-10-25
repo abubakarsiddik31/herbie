@@ -75,7 +75,9 @@ function BotCard({ bot, onEdit, onDelete }: { bot: Bot; onEdit: (bot: Bot) => vo
             </p>
           </div>
         </Link>
-        {/* Status placeholder — wired to real run status in Task 9. */}
+        {/* Status chip intentionally stays "Idle" here: the bots list endpoint
+         *  carries no latest-run data and per-bot run polling on this page was
+         *  ruled out (see task-9 report); revisit during T12/morning polish. */}
         <Badge variant="outline" className="shrink-0 text-[10px] text-muted-foreground">
           Idle
         </Badge>

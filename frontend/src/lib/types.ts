@@ -208,6 +208,48 @@ export interface Bot {
   updatedAt: string;
 }
 
+export type BotRunStatus =
+  | "queued"
+  | "running"
+  | "waiting_approval"
+  | "succeeded"
+  | "failed"
+  | "cancelled";
+
+/** One step in a run's activity log; the runner currently emits tool_start /
+ *  tool_end events with millisecond timestamps. */
+export interface BotRunActivity {
+  event: string;
+  name?: string;
+  ok?: boolean;
+  t: number;
+}
+
+export interface BotRun {
+  id: string;
+  botId: string;
+  conversationId: string;
+  status: BotRunStatus;
+  task: string;
+  triggerSource: string;
+  error: string | null;
+  activity: BotRunActivity[];
+  inputTokens: number;
+  outputTokens: number;
+  requests: number;
+  costUsd: number;
+  createdAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+}
+
+export interface PendingCall {
+  callId: string;
+  toolName: string;
+  args: unknown;
+  reason: string;
+}
+
 export interface ToolOAuthProvider {
   id: string;
   name: string;
