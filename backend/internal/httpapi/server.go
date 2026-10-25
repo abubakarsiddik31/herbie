@@ -43,6 +43,7 @@ type ServerDeps struct {
 	Bots        BotStore
 	BotMemories BotMemoryStore
 	BotRuns     BotRunStore
+	BotRoutines BotRoutineStore
 	Agent       *chat.Agent
 	Rates       cost.Table
 	ModelKeys   chat.ProviderKeys
@@ -199,6 +200,11 @@ func newServer(deps ServerDeps) (*Server, http.Handler) {
 	authed.HandleFunc("DELETE /api/bots/{id}", s.handleDeleteBot)
 	authed.HandleFunc("POST /api/bots/{id}/conversations", s.handleCreateBotConversation)
 	authed.HandleFunc("POST /api/bots/{id}/tasks", s.handleCreateBotTask)
+	authed.HandleFunc("GET /api/bots/{id}/routines", s.handleListRoutines)
+	authed.HandleFunc("POST /api/bots/{id}/routines", s.handleCreateRoutine)
+	authed.HandleFunc("PATCH /api/bots/routines/{id}", s.handleUpdateRoutine)
+	authed.HandleFunc("DELETE /api/bots/routines/{id}", s.handleDeleteRoutine)
+	authed.HandleFunc("POST /api/bots/routines/{id}/run", s.handleRunRoutineNow)
 	authed.HandleFunc("GET /api/bots/{id}/runs", s.handleListBotRuns)
 	authed.HandleFunc("GET /api/bot-runs/{id}", s.handleGetBotRun)
 	authed.HandleFunc("POST /api/bot-runs/{id}/cancel", s.handleCancelBotRun)

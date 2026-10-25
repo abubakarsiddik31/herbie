@@ -50,6 +50,12 @@ type Config struct {
 	BotRunnerConcurrency  int
 	BotRunnerPollInterval time.Duration
 
+	// Routine scheduler (the runner's second goroutine): TickInterval is
+	// how often enabled bot routines are checked for due occurrences;
+	// MaxRoutinesPerBot caps the routines one always-on bot may keep.
+	BotRoutineTickInterval time.Duration
+	MaxRoutinesPerBot      int
+
 	// RAGConfig gates the retrieval stack. Enabled is an explicit opt-in
 	// so a running stack never requires the rag compose profile.
 	RAG RAGConfig
@@ -169,6 +175,20 @@ func Load() (Config, error) {
 	}
 	if botPollMs <= 0 {
 		botPollMs = 2000
+	}
+	routineTickMs, err := envInt("BOT_ROUTINE_TICK_MS", 30000)
+	if err != nil {
+		return Config{}, err
+	}
+	if routineTickMs <= 0 {
+		routineTickMs = 30000
+	}
+	maxRoutines, err := envInt("MAX_ROUTINES_PER_BOT", 10)
+	if err != nil {
+		return Config{}, err
+	}
+	if maxRoutines <= 0 {
+		maxRoutines = 10
 	}
 	dims, err := envInt("EMBEDDING_DIMS", 768)
 	if err != nil {
@@ -345,6 +365,9 @@ func Load() (Config, error) {
 		BotRunnerEnabled:      envBool("BOT_RUNNER_ENABLED", true),
 		BotRunnerConcurrency:  botConc,
 		BotRunnerPollInterval: time.Duration(botPollMs) * time.Millisecond,
+
+		BotRoutineTickInterval: time.Duration(routineTickMs) * time.Millisecond,
+		MaxRoutinesPerBot:      maxRoutines,
 
 		RAG: RAGConfig{
 			Enabled:            envBool("RAG_ENABLED", false),

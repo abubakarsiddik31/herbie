@@ -95,6 +95,9 @@ func (s *Server) StartBotRunner(parent context.Context) {
 		s.deps.Log.Error("bot run recover", "err", err)
 	}
 	go r.loop(parent)
+	// The routine scheduler rides the same lifecycle (and wake channel) as
+	// the claim loop: one parent context, two goroutines.
+	s.StartRoutineScheduler(parent)
 }
 
 // WakeBotRunner nudges the claim loop immediately (enqueue paths call it;

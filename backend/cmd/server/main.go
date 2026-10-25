@@ -9,6 +9,10 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+	// Embedded tz database: routine schedules are evaluated in IANA zones
+	// (Europe/Berlin, ...), and container images often ship without
+	// /usr/share/zoneinfo. Blank import only.
+	_ "time/tzdata"
 
 	"github.com/abubakarsiddik31/golem"
 	"github.com/abubakarsiddik31/golem-chatbot/internal/auth"
@@ -177,6 +181,7 @@ func main() {
 		Bots:        storage.NewBots(pool),
 		BotMemories: storage.NewBotMemories(pool),
 		BotRuns:     storage.NewBotRuns(pool),
+		BotRoutines: storage.NewBotRoutines(pool),
 		Agent:       agent,
 		Rates:       rates,
 		ModelKeys:   modelKeys,
