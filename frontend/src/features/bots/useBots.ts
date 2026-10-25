@@ -1,13 +1,16 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { ApiError, apiFetch } from "@/lib/api";
-import type { Bot, BotRoutine, BotRun, BotRunStatus, Conversation, PendingCall } from "@/lib/types";
-
-export interface BotMemory {
-  id: string;
-  content: string;
-  createdAt: string;
-}
+import type {
+  Bot,
+  BotFileMeta,
+  BotMemory,
+  BotRoutine,
+  BotRun,
+  BotRunStatus,
+  Conversation,
+  PendingCall,
+} from "@/lib/types";
 
 export interface BotsResponse {
   bots: Bot[];
@@ -261,6 +264,42 @@ export function useRunRoutineNow(botId: string) {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["bot-routines", botId] });
       void queryClient.invalidateQueries({ queryKey: ["bot-runs", botId] });
+    },
+  });
+}
+
+export interface BotFilesResponse {
+  files: BotFileMeta[];
+}
+
+export interface BotMemoriesResponse {
+  memories: BotMemory[];
+}
+
+/** Workspace file listing (metadata only — no content endpoint exists). */
+export function useBotFiles(botId: string | null) {
+  return useQuery({
+    queryKey: ["bot-files", botId],
+    queryFn: () => apiFetch<BotFilesResponse>(`/api/bots/${botId}/files`),
+    enabled: botId !== null,
+  });
+}
+
+export function useBotMemories(botId: string | null) {
+  return useQuery({
+    queryKey: ["bot-memories", botId],
+    queryFn: () => apiFetch<BotMemoriesResponse>(`/api/bots/${botId}/memories`),
+    enabled: botId !== null,
+  });
+}
+
+export function useDeleteBotMemory(botId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (memoryId: string) =>
+      apiFetch<void>(`/api/bots/${botId}/memories/${memoryId}`, { method: "DELETE" }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["bot-memories", botId] });
     },
   });
 }

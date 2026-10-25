@@ -267,6 +267,20 @@ export interface BotRoutine {
   updatedAt: string;
 }
 
+/** A file in the bot's workspace (metadata only — there is no content GET). */
+export interface BotFileMeta {
+  path: string;
+  sizeBytes: number;
+  updatedAt: string;
+}
+
+/** A compounding memory the bot learned via the remember tool. */
+export interface BotMemory {
+  id: string;
+  content: string;
+  createdAt: string;
+}
+
 export interface ToolOAuthProvider {
   id: string;
   name: string;

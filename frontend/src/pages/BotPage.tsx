@@ -3,6 +3,7 @@ import { Link, useParams, useNavigate } from "react-router";
 import { toast } from "sonner";
 import {
   ArrowLeft,
+  Brain,
   CalendarClock,
   FolderOpen,
   Loader2,
@@ -15,9 +16,10 @@ import {
 } from "lucide-react";
 import { ApiError } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import type { BotRoutine } from "@/lib/types";
+import type { BotFileMeta, BotRoutine } from "@/lib/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -32,14 +34,18 @@ import { useSidebar } from "@/components/layout/SidebarContext";
 import {
   isRunActive,
   useBot,
+  useBotFiles,
+  useBotMemories,
   useBotRoutines,
   useBotRuns,
+  useDeleteBotMemory,
   useDeleteRoutine,
   useRunRoutineNow,
   useStartBotChat,
   useUpdateRoutine,
 } from "@/features/bots/useBots";
 import { BotFormDialog } from "@/features/bots/BotFormDialog";
+import { FileViewerDialog, formatBytes } from "@/features/bots/FileViewerDialog";
 import { RoutineFormDialog } from "@/features/bots/RoutineFormDialog";
 import { TaskComposer } from "@/features/bots/TaskComposer";
 import { RunCard, RUN_STATUS_LABELS, RUN_STATUS_STYLES } from "@/features/bots/RunCard";
@@ -239,6 +245,113 @@ function RoutinesPanel({ botId, botName }: { botId: string; botName: string }) {
 }
 
 
+// WorkspacePanel shows the bot's Files and Memory: files are metadata-only
+// (bots write them via write_file), memories can be deleted inline.
+function WorkspacePanel({ botId }: { botId: string }) {
+  const files = useBotFiles(botId);
+  const memories = useBotMemories(botId);
+  const deleteMemory = useDeleteBotMemory(botId);
+
+  const [viewing, setViewing] = useState<BotFileMeta | null>(null);
+
+  const fileList = files.data?.files ?? [];
+  const memoryList = memories.data?.memories ?? [];
+
+  return (
+    <div className="grid gap-6 lg:grid-cols-2">
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Files</CardTitle>
+          <CardDescription>Bots write these via the write_file tool.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          {files.isLoading && <Skeleton className="h-32 rounded-2xl" />}
+
+          {fileList.map((f) => (
+            <button
+              key={f.path}
+              type="button"
+              onClick={() => setViewing(f)}
+              className="flex w-full items-center justify-between gap-3 rounded-xl border border-border/60 bg-card px-3 py-2 text-left hover:bg-muted/50"
+            >
+              <span className="min-w-0 truncate font-mono text-xs" title={f.path}>
+                {f.path}
+              </span>
+              <span className="shrink-0 text-[11px] text-muted-foreground">
+                {formatBytes(f.sizeBytes)} · {new Date(f.updatedAt).toLocaleDateString()}
+              </span>
+            </button>
+          ))}
+
+          {!files.isLoading && fileList.length === 0 && (
+            <div className="flex flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border/80 p-8 text-center">
+              <FolderOpen className="size-5 text-muted-foreground" />
+              <p className="text-xs text-muted-foreground">
+                No files yet — give the bot a task that saves a file.
+              </p>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Memory</CardTitle>
+          <CardDescription>
+            Learned via the remember tool — injected into every run.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          {memories.isLoading && <Skeleton className="h-32 rounded-2xl" />}
+
+          {memoryList.map((m) => (
+            <div
+              key={m.id}
+              className="flex items-start justify-between gap-3 rounded-xl border border-border/60 bg-card px-3 py-2"
+            >
+              <div className="min-w-0 space-y-0.5">
+                <p className="text-xs break-words">{m.content}</p>
+                <p className="text-[11px] text-muted-foreground">
+                  {new Date(m.createdAt).toLocaleString()}
+                </p>
+              </div>
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                className="text-muted-foreground hover:text-destructive shrink-0"
+                onClick={() =>
+                  deleteMemory.mutate(m.id, {
+                    onError: (err) =>
+                      toast.error(
+                        err instanceof ApiError ? err.message : "Failed to delete memory"
+                      ),
+                  })
+                }
+                disabled={deleteMemory.isPending}
+                aria-label="Delete memory"
+                title="Delete memory"
+              >
+                <Trash2 className="size-4" />
+              </Button>
+            </div>
+          ))}
+
+          {!memories.isLoading && memoryList.length === 0 && (
+            <div className="flex flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border/80 p-8 text-center">
+              <Brain className="size-5 text-muted-foreground" />
+              <p className="text-xs text-muted-foreground">
+                Nothing remembered yet — ask the bot to remember something.
+              </p>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <FileViewerDialog open={viewing !== null} onOpenChange={(open) => !open && setViewing(null)} file={viewing} />
+    </div>
+  );
+}
+
 // BotPage is the bot detail shell (header + tabs); Task 16 fills Workspace.
 export function BotPage() {
   const { botId } = useParams<{ botId: string }>();
@@ -421,19 +534,7 @@ export function BotPage() {
             <RoutinesPanel botId={bot.id} botName={bot.name} />
           )}
 
-          {activeTab === "workspace" && (
-            <div className="flex flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-border/80 p-12 text-center">
-              <div className="flex size-12 items-center justify-center rounded-2xl bg-muted text-muted-foreground">
-                <FolderOpen className="size-6" />
-              </div>
-              <div className="space-y-1">
-                <h3 className="text-sm font-semibold">Nothing in the workspace yet</h3>
-                <p className="max-w-sm text-xs text-muted-foreground">
-                  Files and artifacts {bot.name} produces will land here.
-                </p>
-              </div>
-            </div>
-          )}
+          {activeTab === "workspace" && bot && <WorkspacePanel botId={bot.id} />}
         </div>
       </div>
 
