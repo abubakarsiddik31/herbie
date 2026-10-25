@@ -1229,5 +1229,116 @@ table "bot_memories" {
   }
 }
 
+table "bot_runs" {
+  schema = schema.public
+  column "id" {
+    type    = uuid
+    null    = false
+    default = sql("gen_random_uuid()")
+  }
+  column "bot_id" {
+    type = uuid
+    null = false
+  }
+  column "conversation_id" {
+    type = uuid
+    null = false
+  }
+  column "user_id" {
+    type = uuid
+    null = false
+  }
+  column "status" {
+    type    = text
+    null    = false
+    default = "queued"
+  }
+  column "task" {
+    type    = text
+    null    = false
+    default = ""
+  }
+  column "trigger_source" {
+    type    = text
+    null    = false
+    default = "manual"
+  }
+  column "error" {
+    type = text
+    null = true
+  }
+  column "activity" {
+    type    = jsonb
+    null    = false
+    default = sql("'[]'::jsonb")
+  }
+  column "input_tokens" {
+    type    = integer
+    null    = false
+    default = 0
+  }
+  column "output_tokens" {
+    type    = integer
+    null    = false
+    default = 0
+  }
+  column "requests" {
+    type    = integer
+    null    = false
+    default = 0
+  }
+  column "cost_micro_usd" {
+    type    = bigint
+    null    = false
+    default = 0
+  }
+  column "created_at" {
+    type    = timestamptz
+    null    = false
+    default = sql("now()")
+  }
+  column "started_at" {
+    type = timestamptz
+    null = true
+  }
+  column "finished_at" {
+    type = timestamptz
+    null = true
+  }
+  primary_key {
+    columns = [column.id]
+  }
+  foreign_key "bot_runs_bot_id_fkey" {
+    columns     = [column.bot_id]
+    ref_columns = [table.bots.column.id]
+    on_delete   = CASCADE
+  }
+  foreign_key "bot_runs_conversation_id_fkey" {
+    columns     = [column.conversation_id]
+    ref_columns = [table.conversations.column.id]
+    on_delete   = CASCADE
+  }
+  foreign_key "bot_runs_user_id_fkey" {
+    columns     = [column.user_id]
+    ref_columns = [table.users.column.id]
+    on_delete   = CASCADE
+  }
+  index "idx_bot_runs_bot" {
+    on {
+      column = column.bot_id
+    }
+    on {
+      column = column.created_at
+      desc   = true
+    }
+  }
+  index "idx_bot_runs_active" {
+    on {
+      column = column.status
+    }
+    where = sql("status IN ('queued','running','waiting_approval')")
+  }
+}
+
 
 
