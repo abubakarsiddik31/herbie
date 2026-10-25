@@ -1340,5 +1340,86 @@ table "bot_runs" {
   }
 }
 
+table "bot_routines" {
+  schema = schema.public
+  column "id" {
+    type    = uuid
+    null    = false
+    default = sql("gen_random_uuid()")
+  }
+  column "bot_id" {
+    type = uuid
+    null = false
+  }
+  column "user_id" {
+    type = uuid
+    null = false
+  }
+  column "name" {
+    type = text
+    null = false
+  }
+  column "schedule" {
+    type = text
+    null = false
+  }
+  column "timezone" {
+    type    = text
+    null    = false
+    default = "UTC"
+  }
+  column "prompt" {
+    type = text
+    null = false
+  }
+  column "enabled" {
+    type    = boolean
+    null    = false
+    default = true
+  }
+  column "last_run_at" {
+    type = timestamptz
+    null = true
+  }
+  column "created_at" {
+    type    = timestamptz
+    null    = false
+    default = sql("now()")
+  }
+  column "updated_at" {
+    type    = timestamptz
+    null    = false
+    default = sql("now()")
+  }
+  primary_key {
+    columns = [column.id]
+  }
+  foreign_key "bot_routines_bot_id_fkey" {
+    columns     = [column.bot_id]
+    ref_columns = [table.bots.column.id]
+    on_delete   = CASCADE
+  }
+  foreign_key "bot_routines_user_id_fkey" {
+    columns     = [column.user_id]
+    ref_columns = [table.users.column.id]
+    on_delete   = CASCADE
+  }
+  index "idx_bot_routines_bot" {
+    on {
+      column = column.bot_id
+    }
+    on {
+      column = column.created_at
+      desc   = true
+    }
+  }
+  index "idx_bot_routines_enabled" {
+    on {
+      column = column.enabled
+    }
+    where = sql("enabled = true")
+  }
+}
+
 
 
