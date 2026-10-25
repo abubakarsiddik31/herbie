@@ -41,6 +41,7 @@ Under the hood, Herbie pairs a high-concurrency Go backend powered by [golem](ht
 | **📊 Micro-USD Metering** | Granular sub-cent cost tracking across models and runs | Per-run token counters, 5-decimal USD ledger ($0.00001), and 30-day burn charts |
 | **🎙️ Multimodal & Voice** | Vision attachment input and client-side speech-to-text | Up to 4 image attachments per prompt; native browser Web Speech API dictation |
 | **🔒 Privacy & Security** | Self-hosted control running entirely on your infrastructure | In-memory access tokens, HttpOnly rotating refresh cookies, and AES-256-GCM vault encryption |
+| **🤝 Always-On Bots** | Teammates that keep working when you close the tab | Per-bot model & instructions, background tasks with approvals, cron routines, and a private workspace |
 
 ---
 
@@ -158,6 +159,19 @@ TAVILY_API_KEY=tvly-your_key_here
 WEB_SEARCH_PROVIDER=brave
 BRAVE_API_KEY=BSA-your_key_here
 ```
+
+---
+
+## Bots (always-on teammates)
+
+Bots are persistent, always-on teammates with their own identity, instructions, model, and emoji. Each bot picks its own model (Gemini, OpenAI, Claude, or local), so you can pair a cheap model for routine chores with a frontier model for hard tasks.
+
+- **Live chat** — talk to a bot directly; its instructions and persona apply to every conversation.
+- **Background tasks** — ask a bot to do long-running work (web research, multi-step tool calls). Runs execute in the background with live run cards, activity traces, and cancellable queues. Destructive tool calls (e.g. `delete_file`) park the run in `waiting_approval` until you approve or deny it.
+- **Routines** — attach cron schedules (`*/5 * * * *`) that fire tasks automatically; results land in the bot's conversation.
+- **Workspace files & memory** — bots read and write files in their own workspace (e.g. `findings.md`) and remember facts across conversations.
+
+Tuning knobs (see `.env.example`): `BOT_RUNNER_ENABLED`, `BOT_RUNNER_CONCURRENCY`, `BOT_RUNNER_POLL_MS`, `BOT_ROUTINE_TICK_MS`, `MAX_BOTS_PER_USER`, `MAX_ROUTINES_PER_BOT`, `BOT_FILE_MAX_BYTES`.
 
 ---
 
