@@ -27,21 +27,23 @@ type ServerDeps struct {
 	// OAuth lists the configured social-login providers in display
 	// order. Empty = password auth only; the login UI hides the
 	// provider buttons.
-	OAuth     []*oauth.Provider
-	Vault     *vault.Vault
-	Audits    storage.AuditStore
-	Shares    ShareStore
-	Profiles  ProfileStore
-	Users     UserAdminStore
-	Memories  MemoryStore
-	Convos    ConvoStore
-	Msgs      MsgStore
-	Usage     UsageStore
-	Tools     ToolStore
-	Pending   PendingStore
-	Agent     *chat.Agent
-	Rates     cost.Table
-	ModelKeys chat.ProviderKeys
+	OAuth       []*oauth.Provider
+	Vault       *vault.Vault
+	Audits      storage.AuditStore
+	Shares      ShareStore
+	Profiles    ProfileStore
+	Users       UserAdminStore
+	Memories    MemoryStore
+	Convos      ConvoStore
+	Msgs        MsgStore
+	Usage       UsageStore
+	Tools       ToolStore
+	Pending     PendingStore
+	Bots        BotStore
+	BotMemories BotMemoryStore
+	Agent       *chat.Agent
+	Rates       cost.Table
+	ModelKeys   chat.ProviderKeys
 	// RagSearch retrieves document chunks and returns the query
 	// embedding's exact usage for metering. Nil = RAG disabled: no
 	// search tool is registered and the documents API answers 503.
@@ -173,6 +175,12 @@ func newServer(deps ServerDeps) (*Server, http.Handler) {
 	authed.HandleFunc("POST /api/tool-oauth/{provider}/config", s.handleConfigureToolOAuth)
 	authed.HandleFunc("POST /api/tool-oauth/{provider}/disconnect", s.handleToolOAuthDisconnect)
 	authed.HandleFunc("GET /api/tool-audit-logs", s.handleListToolAuditLogs)
+	authed.HandleFunc("GET /api/bots", s.handleListBots)
+	authed.HandleFunc("POST /api/bots", s.handleCreateBot)
+	authed.HandleFunc("GET /api/bots/{id}", s.handleGetBot)
+	authed.HandleFunc("PATCH /api/bots/{id}", s.handleUpdateBot)
+	authed.HandleFunc("DELETE /api/bots/{id}", s.handleDeleteBot)
+	authed.HandleFunc("POST /api/bots/{id}/conversations", s.handleCreateBotConversation)
 	authed.HandleFunc("GET /api/mcp/catalog", s.handleListMCPCatalog)
 	authed.HandleFunc("POST /api/mcp/catalog/{appId}/link", s.handleLinkCatalogApp)
 	authed.HandleFunc("POST /api/mcp/catalog/{appId}/unlink", s.handleUnlinkCatalogApp)

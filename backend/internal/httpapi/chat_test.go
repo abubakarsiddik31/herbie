@@ -116,6 +116,10 @@ func (f *fakeConvos) Create(_ context.Context, userID, title string, patch stora
 		p := *patch.ProjectID
 		conv.ProjectID = &p
 	}
+	if patch.BotID != nil {
+		b := *patch.BotID
+		conv.BotID = &b
+	}
 	f.convs[conv.ID] = conv
 	return conv, nil
 }
@@ -135,6 +139,48 @@ func (f *fakeConvos) ListByProject(_ context.Context, projectID, userID string) 
 	for _, c := range f.convs {
 		if c.UserID == userID && c.ProjectID != nil && *c.ProjectID == projectID {
 			out = append(out, c)
+		}
+	}
+	return out, nil
+}
+
+// ListByBot mirrors the bot-scoped listing; latest = highest c-N id, which
+// tracks the fake's creation order.
+func (f *fakeConvos) ListByBot(_ context.Context, botID, userID string) ([]storage.Conversation, error) {
+	var out []storage.Conversation
+	for _, c := range f.convs {
+		if c.UserID == userID && c.BotID != nil && *c.BotID == botID {
+			out = append(out, c)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeConvos) LatestForBot(_ context.Context, botID, userID string) (storage.Conversation, error) {
+	var best storage.Conversation
+	found := false
+	for _, c := range f.convs {
+		if c.UserID != userID || c.BotID == nil || *c.BotID != botID {
+			continue
+		}
+		if !found || c.ID > best.ID {
+			best, found = c, true
+		}
+	}
+	if !found {
+		return storage.Conversation{}, storage.ErrNotFound
+	}
+	return best, nil
+}
+
+func (f *fakeConvos) LatestIDsByUser(_ context.Context, userID string) (map[string]string, error) {
+	out := map[string]string{}
+	for _, c := range f.convs {
+		if c.UserID != userID || c.BotID == nil {
+			continue
+		}
+		if cur, ok := out[*c.BotID]; !ok || c.ID > cur {
+			out[*c.BotID] = c.ID
 		}
 	}
 	return out, nil

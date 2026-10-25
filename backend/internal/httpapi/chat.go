@@ -37,6 +37,9 @@ type ConvoStore interface {
 	Create(ctx context.Context, userID, title string, patch storage.ConversationPatch) (storage.Conversation, error)
 	List(ctx context.Context, userID, q string) ([]storage.Conversation, error)
 	ListByProject(ctx context.Context, projectID, userID string) ([]storage.Conversation, error)
+	ListByBot(ctx context.Context, botID, userID string) ([]storage.Conversation, error)
+	LatestForBot(ctx context.Context, botID, userID string) (storage.Conversation, error)
+	LatestIDsByUser(ctx context.Context, userID string) (map[string]string, error)
 	ByID(ctx context.Context, id, userID string) (storage.Conversation, error)
 	SetTitle(ctx context.Context, id, userID, title string) error
 	SetSettings(ctx context.Context, id, userID string, patch storage.ConversationPatch) error
@@ -163,7 +166,7 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 	for _, row := range msgs {
 		known[string(row.Data)] = true
 	}
-	s.runTurn(ctx, userID, convID, spec, historyFrom(msgs, len(msgs)-1), req.Content, parts, known, w)
+	s.runTurn(ctx, userID, convID, spec, conv.BotID, historyFrom(msgs, len(msgs)-1), req.Content, parts, known, w)
 }
 
 // blockedByPendingApproval writes the response and reports true when the
@@ -198,9 +201,10 @@ func knownRows(msgs []storage.Message) map[string]bool {
 // SSE sink, runs the agent, and settles the outcome (persist + done/error).
 // Callers validate, prepare history/spec/parts, and persist the prompt;
 // known holds the payloads of rows already in the store so history replay
-// rows are not duplicated. The sink opens only after those steps so
-// failures stay plain HTTP errors.
-func (s *Server) runTurn(ctx context.Context, userID, convID string, spec chat.RunSpec, history []model.Message, prompt string, parts []model.Part, known map[string]bool, w http.ResponseWriter) {
+// rows are not duplicated. botID routes the run's remember-tool writes to
+// the bot's memory instead of the user's (nil = plain conversation). The
+// sink opens only after those steps so failures stay plain HTTP errors.
+func (s *Server) runTurn(ctx context.Context, userID, convID string, spec chat.RunSpec, botID *string, history []model.Message, prompt string, parts []model.Part, known map[string]bool, w http.ResponseWriter) {
 	spec, history, compacted := s.maybeCompact(ctx, userID, convID, spec, history)
 	// Tools load before the SSE sink goes out so failures can still be
 	// plain HTTP errors. One broken config skips that tool only (logged by
@@ -247,7 +251,7 @@ func (s *Server) runTurn(ctx context.Context, userID, convID string, spec chat.R
 		Search:         s.searchDeps(userID, convID, &sources, &sourcesMu),
 		ListDocs:       s.listDocsDeps(userID, convID),
 		ReadDoc:        s.readDocDeps(userID, convID, &sources, &sourcesMu),
-		SaveMemory:     s.saveMemoryFunc(userID),
+		SaveMemory:     s.saveMemoryFor(userID, botID),
 		RecordSearch:   s.recordSearchFunc(userID, convID),
 		AddWebSources:  s.webSourcesDeps(&sources, &sourcesMu),
 	}, history, prompt, parts, sink, tools, spec)
@@ -345,7 +349,11 @@ func sourceRows(sources []rag.Scored) []map[string]any {
 // configured key), an empty system prompt to the built-in one (applied at
 // agent build), and nil temperature to the provider default. Global user
 // instructions prepend the prompt; the per-conversation prompt follows so
-// it wins ties. Fail-open: instruction lookup errors behave as unset.
+// it wins ties. A bot-scoped conversation (conv.BotID) swaps that
+// conversation-prompt component for the live bot persona (identity,
+// instructions, and its compounding memories) and takes the bot's model
+// settings; the user's global prefix still leads. Fail-open: instruction
+// and bot lookup errors behave as unset.
 func (s *Server) runSpecFor(ctx context.Context, conv storage.Conversation) chat.RunSpec {
 	spec := chat.RunSpec{Model: conv.Model, Temperature: conv.Temperature, SystemPrompt: conv.SystemPrompt, RagEnabled: conv.RagEnabled}
 	if spec.Model == "" {
@@ -370,6 +378,27 @@ func (s *Server) runSpecFor(ctx context.Context, conv storage.Conversation) chat
 			prefix.WriteString("\n\n")
 		}
 	}
+	if conv.BotID != nil && s.deps.Bots != nil {
+		if bot, err := s.deps.Bots.Get(ctx, conv.UserID, *conv.BotID); err == nil && !bot.IsArchived {
+			var facts []string
+			if s.deps.BotMemories != nil {
+				if mems, merr := s.deps.BotMemories.ListRecent(ctx, conv.UserID, bot.ID, 20); merr == nil {
+					facts = make([]string, 0, len(mems))
+					for _, m := range mems {
+						facts = append(facts, m.Content)
+					}
+				}
+			}
+			spec.SystemPrompt = chat.BotSystemPrompt(bot.Name, bot.Instructions, facts)
+			if bot.Model != "" {
+				spec.Model = bot.Model
+			}
+			if bot.Temperature != nil {
+				spec.Temperature = bot.Temperature
+			}
+			spec.RagEnabled = bot.RagEnabled
+		}
+	}
 	if prefix.Len() > 0 {
 		spec.SystemPrompt = prefix.String() + spec.SystemPrompt
 	}
@@ -384,6 +413,20 @@ func (s *Server) saveMemoryFunc(userID string) func(ctx context.Context, fact st
 		_, err := s.deps.Memories.Create(ctx, userID, fact)
 		return err
 	}
+}
+
+// saveMemoryFor is the bot-aware SaveMemory wiring for a run: a bot-scoped
+// conversation records learned facts on the bot (so they compound per
+// teammate), everything else on the user's global memories.
+func (s *Server) saveMemoryFor(userID string, botID *string) func(ctx context.Context, fact string) error {
+	if botID != nil && s.deps.BotMemories != nil {
+		bot := *botID
+		return func(ctx context.Context, fact string) error {
+			_, err := s.deps.BotMemories.Add(ctx, storage.BotMemory{BotID: bot, UserID: userID, Content: fact})
+			return err
+		}
+	}
+	return s.saveMemoryFunc(userID)
 }
 
 // userTools builds the caller's enabled golem tools plus the built-in

@@ -100,7 +100,7 @@ func (s *Server) handleEditMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = s.deps.Convos.Touch(ctx, convID)
-	s.runTurn(ctx, userID, convID, spec, historyFrom(msgs, idx), req.Content, payload.Parts, knownRows(msgs), w)
+	s.runTurn(ctx, userID, convID, spec, conv.BotID, historyFrom(msgs, idx), req.Content, payload.Parts, knownRows(msgs), w)
 }
 
 // handleRegenerate replaces the last assistant answer: rows after the last
@@ -158,7 +158,7 @@ func (s *Server) handleRegenerate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = s.deps.Convos.Touch(ctx, convID)
-	s.runTurn(ctx, userID, convID, spec, historyFrom(remaining, lastUser), msgs[lastUser].Content, payload.Parts, knownRows(remaining), w)
+	s.runTurn(ctx, userID, convID, spec, conv.BotID, historyFrom(remaining, lastUser), msgs[lastUser].Content, payload.Parts, knownRows(remaining), w)
 }
 
 // handleDeleteMessage removes one message and everything after it —

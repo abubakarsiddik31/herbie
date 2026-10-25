@@ -15,8 +15,12 @@ type Conversation struct {
 	ID        string
 	UserID    string
 	ProjectID *string
-	Title     string
-	Model     string // "" = server default
+	// BotID is set for bot-scoped conversations (the always-on teammates);
+	// nil for plain and project conversations. Freed (NULL) when the bot is
+	// deleted, per the schema's ON DELETE SET NULL.
+	BotID *string
+	Title string
+	Model string // "" = server default
 	// Temperature nil = provider default.
 	Temperature  *float64
 	SystemPrompt string // "" = built-in prompt
@@ -36,26 +40,27 @@ type ConversationPatch struct {
 	RagEnabled       *bool
 	ClearTemperature bool
 	ProjectID        *string
+	BotID            *string
 }
 
 type Conversations struct{ pool *pgxpool.Pool }
 
 func NewConversations(pool *pgxpool.Pool) *Conversations { return &Conversations{pool: pool} }
 
-const conversationColumns = `id, user_id::text, title, model, temperature, system_prompt, rag_enabled, created_at, updated_at, project_id::text`
+const conversationColumns = `id, user_id::text, title, model, temperature, system_prompt, rag_enabled, created_at, updated_at, project_id::text, bot_id::text`
 
 func scanConversation(row pgx.Row) (Conversation, error) {
 	var conv Conversation
 	err := row.Scan(&conv.ID, &conv.UserID, &conv.Title, &conv.Model, &conv.Temperature,
-		&conv.SystemPrompt, &conv.RagEnabled, &conv.CreatedAt, &conv.UpdatedAt, &conv.ProjectID)
+		&conv.SystemPrompt, &conv.RagEnabled, &conv.CreatedAt, &conv.UpdatedAt, &conv.ProjectID, &conv.BotID)
 	return conv, err
 }
 
 func (c *Conversations) Create(ctx context.Context, userID, title string, patch ConversationPatch) (Conversation, error) {
 	row := c.pool.QueryRow(ctx,
-		`INSERT INTO conversations (user_id, title, model, temperature, system_prompt, rag_enabled, project_id) VALUES ($1, $2, $3, $4, $5, $6, $7)
+		`INSERT INTO conversations (user_id, title, model, temperature, system_prompt, rag_enabled, project_id, bot_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		 RETURNING `+conversationColumns,
-		userID, SanitizeText(title), derefString(patch.Model), patch.Temperature, SanitizeText(derefString(patch.SystemPrompt)), derefBool(patch.RagEnabled, true), patch.ProjectID)
+		userID, SanitizeText(title), derefString(patch.Model), patch.Temperature, SanitizeText(derefString(patch.SystemPrompt)), derefBool(patch.RagEnabled, true), patch.ProjectID, patch.BotID)
 	conv, err := scanConversation(row)
 	if err != nil {
 		return Conversation{}, fmt.Errorf("create conversation: %w", err)
@@ -99,6 +104,68 @@ func (c *Conversations) ListByProject(ctx context.Context, projectID, userID str
 			return nil, fmt.Errorf("scan conversation: %w", err)
 		}
 		out = append(out, conv)
+	}
+	return out, rows.Err()
+}
+
+// ListByBot returns one bot's conversations, most recently updated first.
+func (c *Conversations) ListByBot(ctx context.Context, botID, userID string) ([]Conversation, error) {
+	rows, err := c.pool.Query(ctx,
+		`SELECT `+conversationColumns+` FROM conversations
+		 WHERE user_id = $1 AND bot_id = $2
+		 ORDER BY updated_at DESC`, userID, botID)
+	if err != nil {
+		return nil, fmt.Errorf("list bot conversations: %w", err)
+	}
+	defer rows.Close()
+	var out []Conversation
+	for rows.Next() {
+		conv, err := scanConversation(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan conversation: %w", err)
+		}
+		out = append(out, conv)
+	}
+	return out, rows.Err()
+}
+
+// LatestForBot returns the bot's most recently updated conversation, the
+// one an always-on bot continues on its next run. ErrNotFound when the bot
+// has no conversation yet.
+func (c *Conversations) LatestForBot(ctx context.Context, botID, userID string) (Conversation, error) {
+	conv, err := scanConversation(c.pool.QueryRow(ctx,
+		`SELECT `+conversationColumns+` FROM conversations
+		 WHERE user_id = $1 AND bot_id = $2
+		 ORDER BY updated_at DESC LIMIT 1`, userID, botID))
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return Conversation{}, ErrNotFound
+		}
+		return Conversation{}, fmt.Errorf("latest bot conversation: %w", err)
+	}
+	return conv, nil
+}
+
+// LatestIDsByUser maps each bot ID the user owns a conversation for to the
+// ID of that bot's most recently updated conversation, in one query
+// (DISTINCT ON keeps the first row per bot under the updated_at DESC
+// ordering).
+func (c *Conversations) LatestIDsByUser(ctx context.Context, userID string) (map[string]string, error) {
+	rows, err := c.pool.Query(ctx,
+		`SELECT DISTINCT ON (bot_id) bot_id::text, id::text FROM conversations
+		 WHERE user_id = $1 AND bot_id IS NOT NULL
+		 ORDER BY bot_id, updated_at DESC`, userID)
+	if err != nil {
+		return nil, fmt.Errorf("latest conversation ids by bot: %w", err)
+	}
+	defer rows.Close()
+	out := make(map[string]string)
+	for rows.Next() {
+		var botID, convID string
+		if err := rows.Scan(&botID, &convID); err != nil {
+			return nil, fmt.Errorf("scan latest conversation id: %w", err)
+		}
+		out[botID] = convID
 	}
 	return out, rows.Err()
 }

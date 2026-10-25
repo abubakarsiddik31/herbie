@@ -23,15 +23,17 @@ type conversationDTO struct {
 	Temperature  *float64 `json:"temperature"`
 	SystemPrompt string   `json:"systemPrompt"`
 	RagEnabled   bool     `json:"ragEnabled"`
-	CreatedAt    string   `json:"createdAt"`
-	UpdatedAt    string   `json:"updatedAt"`
+	// BotID is set only for bot-scoped conversations (always-on teammates).
+	BotID     *string `json:"botId,omitempty"`
+	CreatedAt string  `json:"createdAt"`
+	UpdatedAt string  `json:"updatedAt"`
 }
 
 func toConversationDTO(c storage.Conversation) conversationDTO {
 	return conversationDTO{
 		ID: c.ID, Title: c.Title, Model: c.Model, Temperature: c.Temperature, SystemPrompt: c.SystemPrompt,
-		RagEnabled: c.RagEnabled,
-		CreatedAt:  c.CreatedAt.UTC().Format(timeRFC3339), UpdatedAt: c.UpdatedAt.UTC().Format(timeRFC3339),
+		RagEnabled: c.RagEnabled, BotID: c.BotID,
+		CreatedAt: c.CreatedAt.UTC().Format(timeRFC3339), UpdatedAt: c.UpdatedAt.UTC().Format(timeRFC3339),
 	}
 }
 

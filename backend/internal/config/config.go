@@ -38,6 +38,10 @@ type Config struct {
 	ToolAllowPrivateHosts bool
 	MaxToolsPerUser       int
 
+	// MaxBotsPerUser caps the always-on bots one user may keep (archived
+	// bots do not count toward the limit).
+	MaxBotsPerUser int
+
 	// RAGConfig gates the retrieval stack. Enabled is an explicit opt-in
 	// so a running stack never requires the rag compose profile.
 	RAG RAGConfig
@@ -137,6 +141,10 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	maxTools, err := envInt("MAX_TOOLS_PER_USER", 20)
+	if err != nil {
+		return Config{}, err
+	}
+	maxBots, err := envInt("MAX_BOTS_PER_USER", 20)
 	if err != nil {
 		return Config{}, err
 	}
@@ -310,6 +318,7 @@ func Load() (Config, error) {
 		ToolResultMaxBytes:    envInt64("TOOL_RESULT_MAX_BYTES", 32<<10),
 		ToolAllowPrivateHosts: envBool("TOOL_ALLOW_PRIVATE_HOSTS", false),
 		MaxToolsPerUser:       maxTools,
+		MaxBotsPerUser:        maxBots,
 
 		RAG: RAGConfig{
 			Enabled:            envBool("RAG_ENABLED", false),
