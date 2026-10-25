@@ -25,6 +25,10 @@ type Deps struct {
 	SaveMemory     func(ctx context.Context, fact string) error
 	RecordSearch   func(ctx context.Context, query, kind, provider string, resultsCount int, durationMs int64)
 	AddWebSources  func(results []websearch.Result)
+	// BotID and BotFS identify a bot run and its file workspace. Both stay
+	// zero for human chats; the workspace tools then refuse to run.
+	BotID string
+	BotFS BotFileStore
 }
 
 // PendingApproval is one deferred tool call waiting on the user's decision.
