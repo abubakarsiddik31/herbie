@@ -96,6 +96,13 @@ func TestBotRunsLifecycle(t *testing.T) {
 	if err := store.SetFinished(ctx, second.ID, "cancelled", 0, 0, 0, 0, ""); err != nil {
 		t.Fatalf("cancel recovered: %v", err)
 	}
+
+	// Cascade cleanup: deleting the bot wipes its runs (bot_runs.bot_id ON
+	// DELETE CASCADE), so a re-run against this database starts from an empty
+	// queue and LatestPerBot sees no leftovers.
+	if err := NewBots(pool).Delete(ctx, user.ID, bot.ID); err != nil {
+		t.Fatalf("bot cleanup: %v", err)
+	}
 }
 
 func TestBotRunsActiveAndLatest(t *testing.T) {
@@ -184,5 +191,12 @@ func TestBotRunsActiveAndLatest(t *testing.T) {
 	limited, err := store.ListByBot(ctx, user.ID, bot.ID, 1)
 	if err != nil || len(limited) != 1 || limited[0].ID != third.ID {
 		t.Fatalf("list limit: %+v %v", limited, err)
+	}
+
+	// Cascade cleanup: deleting the bot wipes third (queued) and second
+	// (waiting_approval) via the bot_runs.bot_id ON DELETE CASCADE FK, so a
+	// re-run's global ClaimNext and LatestPerBot see only its own rows.
+	if err := NewBots(pool).Delete(ctx, user.ID, bot.ID); err != nil {
+		t.Fatalf("bot cleanup: %v", err)
 	}
 }
