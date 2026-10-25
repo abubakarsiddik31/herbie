@@ -193,6 +193,21 @@ export interface WorkflowCredential {
   updatedAt: string;
 }
 
+export interface Bot {
+  id: string;
+  name: string;
+  emoji: string;
+  color: string;
+  instructions: string;
+  model: string;
+  temperature: number | null;
+  ragEnabled: boolean;
+  isArchived: boolean;
+  conversationId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface ToolOAuthProvider {
   id: string;
   name: string;

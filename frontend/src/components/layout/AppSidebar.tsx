@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate } from "react-router";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
+  Bot as BotIcon,
   Calendar,
   ChevronDown,
   FileText,
@@ -56,6 +57,7 @@ import { BrandMark } from "@/components/BrandMark";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { ShareDialog } from "@/features/chat/ShareDialog";
 import { useConversations, useDeleteConversation } from "@/features/chat/useConversations";
+import { useBots } from "@/features/bots/useBots";
 import { useTools } from "@/features/tools/useTools";
 import { useProjects, useProject, type Project } from "@/features/projects/useProjects";
 import { useToolOAuthProviders, useWorkflows } from "@/features/workflows/useWorkflows";
@@ -209,6 +211,7 @@ export function AppSidebar() {
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
   const { data: conversations, isLoading: conversationsLoading } = useConversations(debouncedFilter.trim());
+  const { data: botsData } = useBots();
   const { data: tools } = useTools();
   const { data: projects } = useProjects();
   const { data: workflows } = useWorkflows();
@@ -434,6 +437,27 @@ export function AppSidebar() {
             {workflows && workflows.length > 0 && (
               <Badge variant="secondary" className="px-1.5 py-0 text-[10px] font-mono h-4">
                 {workflows.length}
+              </Badge>
+            )}
+          </Link>
+
+          <Link
+            to="/bots"
+            onClick={() => setMobileOpen(false)}
+            className={cn(
+              "flex items-center justify-between rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors",
+              isNavActive("/bots")
+                ? "bg-sidebar-accent text-sidebar-accent-foreground font-semibold"
+                : "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
+            )}
+          >
+            <span className="flex items-center gap-2.5">
+              <BotIcon className="size-3.5 shrink-0" />
+              <span>Bots</span>
+            </span>
+            {botsData && botsData.count > 0 && (
+              <Badge variant="secondary" className="px-1.5 py-0 text-[10px] font-mono h-4">
+                {botsData.count}
               </Badge>
             )}
           </Link>

@@ -18,6 +18,8 @@ import { ProjectsPage } from "@/pages/ProjectsPage";
 import { ProjectWorkspacePage } from "@/pages/ProjectWorkspacePage";
 import { WorkflowsPage } from "@/pages/WorkflowsPage";
 import { WorkflowCanvasPage } from "@/pages/WorkflowCanvasPage";
+import { BotsPage } from "@/pages/BotsPage";
+import { BotPage } from "@/pages/BotPage";
 import { tryRefresh } from "@/lib/api";
 import { useAuth } from "@/stores/auth";
 
@@ -67,6 +69,8 @@ export default function App() {
               <Route path="/projects/:projectId" element={<ProjectWorkspacePage />} />
               <Route path="/workflows" element={<WorkflowsPage />} />
               <Route path="/workflows/:workflowId" element={<WorkflowCanvasPage />} />
+              <Route path="/bots" element={<BotsPage />} />
+              <Route path="/bots/:botId" element={<BotPage />} />
               <Route path="/tools" element={<ToolsPage />} />
               <Route path="/usage" element={<UsagePage />} />
               <Route path="/preferences" element={<PreferencesPage />} />
