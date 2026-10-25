@@ -284,7 +284,15 @@ func (r *botRunner) execute(parent context.Context, run *storage.BotRun) {
 	s := r.s
 	// Settlement writes must survive the run's own cancellation.
 	settle := context.WithoutCancel(parent)
+	// Early-setup failures settle "failed" — EXCEPT on shutdown: these calls
+	// still run on parent, and a cancelled parent (e.g. pgx returning
+	// context.Canceled) must not terminally fail the row; it stays
+	// running/waiting_approval for the next boot's RecoverRunning requeue,
+	// mirroring settleFailure's parent check.
 	fail := func(msg string) {
+		if parent.Err() != nil {
+			return
+		}
 		_ = s.deps.BotRuns.SetFinished(settle, run.ID, "failed", 0, 0, 0, 0, msg)
 	}
 
@@ -440,14 +448,36 @@ func (r *botRunner) execute(parent context.Context, run *storage.BotRun) {
 		// Park, holding the slot. Shutdown leaves the row in
 		// waiting_approval for the next boot's RecoverRunning requeue;
 		// a user cancel settles it as cancelled (messages already
-		// persisted above). A wake with calls still pending is premature
-		// — wait again on a fresh channel.
+		// persisted above). The resume channel is registered BEFORE the
+		// decision check and stays registered across it: a decision flip
+		// + notify that lands while the check runs (or after a premature
+		// wake found calls still pending) necessarily overlaps a live
+		// registration, so it closes the channel instead of being
+		// dropped — no lost-wakeup window between check and re-park.
 		resumed := false
 		for !resumed {
 			ch := make(chan struct{})
 			r.setResume(run.ID, ch)
+			pend, perr := s.deps.Pending.ForConversation(runCtx, run.ConversationID, run.UserID)
+			if perr != nil {
+				r.clearResume(run.ID)
+				err = perr
+				resumed = true // leave the wait; loop top settles the error
+				break
+			}
+			if len(pend) == 0 {
+				// All decided. Unregister and drain a notify that may have
+				// raced the final decision flip; the signal is spent.
+				r.clearResume(run.ID)
+				select {
+				case <-ch:
+				default:
+				}
+				resumed = true
+				break
+			}
 			select {
-			case <-ch: // NotifyBotRunResume already unregistered it
+			case <-ch: // NotifyBotRunResume already unregistered it; re-check
 			case <-runCtx.Done():
 				r.clearResume(run.ID)
 				if parent.Err() != nil {
@@ -456,13 +486,8 @@ func (r *botRunner) execute(parent context.Context, run *storage.BotRun) {
 				_ = s.deps.BotRuns.SetFinished(settle, run.ID, "cancelled", totalIn, totalOut, totalReqs, cost(), "")
 				return
 			}
-			pend, perr := s.deps.Pending.ForConversation(runCtx, run.ConversationID, run.UserID)
-			if perr != nil {
-				err = perr
-				resumed = true // leave the wait; loop top settles the error
-				break
-			}
-			resumed = len(pend) == 0
+			// Woke with the channel unregistered: loop re-registers a
+			// fresh one before the next decision check.
 		}
 		if err != nil {
 			continue

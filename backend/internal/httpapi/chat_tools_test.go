@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -21,16 +22,33 @@ import (
 	"github.com/abubakarsiddik31/golem/testmodel"
 )
 
-type fakePending struct{ rows []storage.PendingToolCall }
+// fakePending is mutex-guarded: the background bot runner reads it from its
+// own goroutine (the approvals endpoint reads it from request goroutines).
+type fakePending struct {
+	mu   sync.Mutex
+	rows []storage.PendingToolCall
+}
 
 var _ PendingStore = (*fakePending)(nil)
 
+// snapshot copies the rows for assertions from test goroutines that may run
+// concurrently with a background runner holding the fake.
+func (f *fakePending) snapshot() []storage.PendingToolCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]storage.PendingToolCall(nil), f.rows...)
+}
+
 func (f *fakePending) Add(_ context.Context, calls []storage.PendingToolCall) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.rows = append(f.rows, calls...)
 	return nil
 }
 
 func (f *fakePending) ForConversation(_ context.Context, convID, userID string) ([]storage.PendingToolCall, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	var out []storage.PendingToolCall
 	for _, c := range f.rows {
 		if c.ConversationID == convID && c.UserID == userID && c.Status == "pending" {
@@ -41,6 +59,8 @@ func (f *fakePending) ForConversation(_ context.Context, convID, userID string) 
 }
 
 func (f *fakePending) SetStatus(_ context.Context, userID, callID, status string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	for i := range f.rows {
 		if f.rows[i].CallID == callID && f.rows[i].UserID == userID && f.rows[i].Status == "pending" {
 			f.rows[i].Status = status
@@ -51,6 +71,8 @@ func (f *fakePending) SetStatus(_ context.Context, userID, callID, status string
 }
 
 func (f *fakePending) ListAll(_ context.Context, convID, userID string) ([]storage.PendingToolCall, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	var out []storage.PendingToolCall
 	for _, c := range f.rows {
 		if c.ConversationID == convID && c.UserID == userID {
@@ -61,6 +83,8 @@ func (f *fakePending) ListAll(_ context.Context, convID, userID string) ([]stora
 }
 
 func (f *fakePending) DeletePendingFor(_ context.Context, convID, userID string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	var kept []storage.PendingToolCall
 	for _, c := range f.rows {
 		if !(c.ConversationID == convID && c.UserID == userID && c.Status == "pending") {

@@ -395,10 +395,11 @@ func TestRunnerParksAndResumesOnApproval(t *testing.T) {
 
 	// SetWaitingApproval is written after the pending rows, so the parked
 	// call exists by now — with its persisted (rewritten) call ID.
-	if len(pending.rows) != 1 {
-		t.Fatalf("parked calls = %d, want 1: %+v", len(pending.rows), pending.rows)
+	parked := pending.snapshot()
+	if len(parked) != 1 {
+		t.Fatalf("parked calls = %d, want 1: %+v", len(parked), parked)
 	}
-	parkedID := pending.rows[0].CallID
+	parkedID := parked[0].CallID
 	if parkedID == "call-1" || parkedID == "" {
 		t.Fatalf("parked call ID not rewritten to the persisted ID: %q", parkedID)
 	}
@@ -551,6 +552,177 @@ func TestRunnerCancelWhileParked(t *testing.T) {
 	}
 	// A late resume notify after the run exited is a safe no-op.
 	s.NotifyBotRunResume(run.ID)
+}
+
+// TestRunnerPrematureWakeStillResumes locks the re-park contract: a wake
+// that lands while decisions are still pending must NOT swallow a later
+// legitimate flip+notify — the run re-parks (channel re-registered BEFORE
+// the decision check) and the second notify still resumes it.
+func TestRunnerPrematureWakeStillResumes(t *testing.T) {
+	msgs := newFakeMsgs()
+	convs := newFakeConvos(msgs)
+	usage := newFakeUsage()
+	runs := newFakeBotRuns()
+	pending := &fakePending{}
+	agent := &fakeBotAgent{steps: []fakeAgentStep{
+		{outcome: chat.Outcome{
+			Messages: []model.Message{
+				{Role: model.RoleUser, Content: "check the weather"},
+				{Role: model.RoleAssistant, ToolCalls: []model.ToolCall{
+					{ID: "call-1", Name: "get_weather", Args: json.RawMessage(`{"city":"x"}`)},
+				}},
+			},
+			Usage:    model.Usage{InputTokens: 10, OutputTokens: 5},
+			Requests: 1,
+			Pending: []chat.PendingApproval{{
+				CallID: "call-1", ToolName: "get_weather",
+				Args: json.RawMessage(`{"city":"x"}`), Reason: "approval required",
+			}},
+		}},
+		{outcome: chat.Outcome{
+			Output: "It is 21C",
+			Messages: []model.Message{
+				{Role: model.RoleUser, Content: "check the weather"},
+				{Role: model.RoleAssistant, Content: "It is 21C"},
+			},
+			Usage:    model.Usage{InputTokens: 8, OutputTokens: 4},
+			Requests: 1,
+		}},
+	}}
+	s := newBotRunnerTestServer(agent, runs, convs, msgs, usage, pending)
+
+	conv, err := convs.Create(context.Background(), "u-1", "Scout chat", storage.ConversationPatch{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := runs.Create(context.Background(), storage.BotRun{
+		ConversationID: conv.ID, UserID: "u-1", Task: "check the weather",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	s.StartBotRunner(ctx)
+	s.WakeBotRunner()
+	waitForBotRun(t, runs, run.ID, "waiting_approval")
+	parked := pending.snapshot()
+	if len(parked) != 1 {
+		t.Fatalf("parked calls = %d, want 1: %+v", len(parked), parked)
+	}
+	parkedID := parked[0].CallID
+
+	// Premature wake: no decision has been flipped yet. The run must re-park
+	// — status unchanged, no deferred call — and hold a live registration.
+	s.NotifyBotRunResume(run.ID)
+	deadline := time.Now().Add(200 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if got, err := runs.Get(context.Background(), "u-1", run.ID); err != nil {
+			t.Fatal(err)
+		} else if got.Status != "waiting_approval" {
+			t.Fatalf("premature wake resumed the run: %q", got.Status)
+		}
+		if _, deferred, _, _, _ := agent.snapshot(); deferred != 0 {
+			t.Fatal("premature wake ran the deferred call")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	// The legitimate decision + notify must still land: with the
+	// registration held across the decision check, this notify overlaps it.
+	if err := pending.SetStatus(context.Background(), "u-1", parkedID, "approved"); err != nil {
+		t.Fatal(err)
+	}
+	s.NotifyBotRunResume(run.ID)
+	waitForBotRun(t, runs, run.ID, "succeeded")
+
+	runCalls, deferredCalls, _, resolutions, _ := agent.snapshot()
+	if runCalls != 1 || deferredCalls != 1 {
+		t.Fatalf("agent calls: run=%d deferred=%d, want 1/1", runCalls, deferredCalls)
+	}
+	if approved, ok := resolutions[parkedID]; !ok || !approved.Approved {
+		t.Fatalf("resolutions = %+v, want %q approved", resolutions, parkedID)
+	}
+}
+
+// shutdownPending cancels the runner's parent context the moment the
+// fresh-start cleanup runs, simulating SIGINT during early setup.
+type shutdownPending struct {
+	*fakePending
+	cancel context.CancelFunc
+}
+
+func (p *shutdownPending) DeletePendingFor(ctx context.Context, convID, userID string) error {
+	p.cancel()
+	return p.fakePending.DeletePendingFor(ctx, convID, userID)
+}
+
+// failingConvos makes the next setup step (conversation load) fail the way a
+// real store does once its context is cancelled.
+type failingConvos struct{ *fakeConvos }
+
+func (f *failingConvos) ByID(context.Context, string, string) (storage.Conversation, error) {
+	return storage.Conversation{}, errors.New("conn shut down")
+}
+
+// TestRunnerShutdownDuringEarlySetupLeavesRun locks the recovery invariant:
+// when shutdown lands in the pre-runCtx setup (and the store errors out,
+// as a real one does on a cancelled context), the run must NOT settle
+// "failed" — the row stays running for the next boot's RecoverRunning.
+func TestRunnerShutdownDuringEarlySetupLeavesRun(t *testing.T) {
+	msgs := newFakeMsgs()
+	convs := &failingConvos{newFakeConvos(msgs)}
+	usage := newFakeUsage()
+	runs := newFakeBotRuns()
+
+	conv, err := convs.Create(context.Background(), "u-1", "Scout chat", storage.ConversationPatch{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := runs.Create(context.Background(), storage.BotRun{
+		ConversationID: conv.ID, UserID: "u-1", Task: "shutdown race",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	pending := &shutdownPending{fakePending: &fakePending{}, cancel: cancel}
+	agent := &fakeBotAgent{}
+	s := newBotRunnerTestServer(agent, runs, convs, msgs, usage, pending)
+	s.StartBotRunner(ctx)
+	s.WakeBotRunner()
+
+	// ClaimNext flips the row to running; wait for the claim first (the
+	// setup failure lands within milliseconds of it), then hold the runner
+	// to the invariant: the cancelled setup must leave exactly that behind —
+	// no terminal settle, ever.
+	waitForBotRun(t, runs, run.ID, "running")
+	deadline := time.Now().Add(300 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		got, err := runs.Get(context.Background(), "u-1", run.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Status != "running" || got.FinishedAt != nil || got.Error != "" {
+			t.Fatalf("shutdown during setup settled the run: %+v", got)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	// The next boot's recovery requeues it.
+	if err := runs.RecoverRunning(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	got, err := runs.Get(context.Background(), "u-1", run.ID)
+	if err != nil || got.Status != "queued" {
+		t.Fatalf("recovered status = %q (err %v), want queued", got.Status, err)
+	}
+	// The agent was never reached.
+	if runCalls, deferred, _, _, _ := agent.snapshot(); runCalls != 0 || deferred != 0 {
+		t.Fatalf("agent calls during shutdown setup: run=%d deferred=%d", runCalls, deferred)
+	}
 }
 
 func TestRunSinkCapsActivity(t *testing.T) {
