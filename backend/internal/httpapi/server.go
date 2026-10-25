@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync/atomic"
 
 	"github.com/abubakarsiddik31/golem-chatbot/internal/auth"
 	"github.com/abubakarsiddik31/golem-chatbot/internal/auth/oauth"
@@ -86,8 +87,11 @@ type Server struct {
 	deps ServerDeps
 	mux  *http.ServeMux
 	// runner drains the bot run queue once StartBotRunner boots it; nil
-	// until then, so the cancel/wake/resume plumbing is a no-op.
-	runner *botRunner
+	// until then, so the cancel/wake/resume plumbing is a no-op. It is an
+	// atomic pointer because StartBotRunner writes it once at boot while
+	// HTTP handlers (task enqueue, cancel, approvals) read it from request
+	// goroutines — set-once, never cleared.
+	runner atomic.Pointer[botRunner]
 	// botAgent is the Agent narrowed to the run surface the background
 	// runner calls; defaulted to deps.Agent and swapped by runner tests.
 	botAgent botAgentAPI
@@ -194,6 +198,11 @@ func newServer(deps ServerDeps) (*Server, http.Handler) {
 	authed.HandleFunc("PATCH /api/bots/{id}", s.handleUpdateBot)
 	authed.HandleFunc("DELETE /api/bots/{id}", s.handleDeleteBot)
 	authed.HandleFunc("POST /api/bots/{id}/conversations", s.handleCreateBotConversation)
+	authed.HandleFunc("POST /api/bots/{id}/tasks", s.handleCreateBotTask)
+	authed.HandleFunc("GET /api/bots/{id}/runs", s.handleListBotRuns)
+	authed.HandleFunc("GET /api/bot-runs/{id}", s.handleGetBotRun)
+	authed.HandleFunc("POST /api/bot-runs/{id}/cancel", s.handleCancelBotRun)
+	authed.HandleFunc("POST /api/bot-runs/{id}/approvals", s.handleBotRunApprovals)
 	authed.HandleFunc("GET /api/mcp/catalog", s.handleListMCPCatalog)
 	authed.HandleFunc("POST /api/mcp/catalog/{appId}/link", s.handleLinkCatalogApp)
 	authed.HandleFunc("POST /api/mcp/catalog/{appId}/unlink", s.handleUnlinkCatalogApp)

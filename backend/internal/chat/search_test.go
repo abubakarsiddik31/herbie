@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/abubakarsiddik31/golem-chatbot/internal/rag"
@@ -176,12 +177,18 @@ func TestSearchToolCumulativeOffset(t *testing.T) {
 }
 
 func TestSearchToolParallelQueries(t *testing.T) {
+	// Guarded because the parallel multi-query path calls Search from one
+	// goroutine per query.
+	var mu sync.Mutex
 	var calledQueries []string
 	deps := Deps{Search: func(_ context.Context, query string, _ int, _ []string) ([]rag.Scored, int, error) {
+		mu.Lock()
 		calledQueries = append(calledQueries, query)
+		n := len(calledQueries)
+		mu.Unlock()
 		return []rag.Scored{
 			{Chunk: rag.Chunk{DocTitle: "paper.pdf", Content: "content for " + query}, Score: 0.8},
-		}, len(calledQueries), nil
+		}, n, nil
 	}}
 	out, err := SearchTool().Exec(context.Background(), deps, json.RawMessage(`{"queries":["alpha concept","beta benchmark"]}`))
 	if err != nil {

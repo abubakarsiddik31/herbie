@@ -73,7 +73,7 @@ type botRunner struct {
 // tool-call messages, so the fresh run re-asks whatever it still needs).
 // Idempotent; a nil BotRuns store is a no-op (feature unwired).
 func (s *Server) StartBotRunner(parent context.Context) {
-	if s.runner != nil || s.deps.BotRuns == nil {
+	if s.runner.Load() != nil || s.deps.BotRuns == nil {
 		return
 	}
 	r := &botRunner{
@@ -90,7 +90,7 @@ func (s *Server) StartBotRunner(parent context.Context) {
 	if r.poll <= 0 {
 		r.poll = 2 * time.Second
 	}
-	s.runner = r
+	s.runner.Store(r)
 	if err := s.deps.BotRuns.RecoverRunning(parent); err != nil {
 		s.deps.Log.Error("bot run recover", "err", err)
 	}
@@ -100,11 +100,12 @@ func (s *Server) StartBotRunner(parent context.Context) {
 // WakeBotRunner nudges the claim loop immediately (enqueue paths call it;
 // the poll ticker is only the fallback cadence).
 func (s *Server) WakeBotRunner() {
-	if s.runner == nil {
+	r := s.runner.Load()
+	if r == nil {
 		return
 	}
 	select {
-	case s.runner.wake <- struct{}{}:
+	case r.wake <- struct{}{}:
 	default:
 	}
 }
@@ -114,15 +115,16 @@ func (s *Server) WakeBotRunner() {
 // row as cancelled — unless the parent context is also done, in which
 // case the row is left for the next boot's RecoverRunning to requeue.
 func (s *Server) CancelBotRun(runID string) {
-	if s.runner == nil {
+	r := s.runner.Load()
+	if r == nil {
 		return
 	}
-	s.runner.mu.Lock()
-	c, ok := s.runner.cancels[runID]
+	r.mu.Lock()
+	c, ok := r.cancels[runID]
 	if ok {
-		delete(s.runner.cancels, runID)
+		delete(r.cancels, runID)
 	}
-	s.runner.mu.Unlock()
+	r.mu.Unlock()
 	if ok {
 		c()
 	}
@@ -132,15 +134,16 @@ func (s *Server) CancelBotRun(runID string) {
 // removed from the registry under the lock before closing, so a second
 // notify (or one racing the run's exit) is a safe no-op.
 func (s *Server) NotifyBotRunResume(runID string) {
-	if s.runner == nil {
+	r := s.runner.Load()
+	if r == nil {
 		return
 	}
-	s.runner.mu.Lock()
-	ch, ok := s.runner.resumes[runID]
+	r.mu.Lock()
+	ch, ok := r.resumes[runID]
 	if ok {
-		delete(s.runner.resumes, runID)
+		delete(r.resumes, runID)
 	}
-	s.runner.mu.Unlock()
+	r.mu.Unlock()
 	if ok {
 		close(ch)
 	}

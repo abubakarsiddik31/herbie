@@ -5,20 +5,26 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/abubakarsiddik31/golem-chatbot/internal/websearch"
 	"github.com/abubakarsiddik31/golem/tool"
 )
 
+// mockSearcher is mutex-guarded because the parallel multi-query path calls
+// Search from one goroutine per query.
 type mockSearcher struct {
+	mu      sync.Mutex
 	results []websearch.Result
 	err     error
 	called  string
 }
 
 func (m *mockSearcher) Search(_ context.Context, query string) ([]websearch.Result, error) {
+	m.mu.Lock()
 	m.called = query
+	m.mu.Unlock()
 	return m.results, m.err
 }
 
