@@ -101,4 +101,18 @@ describe("RunCard", () => {
       "/chat/conv-1"
     );
   });
+
+  it("shows the cancel button for a parked (waiting_approval) run", () => {
+    renderRunCard();
+
+    expect(screen.getByRole("button", { name: "Cancel run" })).toBeInTheDocument();
+  });
+
+  it("cancels a parked run via the cancel button", () => {
+    renderRunCard();
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel run" }));
+
+    expect(h.cancel).toHaveBeenCalledWith("run-1", expect.anything());
+  });
 });

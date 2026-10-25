@@ -101,7 +101,10 @@ export function RunCard({ run }: { run: BotRun }) {
   const detail = useBotRun(waitingApproval ? run.id : null);
   const pending = waitingApproval ? (detail.data?.pending ?? []) : [];
 
-  const isCancellable = run.status === "queued" || run.status === "running";
+  // Cancel stays available while parked: the backend cancels a parked
+  // (waiting_approval) run from its queue, so keep the escape hatch.
+  const isCancellable =
+    run.status === "queued" || run.status === "running" || run.status === "waiting_approval";
   const activity = run.activity.slice(-5);
   const traceNames = run.activity.flatMap((a) => (a.name ? [a.name] : []));
 

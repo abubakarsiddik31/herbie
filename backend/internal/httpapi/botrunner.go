@@ -380,7 +380,13 @@ func (r *botRunner) execute(parent context.Context, run *storage.BotRun) {
 		return s.deps.Rates.ChatCostMicrosFor(spec.Model, totalIn, totalOut)
 	}
 
-	outcome, err := s.botAgent.Run(runCtx, deps, historyFrom(rows, len(rows)-1), run.Task, nil, sink, tools, spec)
+	// Compact exactly like the live send path (runTurn) and approvals
+	// resume: routine-driven runs reload the full conversation every
+	// cycle, so without this they grow unbounded until runs fail.
+	// Fail-open; a summary's summarizer spend lands as a compaction
+	// usage event on the parent ctx, matching the live path's metering.
+	spec, history, _ := s.maybeCompact(parent, run.UserID, run.ConversationID, spec, historyFrom(rows, len(rows)-1))
+	outcome, err := s.botAgent.Run(runCtx, deps, history, run.Task, nil, sink, tools, spec)
 	deferred := false // cycle 0 persists positionally; resumes use payload dedupe
 	pauses := 0
 

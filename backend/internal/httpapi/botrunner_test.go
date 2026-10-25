@@ -18,6 +18,7 @@ import (
 	"github.com/abubakarsiddik31/golem-chatbot/internal/cost"
 	"github.com/abubakarsiddik31/golem-chatbot/internal/storage"
 	"github.com/abubakarsiddik31/golem/model"
+	"github.com/abubakarsiddik31/golem/testmodel"
 	"github.com/abubakarsiddik31/golem/tool"
 )
 
@@ -187,6 +188,8 @@ type fakeBotAgent struct {
 	deferredCalls   int
 	lastPrompt      string
 	lastResolutions map[string]golem.Approval
+	lastHistory     []model.Message
+	lastSystem      string
 }
 
 func (f *fakeBotAgent) next() (chat.Outcome, error) {
@@ -198,11 +201,13 @@ func (f *fakeBotAgent) next() (chat.Outcome, error) {
 	return st.outcome, st.err
 }
 
-func (f *fakeBotAgent) Run(_ context.Context, _ chat.Deps, _ []model.Message, prompt string, _ []model.Part, _ chat.Sink, _ []tool.Tool[chat.Deps], _ chat.RunSpec) (chat.Outcome, error) {
+func (f *fakeBotAgent) Run(_ context.Context, _ chat.Deps, history []model.Message, prompt string, _ []model.Part, _ chat.Sink, _ []tool.Tool[chat.Deps], spec chat.RunSpec) (chat.Outcome, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.runCalls++
 	f.lastPrompt = prompt
+	f.lastHistory = history
+	f.lastSystem = spec.SystemPrompt
 	return f.next()
 }
 
@@ -746,5 +751,89 @@ func TestRunSinkCapsActivity(t *testing.T) {
 	}
 	if len(activity) != 50 {
 		t.Fatal("activity length changed unexpectedly")
+	}
+}
+
+// TestRunnerCompactsHistory verifies the runner compacts its loaded
+// history exactly like the live send path: over-threshold history is
+// trimmed to the compactor's recent window, the summary lands in the run
+// instructions, and the summarizer spend is metered as a compaction
+// usage event on the conversation.
+func TestRunnerCompactsHistory(t *testing.T) {
+	msgs := newFakeMsgs()
+	convs := newFakeConvos(msgs)
+	usage := newFakeUsage()
+	runs := newFakeBotRuns()
+	pending := &fakePending{}
+	agent := &fakeBotAgent{steps: []fakeAgentStep{{
+		outcome: chat.Outcome{
+			Output: "All clear.",
+			Messages: []model.Message{
+				{Role: model.RoleUser, Content: "check the inbox"},
+				{Role: model.RoleAssistant, Content: "All clear."},
+			},
+			Usage:    model.Usage{InputTokens: 10, OutputTokens: 5},
+			Requests: 1,
+		},
+	}}}
+	s := newBotRunnerTestServer(agent, runs, convs, msgs, usage, pending)
+	// Threshold 10 tokens: any history row trips compaction; keepRecent 1
+	// keeps only the last pre-task row after summarizing the rest.
+	summarizer := testmodel.New().Respond(model.Response{
+		Message: model.Message{Content: "EARLIER SUMMARY"},
+		Usage:   model.Usage{InputTokens: 9000, OutputTokens: 20},
+	})
+	s.deps.Compactor = chat.NewCompactor(summarizer, "gemini-2.5-flash", 10, 1, 100)
+
+	conv, err := convs.Create(context.Background(), "u-1", "Scout chat", storage.ConversationPatch{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range 4 {
+		role := model.RoleUser
+		content := fmt.Sprintf("older question %d", i)
+		if i%2 == 1 {
+			role = model.RoleAssistant
+			content = fmt.Sprintf("older answer %d", i)
+		}
+		if err := msgs.Add(context.Background(), storage.Message{
+			ConversationID: conv.ID, UserID: "u-1", Role: string(role),
+			Content: content, Data: mustJSON(model.Message{Role: role, Content: content}),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	run, err := runs.Create(context.Background(), storage.BotRun{
+		ConversationID: conv.ID, UserID: "u-1", Task: "check the inbox",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	s.StartBotRunner(ctx)
+	s.WakeBotRunner()
+
+	waitForBotRun(t, runs, run.ID, "succeeded")
+
+	// History given to the agent is the compacted recent window, not the
+	// full pre-task span (4 seeded rows).
+	if len(agent.lastHistory) != 1 || agent.lastHistory[0].Content != "older answer 3" {
+		t.Fatalf("agent history not compacted: %+v", agent.lastHistory)
+	}
+	if !strings.Contains(agent.lastSystem, "[Compacted earlier context") ||
+		!strings.Contains(agent.lastSystem, "EARLIER SUMMARY") {
+		t.Fatalf("summary missing from run instructions: %q", agent.lastSystem)
+	}
+	found := false
+	for _, e := range usage.events {
+		if e.Kind == "compaction" && e.ConversationID != nil && *e.ConversationID == conv.ID &&
+			e.Model == "gemini-2.5-flash" && e.InputTokens == 9000 && e.OutputTokens == 20 {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("compaction usage event missing: %+v", usage.events)
 	}
 }
