@@ -1421,5 +1421,63 @@ table "bot_routines" {
   }
 }
 
+table "bot_files" {
+  schema = schema.public
+  column "id" {
+    type    = uuid
+    null    = false
+    default = sql("gen_random_uuid()")
+  }
+  column "bot_id" {
+    type = uuid
+    null = false
+  }
+  column "user_id" {
+    type = uuid
+    null = false
+  }
+  column "path" {
+    type = text
+    null = false
+  }
+  column "content" {
+    type    = text
+    null    = false
+    default = ""
+  }
+  column "size_bytes" {
+    type    = bigint
+    null    = false
+    default = 0
+  }
+  column "created_at" {
+    type    = timestamptz
+    null    = false
+    default = sql("now()")
+  }
+  column "updated_at" {
+    type    = timestamptz
+    null    = false
+    default = sql("now()")
+  }
+  primary_key {
+    columns = [column.id]
+  }
+  foreign_key "bot_files_bot_id_fkey" {
+    columns     = [column.bot_id]
+    ref_columns = [table.bots.column.id]
+    on_delete   = CASCADE
+  }
+  foreign_key "bot_files_user_id_fkey" {
+    columns     = [column.user_id]
+    ref_columns = [table.users.column.id]
+    on_delete   = CASCADE
+  }
+  index "bot_files_bot_path_key" {
+    unique  = true
+    columns = [column.bot_id, column.path]
+  }
+}
+
 
 
