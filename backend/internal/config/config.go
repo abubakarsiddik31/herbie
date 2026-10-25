@@ -56,6 +56,10 @@ type Config struct {
 	BotRoutineTickInterval time.Duration
 	MaxRoutinesPerBot      int
 
+	// BotFileMaxBytes caps the per-call content size of a bot's write_file
+	// tool (the persistent per-bot workspace).
+	BotFileMaxBytes int
+
 	// RAGConfig gates the retrieval stack. Enabled is an explicit opt-in
 	// so a running stack never requires the rag compose profile.
 	RAG RAGConfig
@@ -189,6 +193,13 @@ func Load() (Config, error) {
 	}
 	if maxRoutines <= 0 {
 		maxRoutines = 10
+	}
+	botFileMaxBytes, err := envInt("BOT_FILE_MAX_BYTES", 262144)
+	if err != nil {
+		return Config{}, err
+	}
+	if botFileMaxBytes <= 0 {
+		botFileMaxBytes = 262144
 	}
 	dims, err := envInt("EMBEDDING_DIMS", 768)
 	if err != nil {
@@ -368,6 +379,7 @@ func Load() (Config, error) {
 
 		BotRoutineTickInterval: time.Duration(routineTickMs) * time.Millisecond,
 		MaxRoutinesPerBot:      maxRoutines,
+		BotFileMaxBytes:        botFileMaxBytes,
 
 		RAG: RAGConfig{
 			Enabled:            envBool("RAG_ENABLED", false),

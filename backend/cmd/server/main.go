@@ -180,6 +180,7 @@ func main() {
 		Pending:     storage.NewPendingCalls(pool),
 		Bots:        storage.NewBots(pool),
 		BotMemories: storage.NewBotMemories(pool),
+		BotFiles:    storage.NewBotFiles(pool),
 		BotRuns:     storage.NewBotRuns(pool),
 		BotRoutines: storage.NewBotRoutines(pool),
 		Agent:       agent,

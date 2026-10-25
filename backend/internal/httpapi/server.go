@@ -42,6 +42,7 @@ type ServerDeps struct {
 	Pending     PendingStore
 	Bots        BotStore
 	BotMemories BotMemoryStore
+	BotFiles    BotFileStore
 	BotRuns     BotRunStore
 	BotRoutines BotRoutineStore
 	Agent       *chat.Agent
@@ -199,6 +200,9 @@ func newServer(deps ServerDeps) (*Server, http.Handler) {
 	authed.HandleFunc("PATCH /api/bots/{id}", s.handleUpdateBot)
 	authed.HandleFunc("DELETE /api/bots/{id}", s.handleDeleteBot)
 	authed.HandleFunc("POST /api/bots/{id}/conversations", s.handleCreateBotConversation)
+	authed.HandleFunc("GET /api/bots/{id}/files", s.handleListBotFiles)
+	authed.HandleFunc("GET /api/bots/{id}/memories", s.handleListBotMemories)
+	authed.HandleFunc("DELETE /api/bots/{id}/memories/{memoryId}", s.handleDeleteBotMemory)
 	authed.HandleFunc("POST /api/bots/{id}/tasks", s.handleCreateBotTask)
 	authed.HandleFunc("GET /api/bots/{id}/routines", s.handleListRoutines)
 	authed.HandleFunc("POST /api/bots/{id}/routines", s.handleCreateRoutine)

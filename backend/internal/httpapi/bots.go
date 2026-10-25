@@ -36,6 +36,87 @@ var (
 	_ BotMemoryStore = (*storage.BotMemories)(nil)
 )
 
+// BotFileStore is the per-bot file workspace surface the file tools and
+// read endpoints need; *storage.BotFiles satisfies it (pin below), tests
+// run against in-memory fakes.
+type BotFileStore interface {
+	Upsert(ctx context.Context, file storage.BotFile) (storage.BotFile, error)
+	Get(ctx context.Context, userID, botID, path string) (storage.BotFile, error)
+	List(ctx context.Context, userID, botID string) ([]storage.BotFile, error)
+	Delete(ctx context.Context, userID, botID, path string) error
+}
+
+var _ BotFileStore = (*storage.BotFiles)(nil)
+
+// botFSAdapter adapts the storage workspace (methods take userID first)
+// to chat.BotFileStore (which scopes by botID per call): the adapter closes
+// over the run's user so the tool executors only carry the bot ID.
+type botFSAdapter struct {
+	fs     BotFileStore
+	userID string
+}
+
+var _ chat.BotFileStore = botFSAdapter{}
+
+func (a botFSAdapter) Read(ctx context.Context, botID, path string) (string, error) {
+	file, err := a.fs.Get(ctx, a.userID, botID, path)
+	if err != nil {
+		return "", err
+	}
+	return file.Content, nil
+}
+
+func (a botFSAdapter) Write(ctx context.Context, botID, path, content string) error {
+	_, err := a.fs.Upsert(ctx, storage.BotFile{BotID: botID, UserID: a.userID, Path: path, Content: content})
+	return err
+}
+
+func (a botFSAdapter) List(ctx context.Context, botID string) ([]chat.BotFileInfo, error) {
+	files, err := a.fs.List(ctx, a.userID, botID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]chat.BotFileInfo, len(files))
+	for i, f := range files {
+		out[i] = chat.BotFileInfo{Path: f.Path, Size: f.SizeBytes, UpdatedAt: f.UpdatedAt}
+	}
+	return out, nil
+}
+
+func (a botFSAdapter) Delete(ctx context.Context, botID, path string) error {
+	return a.fs.Delete(ctx, a.userID, botID, path)
+}
+
+// botFileMaxBytesDefault mirrors config's BOT_FILE_MAX_BYTES default so a
+// zero-valued test config keeps the tool usable.
+const botFileMaxBytesDefault = 262144
+
+// botFileMaxBytes resolves the write_file content cap, filling the unset
+// (zero-valued test config) field with the package default.
+func (s *Server) botFileMaxBytes() int {
+	if s.deps.Cfg.BotFileMaxBytes > 0 {
+		return s.deps.Cfg.BotFileMaxBytes
+	}
+	return botFileMaxBytesDefault
+}
+
+// botFor resolves the live bot for a bot-scoped conversation (nil for plain
+// conversations or when the store is missing or the bot is gone). Run paths
+// use it to thread the bot into userTools and buildDeps; fail-open keeps a
+// broken bot row from blocking an otherwise valid conversation.
+func (s *Server) botFor(ctx context.Context, userID string, botID *string) *storage.Bot {
+	if botID == nil || s.deps.Bots == nil {
+		return nil
+	}
+	bot, err := s.deps.Bots.Get(ctx, userID, *botID)
+	if err != nil {
+		return nil
+	}
+	return &bot
+}
+
+const botMemoriesListLimit = 50
+
 const (
 	maxBotNameChars         = 64
 	maxBotEmojiRunes        = 8
@@ -372,4 +453,92 @@ func (s *Server) handleCreateBotConversation(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{"conversation": toConversationDTO(conv)})
+}
+
+// handleListBotFiles returns the bot's workspace listing (paths, sizes,
+// updated timestamps — no content). The canonical file browser source.
+func (s *Server) handleListBotFiles(w http.ResponseWriter, r *http.Request) {
+	userID, _ := userIDFrom(r.Context())
+	bot, ok := s.botOr404(w, r, userID)
+	if !ok {
+		return
+	}
+	type botFileDTO struct {
+		Path      string `json:"path"`
+		SizeBytes int64  `json:"sizeBytes"`
+		UpdatedAt string `json:"updatedAt"`
+	}
+	files := []botFileDTO{}
+	if s.deps.BotFiles != nil {
+		rows, err := s.deps.BotFiles.List(r.Context(), userID, bot.ID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "internal", "could not list files")
+			return
+		}
+		files = make([]botFileDTO, len(rows))
+		for i, f := range rows {
+			files[i] = botFileDTO{Path: f.Path, SizeBytes: f.SizeBytes, UpdatedAt: f.UpdatedAt.UTC().Format(timeRFC3339)}
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"files": files})
+}
+
+// handleListBotMemories returns the bot's compounding memories (newest
+// first, capped at 50) — the canonical list endpoint.
+func (s *Server) handleListBotMemories(w http.ResponseWriter, r *http.Request) {
+	userID, _ := userIDFrom(r.Context())
+	bot, ok := s.botOr404(w, r, userID)
+	if !ok {
+		return
+	}
+	mems := []botMemoryDTO{}
+	if s.deps.BotMemories != nil {
+		rows, err := s.deps.BotMemories.ListRecent(r.Context(), userID, bot.ID, botMemoriesListLimit)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "internal", "could not list memories")
+			return
+		}
+		mems = make([]botMemoryDTO, len(rows))
+		for i, m := range rows {
+			mems[i] = toBotMemoryDTO(m)
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"memories": mems})
+}
+
+// handleDeleteBotMemory removes one bot memory; 404 on unknown bot or memory.
+func (s *Server) handleDeleteBotMemory(w http.ResponseWriter, r *http.Request) {
+	userID, _ := userIDFrom(r.Context())
+	bot, ok := s.botOr404(w, r, userID)
+	if !ok {
+		return
+	}
+	if s.deps.BotMemories == nil {
+		writeError(w, http.StatusServiceUnavailable, "not_configured", "memories not configured")
+		return
+	}
+	if err := s.deps.BotMemories.Delete(r.Context(), userID, bot.ID, r.PathValue("memoryId")); err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "not_found", "memory not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "internal", "could not delete memory")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// botOr404 loads the path bot for the caller, writing the 404/500 itself;
+// ok=false means the response is already written.
+func (s *Server) botOr404(w http.ResponseWriter, r *http.Request, userID string) (storage.Bot, bool) {
+	bot, err := s.deps.Bots.Get(r.Context(), userID, r.PathValue("id"))
+	if errors.Is(err, storage.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "not_found", "bot not found")
+		return storage.Bot{}, false
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "could not load bot")
+		return storage.Bot{}, false
+	}
+	return bot, true
 }

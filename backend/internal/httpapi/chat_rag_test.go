@@ -259,7 +259,7 @@ func TestUserToolsRespectConversationRagToggle(t *testing.T) {
 	}
 	srv := &Server{deps: ServerDeps{RagSearch: ragSearch}}
 
-	off, err := srv.userTools(context.Background(), "u-1", false)
+	off, err := srv.userTools(context.Background(), "u-1", false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -269,7 +269,7 @@ func TestUserToolsRespectConversationRagToggle(t *testing.T) {
 		}
 	}
 
-	on, err := srv.userTools(context.Background(), "u-1", true)
+	on, err := srv.userTools(context.Background(), "u-1", true, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -34,7 +34,7 @@ func (m *mockWebSearcher) Search(_ context.Context, query string) ([]websearch.R
 
 func TestUserToolsIncludesWebSearch(t *testing.T) {
 	sWithout := &Server{deps: ServerDeps{}}
-	toolsWithout, err := sWithout.userTools(context.Background(), "u-1", false)
+	toolsWithout, err := sWithout.userTools(context.Background(), "u-1", false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,7 +46,7 @@ func TestUserToolsIncludesWebSearch(t *testing.T) {
 
 	searcher := &mockWebSearcher{}
 	sWith := &Server{deps: ServerDeps{WebSearch: searcher}}
-	toolsWith, err := sWith.userTools(context.Background(), "u-1", false)
+	toolsWith, err := sWith.userTools(context.Background(), "u-1", false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

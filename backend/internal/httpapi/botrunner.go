@@ -319,7 +319,11 @@ func (r *botRunner) execute(parent context.Context, run *storage.BotRun) {
 		return
 	}
 	spec := s.runSpecFor(parent, conv)
-	tools, err := s.userTools(parent, run.UserID, spec.RagEnabled)
+	// A bot-scoped run threads its live bot through so the workspace file
+	// tools register and chat.Deps carries the bot identity (plain
+	// conversations pass nil).
+	bot := s.botFor(parent, run.UserID, conv.BotID)
+	tools, err := s.userTools(parent, run.UserID, spec.RagEnabled, bot)
 	if err != nil {
 		fail("could not load tools: " + err.Error())
 		return
@@ -344,7 +348,7 @@ func (r *botRunner) execute(parent context.Context, run *storage.BotRun) {
 
 	var sources []rag.Scored
 	var sourcesMu sync.Mutex
-	deps := s.buildDeps(run.UserID, run.ConversationID, &sources, &sourcesMu, conv.BotID)
+	deps := s.buildDeps(run.UserID, run.ConversationID, &sources, &sourcesMu, bot)
 
 	sink := &runSink{}
 	runCtx, cancelRun := context.WithCancel(parent)

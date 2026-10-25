@@ -213,8 +213,9 @@ func (s *Server) runTurn(ctx context.Context, userID, convID string, spec chat.R
 	spec, history, compacted := s.maybeCompact(ctx, userID, convID, spec, history)
 	// Tools load before the SSE sink goes out so failures can still be
 	// plain HTTP errors. One broken config skips that tool only (logged by
-	// DecodeConfigs's returned error).
-	tools, err := s.userTools(ctx, userID, true)
+	// DecodeConfigs's returned error). A bot-scoped conversation threads
+	// its live bot in so the workspace file tools register.
+	tools, err := s.userTools(ctx, userID, true, s.botFor(ctx, userID, botID))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal", "could not load tools")
 		return
@@ -250,7 +251,7 @@ func (s *Server) runTurn(ctx context.Context, userID, convID string, spec chat.R
 	}
 	var sources []rag.Scored
 	var sourcesMu sync.Mutex
-	outcome, err := s.deps.Agent.Run(ctx, s.buildDeps(userID, convID, &sources, &sourcesMu, botID),
+	outcome, err := s.deps.Agent.Run(ctx, s.buildDeps(userID, convID, &sources, &sourcesMu, s.botFor(ctx, userID, botID)),
 		history, prompt, parts, sink, tools, spec)
 	if err != nil {
 		s.persistFailure(ctx, userID, convID, spec, err, sink)
@@ -265,18 +266,29 @@ func (s *Server) runTurn(ctx context.Context, userID, convID string, spec chat.R
 // (saveMemoryFor), and source collection. The send path (runTurn), the
 // approvals resume, and the background bot runner share it so metering and
 // memory routing stay identical everywhere. sources/mu collect the run's
-// retrieved chunks; botID routes remember-writes (nil = plain conversation).
-func (s *Server) buildDeps(userID, convID string, sources *[]rag.Scored, sourcesMu *sync.Mutex, botID *string) chat.Deps {
-	return chat.Deps{
+// retrieved chunks; bot carries the run's bot identity (nil = plain
+// conversation) — its ID routes remember-writes and identifies the run's
+// file workspace on chat.Deps.
+func (s *Server) buildDeps(userID, convID string, sources *[]rag.Scored, sourcesMu *sync.Mutex, bot *storage.Bot) chat.Deps {
+	var botID *string
+	deps := chat.Deps{
 		UserID:         userID,
 		ConversationID: convID,
 		Search:         s.searchDeps(userID, convID, sources, sourcesMu),
 		ListDocs:       s.listDocsDeps(userID, convID),
 		ReadDoc:        s.readDocDeps(userID, convID, sources, sourcesMu),
-		SaveMemory:     s.saveMemoryFor(userID, botID),
 		RecordSearch:   s.recordSearchFunc(userID, convID),
 		AddWebSources:  s.webSourcesDeps(sources, sourcesMu),
 	}
+	if bot != nil {
+		botID = &bot.ID
+		deps.BotID = bot.ID
+		if s.deps.BotFiles != nil {
+			deps.BotFS = botFSAdapter{fs: s.deps.BotFiles, userID: userID}
+		}
+	}
+	deps.SaveMemory = s.saveMemoryFor(userID, botID)
+	return deps
 }
 
 // maybeCompact trims a hot history into its recent window and folds the
@@ -449,8 +461,10 @@ func (s *Server) saveMemoryFor(userID string, botID *string) func(ctx context.Co
 // document search when RAG is enabled globally and for this conversation.
 // A nil Tools store (tests without the tools feature) means user tools
 // only. Every run path (send, edit, regenerate, approvals resume) loads
-// tools through here.
-func (s *Server) userTools(ctx context.Context, userID string, ragEnabled bool) ([]tool.Tool[chat.Deps], error) {
+// tools through here. A non-nil bot appends the four per-bot workspace
+// file tools (write/read/list/delete_file) — the single registration
+// point for them; plain conversations (bot == nil) never see them.
+func (s *Server) userTools(ctx context.Context, userID string, ragEnabled bool, bot *storage.Bot) ([]tool.Tool[chat.Deps], error) {
 	var tools []tool.Tool[chat.Deps]
 	if s.deps.Tools != nil {
 		rows, err := s.deps.Tools.ListEnabled(ctx, userID)
@@ -483,6 +497,14 @@ func (s *Server) userTools(ctx context.Context, userID string, ragEnabled bool) 
 	}
 	if s.deps.Memories != nil {
 		tools = append(tools, chat.RememberTool())
+	}
+	if bot != nil && s.deps.BotFiles != nil {
+		fs := botFSAdapter{fs: s.deps.BotFiles, userID: userID}
+		tools = append(tools,
+			chat.WriteFileTool(fs, s.botFileMaxBytes()),
+			chat.ReadFileTool(fs),
+			chat.ListFilesTool(fs),
+			chat.DeleteFileTool(fs))
 	}
 	if s.deps.Cfg.ToolOAuth.GoogleCalendar.Enabled() || s.hasCalendarCredential(ctx, userID) {
 		tools = append(tools, chat.GoogleCalendarTool(s.calendarClient(ctx, userID)))
