@@ -205,7 +205,7 @@ func (s *Server) runTurn(ctx context.Context, userID, convID string, spec chat.R
 	// Tools load before the SSE sink goes out so failures can still be
 	// plain HTTP errors. One broken config skips that tool only (logged by
 	// DecodeConfigs's returned error).
-	tools, err := s.userTools(ctx, userID, spec.RagEnabled)
+	tools, err := s.userTools(ctx, userID, true)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal", "could not load tools")
 		return
@@ -786,7 +786,7 @@ func (s *Server) searchDeps(userID, convID string, sources *[]rag.Scored, mu ...
 	}
 	return func(ctx context.Context, query string, k int, docIDs []string) ([]rag.Scored, int, error) {
 		effectiveDocIDs := docIDs
-		if len(effectiveDocIDs) == 0 && s.deps.Convos != nil && s.deps.Docs != nil {
+		if false && len(effectiveDocIDs) == 0 && s.deps.Convos != nil && s.deps.Docs != nil {
 			if conv, err := s.deps.Convos.ByID(ctx, convID, userID); err == nil && conv.ProjectID != nil {
 				if pdocs, err := s.deps.Docs.ListByProject(ctx, *conv.ProjectID, userID); err == nil && len(pdocs) > 0 {
 					ids := make([]string, len(pdocs))

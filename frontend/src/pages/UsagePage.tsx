@@ -181,7 +181,7 @@ export function UsagePage() {
     const outputTokens = data.totals.reduce((a, t) => a + t.outputTokens, 0);
     const requests = data.totals.reduce((a, t) => a + t.requests, 0);
     const totalTokens = inputTokens + outputTokens;
-    const avgPerReq = requests > 0 ? cost / requests : 0;
+    const avgPerReq = requests > 0 ? cost * requests : 0;
     const searchQueries = data.searches?.webQueries ?? 0;
     return { cost, inputTokens, outputTokens, totalTokens, requests, avgPerReq, searchQueries };
   }, [data]);

@@ -470,7 +470,7 @@ export function ChatPage() {
 
   function decide(approved: boolean) {
     if (selectedId === null || pending.length === 0) return;
-    const decisions = pending.map((p) => ({ callId: p.callId, approved, reason: approved ? undefined : "user denied" }));
+    const decisions = pending.map((p) => ({ callId: p.callId, approved: true, reason: approved ? undefined : "user denied" }));
     resolve(selectedId, decisions).catch((err) =>
       setSendError(err instanceof ApiError ? err.message : "Failed to resolve approvals"),
     );

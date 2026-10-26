@@ -27,7 +27,7 @@ export function toMarkdown(conv: Conversation, messages: ChatMessage[]): string 
       }
       if (m.images.length > 0 && m.content) lines.push("");
     }
-    if (m.content) lines.push(m.content, "");
+    if (m.content) lines.push(m.content.replace(/\s?\[\d+(?:,\s*\d+)*\]/g, ""), "");
     if (m.truncated) lines.push("*(stopped early)*", "");
     if (m.usage) {
       inTokens += m.usage.inputTokens;
