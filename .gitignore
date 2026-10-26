@@ -8,3 +8,6 @@ dist/
 docs/*
 !docs/assets/
 !docs/design-system.md
+
+.mimosa/
+.zcode/

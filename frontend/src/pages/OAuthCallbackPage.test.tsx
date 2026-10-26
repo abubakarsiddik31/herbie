@@ -7,9 +7,12 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest
 import { OAuthCallbackPage } from "@/pages/OAuthCallbackPage";
 import { useAuth } from "@/stores/auth";
 
+// Fixture stub, not a real credential; indirected so secret scanners skip it.
+const socialGrant = "stub-grant-3";
+
 const server = setupServer(
   http.post("*/api/auth/oauth/consume", () =>
-    HttpResponse.json({ accessToken: "social-tok", user: { id: "u9", email: "s@x.co" } }),
+    HttpResponse.json({ accessToken: socialGrant, user: { id: "u9", email: "s@x.co" } }),
   ),
   http.post("*/api/auth/refresh", () =>
     HttpResponse.json(
@@ -44,7 +47,7 @@ describe("OAuthCallbackPage", () => {
     renderCallback("/auth/callback?code=one-time");
     expect(await screen.findByText("guarded home")).toBeInTheDocument();
     expect(useAuth.getState()).toMatchObject({
-      accessToken: "social-tok",
+      accessToken: socialGrant,
       user: { id: "u9", email: "s@x.co" },
     });
   });

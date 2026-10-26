@@ -99,4 +99,3 @@ func TestSearchQueryTrackingIntegration(t *testing.T) {
 		t.Fatalf("expected recent query 'latest news about AI', got %+v", sum.Searches.Recent)
 	}
 }
-
