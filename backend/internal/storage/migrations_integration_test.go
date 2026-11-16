@@ -86,7 +86,7 @@ func TestMessageBranchesMigrationBackfillAndDown(t *testing.T) {
 		`INSERT INTO users (email, password_hash) VALUES ('migrate-branches@test.dev', 'hash') RETURNING id`).Scan(&userID); err != nil {
 		t.Fatalf("insert user: %v", err)
 	}
-	var conv1, conv2 string
+	var conv1, conv2, conv3 string
 	if err := pool.QueryRow(ctx,
 		`INSERT INTO conversations (user_id, title) VALUES ($1, 'legacy') RETURNING id`, userID).Scan(&conv1); err != nil {
 		t.Fatalf("insert conv1: %v", err)
@@ -94,6 +94,10 @@ func TestMessageBranchesMigrationBackfillAndDown(t *testing.T) {
 	if err := pool.QueryRow(ctx,
 		`INSERT INTO conversations (user_id, title) VALUES ($1, 'paused') RETURNING id`, userID).Scan(&conv2); err != nil {
 		t.Fatalf("insert conv2: %v", err)
+	}
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO conversations (user_id, title) VALUES ($1, 'empty') RETURNING id`, userID).Scan(&conv3); err != nil {
+		t.Fatalf("insert conv3: %v", err)
 	}
 
 	insertMsg := func(id, conv, role, content, data, created string, truncated bool) {
@@ -121,9 +125,12 @@ func TestMessageBranchesMigrationBackfillAndDown(t *testing.T) {
 	insertMsg(n1, conv2, "user", "q", `{"role":"user","content":"q"}`, "2026-01-01T00:01:00Z", false)
 	insertMsg(n2, conv2, "assistant", "", `{"role":"assistant","toolCalls":[{"id":"call-2","name":"t"}]}`, "2026-01-01T00:01:10Z", false)
 	if _, err := pool.Exec(ctx,
-		`INSERT INTO pending_tool_calls (call_id, conversation_id, user_id, tool_name, args)
-		 VALUES ('call-1',$1,$2,'t','{}'::jsonb), ('call-2',$3,$2,'t','{}'::jsonb)`,
-		conv1, userID, conv2); err != nil {
+		`INSERT INTO pending_tool_calls (call_id, conversation_id, user_id, tool_name, args, status)
+		 VALUES ('call-1',$1,$2,'t','{}'::jsonb,'pending'),
+		        ('call-2',$3,$2,'t','{}'::jsonb,'pending'),
+		        ('call-3',$1,$2,'t','{}'::jsonb,'approved'),
+		        ('call-4',$4,$2,'t','{}'::jsonb,'pending')`,
+		conv1, userID, conv2, conv3); err != nil {
 		t.Fatalf("insert pending calls: %v", err)
 	}
 
@@ -181,6 +188,15 @@ func TestMessageBranchesMigrationBackfillAndDown(t *testing.T) {
 	}
 	if err := pool.QueryRow(ctx, `SELECT message_id::text FROM pending_tool_calls WHERE call_id = 'call-2'`).Scan(&pendingMsg2); err != nil || pendingMsg2 != n2 {
 		t.Fatalf("parked call-2 message = %q %v, want tail %s", pendingMsg2, err, n2)
+	}
+	// Resolved calls are not resume anchors, and a conversation with no rows
+	// has no tail to anchor at: both stay NULL.
+	var approvedMsg, emptyMsg sql.NullString
+	if err := pool.QueryRow(ctx, `SELECT message_id::text FROM pending_tool_calls WHERE call_id = 'call-3'`).Scan(&approvedMsg); err != nil || approvedMsg.Valid {
+		t.Fatalf("resolved call-3 message = %v %v, want NULL", approvedMsg, err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT message_id::text FROM pending_tool_calls WHERE call_id = 'call-4'`).Scan(&emptyMsg); err != nil || emptyMsg.Valid {
+		t.Fatalf("empty-conversation call-4 message = %v %v, want NULL", emptyMsg, err)
 	}
 	var truncated bool
 	if err := pool.QueryRow(ctx, `SELECT truncated FROM messages WHERE id = $1`, m2b).Scan(&truncated); err != nil || !truncated {

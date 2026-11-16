@@ -42,6 +42,51 @@ func addToolCallRow(t *testing.T, msgs *fakeMsgs, convID, userID, parent, callID
 	return id
 }
 
+// normalizeJSONB rewrites fake-store payloads the way pgx returns a jsonb
+// column: server-normalized text, not the bytes the app wrote.
+func normalizeJSONB(t *testing.T, msgs *fakeMsgs) {
+	t.Helper()
+	for i := range msgs.rows {
+		if len(msgs.rows[i].Data) == 0 {
+			continue
+		}
+		dec := json.NewDecoder(strings.NewReader(string(msgs.rows[i].Data)))
+		dec.UseNumber()
+		var v any
+		if err := dec.Decode(&v); err != nil {
+			t.Fatalf("normalize payload: %v", err)
+		}
+		out, err := json.MarshalIndent(v, "", "  ")
+		if err != nil {
+			t.Fatalf("normalize payload: %v", err)
+		}
+		msgs.rows[i].Data = out
+	}
+}
+
+func TestKnownRowsCanonicalizesJSONB(t *testing.T) {
+	msg := model.Message{Role: model.RoleAssistant, Content: "x",
+		ToolCalls: []model.ToolCall{{ID: "c1", Name: "get_time", Args: json.RawMessage(`{"b":2,"a":1}`)}}}
+	compact := mustJSON(msg)
+	dec := json.NewDecoder(strings.NewReader(string(compact)))
+	dec.UseNumber()
+	var v any
+	if err := dec.Decode(&v); err != nil {
+		t.Fatal(err)
+	}
+	normalized, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	known := knownRows([]storage.Message{{Data: normalized}})
+	if !known[canonicalJSON(compact)] {
+		t.Fatal("canonicalized jsonb payload did not match the freshly marshaled message")
+	}
+	if known[string(compact)] {
+		t.Fatal("raw-byte comparison matched; the test does not reproduce jsonb normalization")
+	}
+}
+
 func branchReq(t *testing.T, h http.Handler, token, method, path string, body any) *httptest.ResponseRecorder {
 	t.Helper()
 	req := reqJSON(method, path, body)
@@ -597,6 +642,7 @@ func TestResumeFailureDoesNotDuplicatePausedTail(t *testing.T) {
 		t.Fatalf("pause leg failed:\n%s", rec.Body.String())
 	}
 	callID := announcedCallID(t, rec.Body.String())
+	normalizeJSONB(t, msgs)
 	before := msgs.forConv(conv.ID, "u-1")
 
 	req := reqJSON(http.MethodPost, "/api/conversations/"+conv.ID+"/approvals", map[string]any{
@@ -743,8 +789,18 @@ func TestBotResumeFailureDoesNotDuplicatePausedTail(t *testing.T) {
 // when one call executes and another defers, the paused run persists the
 // executed result after the assistant row. The parked anchor must be that
 // tail (not the call row) and the resume must replay the executed result
-// while persisting only the resolution and the new answer.
+// while persisting only the resolution and the new answer. Both call orders
+// are covered because golem interleaves resolutions among executed results.
 func TestResumeMixedBatchKeepsExecutedResults(t *testing.T) {
+	for _, approvalFirst := range []bool{false, true} {
+		t.Run(fmt.Sprintf("approvalFirst=%v", approvalFirst), func(t *testing.T) {
+			runMixedBatchResume(t, approvalFirst)
+		})
+	}
+}
+
+func runMixedBatchResume(t *testing.T, approvalFirst bool) {
+	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{"time":"12:00"}`))
 	}))
@@ -759,12 +815,16 @@ func TestResumeMixedBatchKeepsExecutedResults(t *testing.T) {
 		n := calls
 		mu.Unlock()
 		if n == 1 {
+			toolCalls := []model.ToolCall{
+				{ID: "call-1", Name: "get_time", Args: json.RawMessage(`{}`)},
+				{ID: "call-2", Name: "get_weather", Args: json.RawMessage(`{"city":"x"}`)},
+			}
+			if approvalFirst {
+				toolCalls[0], toolCalls[1] = toolCalls[1], toolCalls[0]
+			}
 			return model.Response{
-				Message: model.Message{Role: model.RoleAssistant, ToolCalls: []model.ToolCall{
-					{ID: "call-1", Name: "get_time", Args: json.RawMessage(`{}`)},
-					{ID: "call-2", Name: "get_weather", Args: json.RawMessage(`{"city":"x"}`)},
-				}},
-				Usage: model.Usage{InputTokens: 10, OutputTokens: 5},
+				Message: model.Message{Role: model.RoleAssistant, ToolCalls: toolCalls},
+				Usage:   model.Usage{InputTokens: 10, OutputTokens: 5},
 			}, nil
 		}
 		mu.Lock()
@@ -796,6 +856,7 @@ func TestResumeMixedBatchKeepsExecutedResults(t *testing.T) {
 		t.Fatalf("pause leg failed:\n%s", rec.Body.String())
 	}
 	callID := announcedCallID(t, rec.Body.String())
+	normalizeJSONB(t, msgs)
 
 	rows := msgs.forConv(conv.ID, "u-1")
 	var executedID string
@@ -855,5 +916,80 @@ func TestResumeMixedBatchKeepsExecutedResults(t *testing.T) {
 	}
 	if leaf := convs.convs[conv.ID].ActiveLeafID; leaf == nil || *leaf != after[len(after)-1].ID {
 		t.Fatalf("active leaf = %v, want %s", leaf, after[len(after)-1].ID)
+	}
+}
+
+// TestBotResumeMixedTailDedupes keeps the bot resume path honest with a mixed
+// batch: the paused tail is an executed tool result, the parked anchor is that
+// tail, and a failed resume does not re-persist the paused rows (including
+// after jsonb-normalized reads).
+func TestBotResumeMixedTailDedupes(t *testing.T) {
+	msgs := newFakeMsgs()
+	convs := newFakeConvos(msgs)
+	usage := newFakeUsage()
+	runs := newFakeBotRuns()
+	pending := &fakePending{}
+	paused := []model.Message{
+		{Role: model.RoleUser, Content: "check the weather"},
+		{Role: model.RoleAssistant, ToolCalls: []model.ToolCall{
+			{ID: "call-1", Name: "get_weather", Args: json.RawMessage(`{}`)},
+			{ID: "call-2", Name: "get_time", Args: json.RawMessage(`{}`)},
+		}},
+		{Role: model.RoleTool, ToolCallID: "call-2", ToolName: "get_time", Content: "12:00"},
+	}
+	agent := &fakeBotAgent{steps: []fakeAgentStep{
+		{outcome: chat.Outcome{
+			Messages: paused,
+			Usage:    model.Usage{InputTokens: 3, OutputTokens: 2},
+			Requests: 1,
+			Pending:  []chat.PendingApproval{{CallID: "call-1", ToolName: "get_weather"}},
+		}},
+		{echoPartial: true},
+	}}
+	s := newBotRunnerTestServer(agent, runs, convs, msgs, usage, pending)
+	conv := convs.mustCreate("u-1", "Scout chat")
+	run, err := runs.Create(context.Background(), storage.BotRun{ConversationID: conv.ID, UserID: "u-1", Task: "check the weather"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	s.StartBotRunner(ctx)
+	s.WakeBotRunner()
+	waitForBotRun(t, runs, run.ID, "waiting_approval")
+
+	parked := pending.snapshot()
+	if len(parked) != 1 {
+		t.Fatalf("parked calls = %d", len(parked))
+	}
+	var tailID string
+	for _, row := range msgs.forConv(conv.ID, "u-1") {
+		if row.Role == string(model.RoleTool) {
+			tailID = row.ID
+		}
+	}
+	if tailID == "" || parked[0].MessageID != tailID {
+		t.Fatalf("parked anchor = %q, want executed tail %q", parked[0].MessageID, tailID)
+	}
+	normalizeJSONB(t, msgs)
+	if err := pending.SetStatus(context.Background(), "u-1", parked[0].CallID, "approved"); err != nil {
+		t.Fatal(err)
+	}
+	s.NotifyBotRunResume(run.ID)
+	waitForBotRun(t, runs, run.ID, "failed")
+
+	users, callRows, toolRows := 0, 0, 0
+	for _, row := range msgs.forConv(conv.ID, "u-1") {
+		switch {
+		case row.Role == string(model.RoleUser):
+			users++
+		case row.Role == string(model.RoleAssistant) && strings.Contains(string(row.Data), "toolCalls"):
+			callRows++
+		case row.Role == string(model.RoleTool):
+			toolRows++
+		}
+	}
+	if users != 1 || callRows != 1 || toolRows != 1 {
+		t.Fatalf("bot mixed resume duplicated rows: users=%d calls=%d tools=%d", users, callRows, toolRows)
 	}
 }

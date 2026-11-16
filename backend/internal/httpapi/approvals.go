@@ -222,7 +222,7 @@ func (s *Server) resumeHistory(ctx context.Context, convID, userID string, pendi
 	if len(path) > 0 {
 		startParentID = path[len(path)-1].ID
 	}
-	return pausedRunHistory(path), startParentID, knownRows(path), nil
+	return pausedRunHistory(path), startParentID, pausedKnownRows(path), nil
 }
 
 // parkPending persists the pending calls of a paused run and announces them.

@@ -586,7 +586,7 @@ func (r *botRunner) execute(parent context.Context, run *storage.BotRun) {
 			startParentID = resumeRows[len(resumeRows)-1].ID
 		}
 		deferred = true
-		resumeSkip = knownRows(resumeRows)
+		resumeSkip = pausedKnownRows(resumeRows)
 		outcome, err = s.botAgent.RunDeferred(runCtx, deps, resumeHistory,
 			golem.DeferredResults{Approvals: resolutions}, sink, tools, spec)
 	}

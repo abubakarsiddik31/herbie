@@ -307,12 +307,46 @@ func (s *Server) blockedByPendingApproval(w http.ResponseWriter, ctx context.Con
 }
 
 // knownRows builds the skip set of already-stored message payloads.
+// Payloads are canonicalized because messages.data is jsonb: pgx returns the
+// server's normalized text (sorted keys, spaces), while freshly marshaled
+// messages are compact in struct order. Comparing raw bytes would never match
+// in production.
 func knownRows(msgs []storage.Message) map[string]bool {
 	known := make(map[string]bool, len(msgs))
 	for _, row := range msgs {
-		known[string(row.Data)] = true
+		known[canonicalJSON(row.Data)] = true
 	}
 	return known
+}
+
+// pausedKnownRows scopes the skip set to the paused turn (from the last user
+// row to the anchor), so replay dedupe does not depend on run identity to keep
+// older turns from colliding.
+func pausedKnownRows(path []storage.Message) map[string]bool {
+	start := 0
+	for i, m := range path {
+		if m.Role == string(model.RoleUser) {
+			start = i
+		}
+	}
+	return knownRows(path[start:])
+}
+
+// canonicalJSON re-encodes JSON deterministically (sorted keys, no whitespace,
+// numbers preserved) so a payload read back from jsonb compares equal to a
+// message marshaled in Go.
+func canonicalJSON(raw []byte) string {
+	dec := json.NewDecoder(strings.NewReader(string(raw)))
+	dec.UseNumber()
+	var v any
+	if err := dec.Decode(&v); err != nil {
+		return string(raw)
+	}
+	out, err := json.Marshal(v)
+	if err != nil {
+		return string(raw)
+	}
+	return string(out)
 }
 
 // runTurn streams one model turn to w: loads the caller's tools, opens the
@@ -1277,7 +1311,7 @@ func (s *Server) persistRunMessages(ctx context.Context, userID, convID, modelSt
 			if i < newFrom {
 				continue
 			}
-		} else if skip[string(mustJSON(m))] {
+		} else if skip[canonicalJSON(mustJSON(m))] {
 			// Deferred resume fallback: the paused history replays verbatim
 			// from index 0, so payload equality is the replay test.
 			continue
@@ -1398,6 +1432,7 @@ func (s *Server) finishRun(ctx context.Context, userID, convID string, spec chat
 		"requests":        outcome.Requests,
 		"costUsd":         math.Round(float64(cost)/10) / 1e5, // 5 decimal places
 		"model":           spec.Model,
+		"promptMessageId": startParentID,
 		"contextTokens":   ctxTokens,
 		"thresholdTokens": compThreshold,
 		"keepRecent":      compKeepRecent,
