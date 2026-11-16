@@ -54,6 +54,31 @@ export function useDeleteConversation() {
   });
 }
 
+export function useActivateBranch(conversationId: string | null) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (messageId: string) =>
+      apiFetch<void>(`/api/conversations/${conversationId}/messages/${messageId}/activate`, { method: "POST" }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["conversation", conversationId] });
+    },
+  });
+}
+
+export function useForkConversation(conversationId: string | null) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (messageId?: string) =>
+      apiFetch<Conversation>(`/api/conversations/${conversationId}/fork`, {
+        method: "POST",
+        json: messageId ? { messageId } : {},
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["conversations"] });
+    },
+  });
+}
+
 export function useDeleteMessage(convID: string | null) {
   const queryClient = useQueryClient();
   return useMutation({

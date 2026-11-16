@@ -70,6 +70,24 @@ describe("useChat send", () => {
     expect(result.current.trace).toContain("earlier history summarized");
   });
 
+  it("settles the assistant placeholder when a run is already active", async () => {
+    server.use(
+      http.post("*/api/conversations/c1/messages", () =>
+        HttpResponse.json(
+          { error: { code: "run_active", message: "A run is in progress" } },
+          { status: 409 },
+        ),
+      ),
+    );
+    const { result } = renderHook(() => useChat());
+    await act(async () => {
+      await expect(result.current.send("hi", "c1")).rejects.toThrow("A run is in progress");
+    });
+    const assistant = result.current.messages.find((m) => m.role === "assistant");
+    expect(assistant).toMatchObject({ streaming: false, error: "A run is in progress" });
+    expect(result.current.status).toBe("error");
+  });
+
   it("tracks context status and compaction updates from stream frames", async () => {
     server.use(
       http.post("*/api/conversations/c1/messages", () =>

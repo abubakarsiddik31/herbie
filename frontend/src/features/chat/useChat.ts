@@ -184,7 +184,12 @@ export function useChat(onDone?: () => void) {
           setStatus("idle");
         }
       } else {
-        if (abortRef.current === controller) setStatus("error");
+        if (abortRef.current === controller) {
+          setMessages((m) => m.map((msg) => msg.id === assistantId
+            ? { ...msg, streaming: false, error: (err as Error).message }
+            : msg));
+          setStatus("error");
+        }
         throw err;
       }
     }
