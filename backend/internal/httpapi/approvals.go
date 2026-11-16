@@ -124,7 +124,7 @@ func (s *Server) handleApprovals(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	history, startParentID, err := s.resumeHistory(ctx, convID, userID, pending)
+	history, startParentID, skip, err := s.resumeHistory(ctx, convID, userID, pending)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal", "could not load history")
 		return
@@ -146,18 +146,20 @@ func (s *Server) handleApprovals(w http.ResponseWriter, r *http.Request) {
 	if compacted {
 		_ = sink.event("meta", map[string]any{"type": "compacted"})
 	}
-	// Resume dedupe is positional: everything handed to RunDeferred is the
-	// paused tail and already stored. No conversation-global payload skip.
+	// Resume dedupe is payload equality scoped to the paused path: golem
+	// merges resolution rows among the batch's already-executed results, so a
+	// positional boundary can land mid-batch. Rows replayed verbatim are
+	// skipped; resolutions and new answers carry this run's identity and are
+	// persisted at the paused tail.
 	outcome, err := s.deps.Agent.RunDeferred(ctx,
 		s.buildDeps(userID, convID, &sources, &sourcesMu, s.botFor(ctx, userID, conv.BotID)),
 		history, golem.DeferredResults{Approvals: resolutions},
 		sink, tools, spec)
 	if err != nil {
-		s.persistFailure(ctx, userID, convID, spec, startParentID, len(history), err, sink)
+		s.persistFailure(ctx, userID, convID, spec, startParentID, skip, 0, err, sink)
 		return
 	}
-	newFrom := resumeNewFrom(outcome.Messages, len(history))
-	res, err := s.persistRunMessages(ctx, userID, convID, spec.Model, outcome.Messages, outcome.Usage, outcome.Requests, false, nil, newFrom, startParentID, sourceJSON(sources))
+	res, err := s.persistRunMessages(ctx, userID, convID, spec.Model, outcome.Messages, outcome.Usage, outcome.Requests, false, skip, 0, startParentID, sourceJSON(sources))
 	if err != nil {
 		s.deps.Log.Error("persist resumed messages", "err", err)
 	}
@@ -172,10 +174,14 @@ func (s *Server) handleApprovals(w http.ResponseWriter, r *http.Request) {
 }
 
 // resumeHistory rebuilds the paused run's history from the path ending at the
-// parked call's assistant row. Legacy pending rows carry no message ID; they
-// fall back to the active-leaf path, which after the backfill is the same
-// chain. startParentID is the last paused row new rows chain under.
-func (s *Server) resumeHistory(ctx context.Context, convID, userID string, pending []storage.PendingToolCall) ([]model.Message, string, error) {
+// paused tail (the parked call's message ID). Mixed batches execute some calls
+// before pausing, so the tail is the last executed result — anchoring at the
+// assistant call row would drop those results and make the resume look like it
+// still owed every call. Legacy pending rows carry no message ID and fall back
+// to the active-leaf path, which after the backfill is the same chain.
+// startParentID is the tail new rows chain under; skip is the payload set of
+// the paused path replayed back verbatim.
+func (s *Server) resumeHistory(ctx context.Context, convID, userID string, pending []storage.PendingToolCall) ([]model.Message, string, map[string]bool, error) {
 	parked := ""
 	for _, p := range pending {
 		if p.MessageID != "" {
@@ -185,38 +191,38 @@ func (s *Server) resumeHistory(ctx context.Context, convID, userID string, pendi
 	if parked == "" {
 		conv, err := s.deps.Convos.ByID(ctx, convID, userID)
 		if err != nil {
-			return nil, "", err
+			return nil, "", nil, err
 		}
 		rows, err := s.deps.Msgs.ForConversation(ctx, convID, userID)
 		if err != nil {
-			return nil, "", err
+			return nil, "", nil, err
 		}
 		leaf, err := s.resolveActiveLeaf(ctx, conv, rows)
 		if err != nil {
-			return nil, "", err
+			return nil, "", nil, err
 		}
 		parked = leaf
 	}
 	path, err := s.pathToLeaf(ctx, convID, userID, parked)
 	if err != nil {
-		return nil, "", err
+		return nil, "", nil, err
 	}
 	if len(path) == 0 {
 		// Stale pointer: recover through the active leaf instead.
 		rows, rerr := s.deps.Msgs.ForConversation(ctx, convID, userID)
 		if rerr != nil {
-			return nil, "", rerr
+			return nil, "", nil, rerr
 		}
 		leafID := latestRowID(rows)
 		if path, err = s.pathToLeaf(ctx, convID, userID, leafID); err != nil {
-			return nil, "", err
+			return nil, "", nil, err
 		}
 	}
 	startParentID := ""
 	if len(path) > 0 {
 		startParentID = path[len(path)-1].ID
 	}
-	return pausedRunHistory(path), startParentID, nil
+	return pausedRunHistory(path), startParentID, knownRows(path), nil
 }
 
 // parkPending persists the pending calls of a paused run and announces them.
@@ -232,7 +238,7 @@ func (s *Server) parkPending(ctx context.Context, userID, convID string, spec ch
 			p.CallID = mapped
 		}
 		calls = append(calls, storage.PendingToolCall{
-			CallID: p.CallID, MessageID: res.CallRows[p.CallID], ConversationID: convID, UserID: userID,
+			CallID: p.CallID, MessageID: res.LastRowID, ConversationID: convID, UserID: userID,
 			ToolName: p.ToolName, Args: p.Args, Reason: p.Reason, Status: "pending",
 		})
 		announced = append(announced, p)

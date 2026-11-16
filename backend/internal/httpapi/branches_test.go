@@ -3,7 +3,6 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -12,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/abubakarsiddik31/golem"
 	"github.com/abubakarsiddik31/golem-chatbot/internal/chat"
 	"github.com/abubakarsiddik31/golem-chatbot/internal/storage"
 	"github.com/abubakarsiddik31/golem/model"
@@ -700,8 +698,7 @@ func TestBotResumeFailureDoesNotDuplicatePausedTail(t *testing.T) {
 			Requests: 1,
 			Pending:  []chat.PendingApproval{{CallID: "call-1", ToolName: "get_weather"}},
 		}},
-		{err: &golem.RunError{Stage: golem.StageModel, Err: errors.New("boom"),
-			Partial: &golem.PartialResult{Messages: paused}}},
+		{echoPartial: true},
 	}}
 	s := newBotRunnerTestServer(agent, runs, convs, msgs, usage, pending)
 	conv := convs.mustCreate("u-1", "Scout chat")
@@ -739,5 +736,124 @@ func TestBotResumeFailureDoesNotDuplicatePausedTail(t *testing.T) {
 	}
 	if users != 1 || callRows != 1 {
 		t.Fatalf("bot resume failure duplicated the paused tail: users=%d toolcall rows=%d", users, callRows)
+	}
+}
+
+// TestResumeMixedBatchKeepsExecutedResults covers the deferred-batch hazard:
+// when one call executes and another defers, the paused run persists the
+// executed result after the assistant row. The parked anchor must be that
+// tail (not the call row) and the resume must replay the executed result
+// while persisting only the resolution and the new answer.
+func TestResumeMixedBatchKeepsExecutedResults(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"time":"12:00"}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	var mu sync.Mutex
+	var calls int
+	var resumeHistory []model.Message
+	m := testmodel.StreamFunc(func(_ context.Context, req model.Request, onDelta func(model.Delta) error) (model.Response, error) {
+		mu.Lock()
+		calls++
+		n := calls
+		mu.Unlock()
+		if n == 1 {
+			return model.Response{
+				Message: model.Message{Role: model.RoleAssistant, ToolCalls: []model.ToolCall{
+					{ID: "call-1", Name: "get_time", Args: json.RawMessage(`{}`)},
+					{ID: "call-2", Name: "get_weather", Args: json.RawMessage(`{"city":"x"}`)},
+				}},
+				Usage: model.Usage{InputTokens: 10, OutputTokens: 5},
+			}, nil
+		}
+		mu.Lock()
+		resumeHistory = append([]model.Message(nil), req.Messages...)
+		mu.Unlock()
+		_ = testmodel.Emit(onDelta, model.Delta{Content: "done"})
+		return model.Response{Message: model.Message{Role: model.RoleAssistant, Content: "done"},
+			Usage: model.Usage{InputTokens: 10, OutputTokens: 5}}, nil
+	})
+	agent := newTestAgent(t, m)
+	msgs := newFakeMsgs()
+	convs := newFakeConvos(msgs)
+	tools := newFakeToolStore()
+	if _, err := tools.Create(context.Background(), storedWeatherTool(t, "u-1", srv.URL+"/wx/{{city}}", true)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tools.Create(context.Background(), storage.UserTool{
+		UserID: "u-1", Name: "get_time", Description: "time", Method: "GET",
+		URLTemplate: srv.URL + "/time", Params: json.RawMessage(`[]`), Headers: json.RawMessage(`{}`), Enabled: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	pending := &fakePending{}
+	h, token := newHandlerServerFull(t, agent, convs, msgs, newFakeUsage(), tools, pending)
+	conv := convs.mustCreate("u-1", "")
+
+	rec := postMessage(t, h, token, conv.ID, "go")
+	if !strings.Contains(rec.Body.String(), "event: approval_request") {
+		t.Fatalf("pause leg failed:\n%s", rec.Body.String())
+	}
+	callID := announcedCallID(t, rec.Body.String())
+
+	rows := msgs.forConv(conv.ID, "u-1")
+	var executedID string
+	for _, row := range rows {
+		if row.Role == string(model.RoleTool) && strings.Contains(row.Content, "12:00") {
+			executedID = row.ID
+		}
+	}
+	if executedID == "" {
+		t.Fatalf("eager call result not persisted: %+v", rows)
+	}
+	parked := pending.snapshot()
+	if len(parked) != 1 || parked[0].MessageID != executedID {
+		t.Fatalf("parked anchor = %+v, want executed tail %s", parked, executedID)
+	}
+
+	req := reqJSON(http.MethodPost, "/api/conversations/"+conv.ID+"/approvals", map[string]any{
+		"decisions": []map[string]any{{"callId": callID, "approved": true}},
+	})
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if !strings.Contains(rec.Body.String(), "event: done") {
+		t.Fatalf("resume leg failed:\n%s", rec.Body.String())
+	}
+
+	mu.Lock()
+	history := append([]model.Message(nil), resumeHistory...)
+	mu.Unlock()
+	var replayed bool
+	for _, msg := range history {
+		if msg.Role == model.RoleTool && strings.Contains(msg.Content, "12:00") {
+			replayed = true
+		}
+	}
+	if !replayed {
+		t.Fatalf("resume history dropped the executed tool result: %+v", history)
+	}
+
+	after := msgs.forConv(conv.ID, "u-1")
+	toolResults := 0
+	for _, row := range after {
+		if row.Role == string(model.RoleTool) {
+			toolResults++
+		}
+	}
+	if toolResults != 2 {
+		t.Fatalf("resume persisted %d tool results, want 2 (executed + resolution): %+v", toolResults, after)
+	}
+	if len(after) != 5 {
+		t.Fatalf("resumed rows = %d, want 5: %+v", len(after), after)
+	}
+	for i := 1; i < len(after); i++ {
+		if after[i].ParentID != after[i-1].ID {
+			t.Fatalf("resumed rows are not one chain: row %d parent %q, want %q", i, after[i].ParentID, after[i-1].ID)
+		}
+	}
+	if leaf := convs.convs[conv.ID].ActiveLeafID; leaf == nil || *leaf != after[len(after)-1].ID {
+		t.Fatalf("active leaf = %v, want %s", leaf, after[len(after)-1].ID)
 	}
 }

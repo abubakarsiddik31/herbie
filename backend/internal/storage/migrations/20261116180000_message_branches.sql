@@ -28,14 +28,15 @@ WITH "last" AS (
 UPDATE "conversations" c SET "active_leaf_id" = l."id"
 FROM "last" l WHERE c."id" = l."conversation_id";
 
--- Parked approvals point at their persisted tool-call row so a resume can
--- rebuild the exact paused branch. Call IDs are conversation-unique
--- (rewritten at persist time), so the containment match is unambiguous.
-UPDATE "pending_tool_calls" p SET "message_id" = m."id"
-FROM "messages" m
-WHERE m."conversation_id" = p."conversation_id"
-  AND m."role" = 'assistant'
-  AND m."data"->'toolCalls' @> jsonb_build_array(jsonb_build_object('id', p."call_id"));
+-- Parked approvals anchor at the paused run's tail: the conversation's active
+-- leaf is the last row that run persisted. A mixed batch executes some calls
+-- before pausing, so anchoring at the assistant call row would drop those
+-- results from the resume history. Sends are blocked while an approval is
+-- pending, so no later unrelated row can be the leaf.
+UPDATE "pending_tool_calls" p SET "message_id" = c."active_leaf_id"
+FROM "conversations" c
+WHERE c."id" = p."conversation_id" AND p."status" = 'pending'
+  AND c."active_leaf_id" IS NOT NULL;
 
 -- FKs after backfill so the chain validation never sees a half-built tree.
 ALTER TABLE "messages"

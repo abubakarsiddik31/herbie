@@ -369,7 +369,7 @@ func (s *Server) runTurn(ctx context.Context, userID, convID string, spec chat.R
 	outcome, err := s.deps.Agent.Run(ctx, s.buildDeps(userID, convID, &sources, &sourcesMu, s.botFor(ctx, userID, botID)),
 		history, prompt, parts, sink, tools, spec)
 	if err != nil {
-		s.persistFailure(ctx, userID, convID, spec, startParentID, -1, err, sink)
+		s.persistFailure(ctx, userID, convID, spec, startParentID, nil, -1, err, sink)
 		return
 	}
 	emitSources(sink, sources)
@@ -1154,18 +1154,6 @@ func replayedPrefixLen(msgs []model.Message) int {
 	return last + 1
 }
 
-// resumeNewFrom positions the resume replay boundary: golem's result carries
-// the agent's leading system instructions before the history handed to
-// RunDeferred, so the replay prefix is historyLen plus those leading system
-// rows. Everything from there on is genuinely new.
-func resumeNewFrom(msgs []model.Message, historyLen int) int {
-	offset := 0
-	for offset < len(msgs) && msgs[offset].Role == model.RoleSystem {
-		offset++
-	}
-	return offset + historyLen
-}
-
 // pauseRun persists the paused conversation (history through the unanswered
 // tool call, usage, pending calls) and tells the client what needs a
 // decision. No done event follows — the stream ends waiting for approvals.
@@ -1187,7 +1175,7 @@ func (s *Server) pauseRun(ctx context.Context, userID, convID string, spec chat.
 			p.CallID = mapped
 		}
 		calls = append(calls, storage.PendingToolCall{
-			CallID: callID, MessageID: res.CallRows[callID], ConversationID: convID, UserID: userID,
+			CallID: callID, MessageID: res.LastRowID, ConversationID: convID, UserID: userID,
 			ToolName: p.ToolName, Args: p.Args, Reason: p.Reason, Status: "pending",
 		})
 		announced = append(announced, p)
@@ -1202,10 +1190,11 @@ func (s *Server) pauseRun(ctx context.Context, userID, convID string, spec chat.
 // persistFailure uses golem's partial evidence: whatever completed is kept,
 // marked truncated. Every partial message persists so the next turn's
 // history — including any completed tool exchanges — replays faithfully.
-// resumeHistoryLen < 0 computes the positional replay prefix for a streamed
-// run; resume callers pass the exact length of the history they handed to
-// RunDeferred, so the paused tail is never re-persisted.
-func (s *Server) persistFailure(ctx context.Context, userID, convID string, spec chat.RunSpec, startParentID string, resumeHistoryLen int, runErr error, sink *sseSink) {
+// newFrom < 0 computes the positional replay prefix for a streamed run;
+// resume callers pass newFrom 0 plus the paused path's payload set, because
+// resolution rows can be merged among already-stored results (mixed deferred
+// batches), which makes a positional boundary wrong.
+func (s *Server) persistFailure(ctx context.Context, userID, convID string, spec chat.RunSpec, startParentID string, skip map[string]bool, newFrom int, runErr error, sink *sseSink) {
 	clientGone := errors.Is(runErr, context.Canceled) || errors.Is(runErr, context.DeadlineExceeded)
 	var runError *golem.RunError
 	_ = errors.As(runErr, &runError)
@@ -1215,13 +1204,10 @@ func (s *Server) persistFailure(ctx context.Context, userID, convID string, spec
 		partial = runError.Partial
 	}
 	if partial != nil && len(partial.Messages) > 0 {
-		newFrom := resumeHistoryLen
 		if newFrom < 0 {
 			newFrom = replayedPrefixLen(partial.Messages)
-		} else {
-			newFrom = resumeNewFrom(partial.Messages, resumeHistoryLen)
 		}
-		if _, err := s.persistRunMessages(ctx, userID, convID, spec.Model, partial.Messages, partial.Usage, partial.Requests, true, nil, newFrom, startParentID, nil); err != nil {
+		if _, err := s.persistRunMessages(ctx, userID, convID, spec.Model, partial.Messages, partial.Usage, partial.Requests, true, skip, newFrom, startParentID, nil); err != nil {
 			s.deps.Log.Error("persist partial", "err", err)
 		}
 		_ = s.deps.Usage.Add(ctx, usageEventFor(userID, convID, spec.Model, partial.Usage, partial.Requests, s.deps.Rates))
@@ -1239,11 +1225,10 @@ func (s *Server) persistFailure(ctx context.Context, userID, convID string, spec
 }
 
 // persistRunResult reports what a persisted run added: the raw→persisted
-// call-ID map, each persisted call ID's assistant row (for parked approvals
-// and resume), and the new tail rows.
+// call-ID map and the new tail rows. The last row is the paused tail parked
+// approvals anchor to.
 type persistRunResult struct {
 	IDMap           map[string]string
-	CallRows        map[string]string
 	LastRowID       string
 	LastAssistantID string
 }
@@ -1271,7 +1256,7 @@ type persistRunResult struct {
 // result is matched to the most recent unanswered raw ID, mirroring the
 // emission order golem guarantees.
 func (s *Server) persistRunMessages(ctx context.Context, userID, convID, modelStr string, msgs []model.Message, usage model.Usage, requests int, truncated bool, skip map[string]bool, newFrom int, startParentID string, sources json.RawMessage) (persistRunResult, error) {
-	res := persistRunResult{IDMap: map[string]string{}, CallRows: map[string]string{}}
+	res := persistRunResult{IDMap: map[string]string{}}
 	lastAssistant := -1
 	for i, m := range msgs {
 		if m.Role == model.RoleAssistant {
@@ -1297,7 +1282,6 @@ func (s *Server) persistRunMessages(ctx context.Context, userID, convID, modelSt
 			// from index 0, so payload equality is the replay test.
 			continue
 		}
-		var newCallIDs []string
 		if m.Role == model.RoleAssistant && len(m.ToolCalls) > 0 {
 			m = cloneMessage(m)
 			for j, call := range m.ToolCalls {
@@ -1309,7 +1293,6 @@ func (s *Server) persistRunMessages(ctx context.Context, userID, convID, modelSt
 				if call.ID != "" {
 					unanswered[call.ID] = newID
 					res.IDMap[call.ID] = newID
-					newCallIDs = append(newCallIDs, newID)
 				}
 				m.ToolCalls[j].ID = newID
 			}
@@ -1340,9 +1323,6 @@ func (s *Server) persistRunMessages(ctx context.Context, userID, convID, modelSt
 		id, err := s.deps.Msgs.Add(ctx, row)
 		if err != nil {
 			return res, err
-		}
-		for _, callID := range newCallIDs {
-			res.CallRows[callID] = id
 		}
 		parent = id
 		res.LastRowID = id

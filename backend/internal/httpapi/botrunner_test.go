@@ -177,6 +177,10 @@ func (f *fakeBotRuns) HasActiveForConversation(_ context.Context, userID, conver
 type fakeAgentStep struct {
 	outcome chat.Outcome
 	err     error
+	// echoPartial mirrors golem's partial evidence on a failed resume: the
+	// RunError carries the exact history handed to RunDeferred (stored rows,
+	// rewritten call IDs included), which the persistence dedupe must skip.
+	echoPartial bool
 }
 
 // fakeBotAgent scripts the runner's model calls in order and records what
@@ -211,11 +215,17 @@ func (f *fakeBotAgent) Run(_ context.Context, _ chat.Deps, history []model.Messa
 	return f.next()
 }
 
-func (f *fakeBotAgent) RunDeferred(_ context.Context, _ chat.Deps, _ []model.Message, res golem.DeferredResults, _ chat.Sink, _ []tool.Tool[chat.Deps], _ chat.RunSpec) (chat.Outcome, error) {
+func (f *fakeBotAgent) RunDeferred(_ context.Context, _ chat.Deps, history []model.Message, res golem.DeferredResults, _ chat.Sink, _ []tool.Tool[chat.Deps], _ chat.RunSpec) (chat.Outcome, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.deferredCalls++
 	f.lastResolutions = res.Approvals
+	f.lastHistory = history
+	if len(f.steps) > 0 && f.steps[0].echoPartial {
+		f.steps = f.steps[1:]
+		return chat.Outcome{}, &golem.RunError{Stage: golem.StageModel, Err: errors.New("boom"),
+			Partial: &golem.PartialResult{Messages: history}}
+	}
 	return f.next()
 }
 

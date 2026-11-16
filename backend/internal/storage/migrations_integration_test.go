@@ -172,12 +172,15 @@ func TestMessageBranchesMigrationBackfillAndDown(t *testing.T) {
 	if err := pool.QueryRow(ctx, `SELECT active_leaf_id::text FROM conversations WHERE id = $1`, conv2).Scan(&leaf2); err != nil || leaf2 != n2 {
 		t.Fatalf("conv2 leaf = %q %v, want %s", leaf2, err, n2)
 	}
+	// Parked approvals anchor at the conversation's paused tail (its active
+	// leaf), not the assistant call row: mixed batches persist executed tool
+	// results after the call row and the resume must replay them.
 	var pendingMsg, pendingMsg2 string
-	if err := pool.QueryRow(ctx, `SELECT message_id::text FROM pending_tool_calls WHERE call_id = 'call-1'`).Scan(&pendingMsg); err != nil || pendingMsg != m2 {
-		t.Fatalf("parked call-1 message = %q %v, want %s", pendingMsg, err, m2)
+	if err := pool.QueryRow(ctx, `SELECT message_id::text FROM pending_tool_calls WHERE call_id = 'call-1'`).Scan(&pendingMsg); err != nil || pendingMsg != m4 {
+		t.Fatalf("parked call-1 message = %q %v, want tail %s", pendingMsg, err, m4)
 	}
 	if err := pool.QueryRow(ctx, `SELECT message_id::text FROM pending_tool_calls WHERE call_id = 'call-2'`).Scan(&pendingMsg2); err != nil || pendingMsg2 != n2 {
-		t.Fatalf("parked call-2 message = %q %v, want %s", pendingMsg2, err, n2)
+		t.Fatalf("parked call-2 message = %q %v, want tail %s", pendingMsg2, err, n2)
 	}
 	var truncated bool
 	if err := pool.QueryRow(ctx, `SELECT truncated FROM messages WHERE id = $1`, m2b).Scan(&truncated); err != nil || !truncated {

@@ -411,25 +411,21 @@ func (r *botRunner) execute(parent context.Context, run *storage.BotRun) {
 	// usage event on the parent ctx, matching the live path's metering.
 	spec, history, _ := s.maybeCompact(parent, run.UserID, run.ConversationID, spec, fullHistory(path))
 	outcome, err := s.botAgent.Run(runCtx, deps, history, run.Task, nil, sink, tools, spec)
-	deferred := false // cycle 0 persists positionally; resumes are positional too
+	deferred := false // cycle 0 persists positionally; resumes use the paused path's payload set
 	pauses := 0
 	startParentID := promptID
-	resumeHistoryLen := 0
+	var resumeSkip map[string]bool
 
 	for {
 		if err != nil {
-			failHistoryLen := -1
-			if deferred {
-				failHistoryLen = resumeHistoryLen
-			}
-			r.settleFailure(settle, parent, run, spec, startParentID, failHistoryLen, err, totalIn, totalOut, totalReqs, cost())
+			r.settleFailure(settle, parent, run, spec, startParentID, deferred, resumeSkip, err, totalIn, totalOut, totalReqs, cost())
 			return
 		}
 		newFrom := replayedPrefixLen(outcome.Messages)
 		skip := known
 		if deferred {
-			newFrom = resumeNewFrom(outcome.Messages, resumeHistoryLen)
-			skip = nil // positional dedupe; never a conversation-global payload skip
+			newFrom = 0
+			skip = resumeSkip
 		}
 
 		if len(outcome.Pending) == 0 {
@@ -480,7 +476,7 @@ func (r *botRunner) execute(parent context.Context, run *storage.BotRun) {
 				callID = mapped
 			}
 			calls = append(calls, storage.PendingToolCall{
-				CallID: callID, MessageID: res.CallRows[callID], ConversationID: run.ConversationID, UserID: run.UserID,
+				CallID: callID, MessageID: res.LastRowID, ConversationID: run.ConversationID, UserID: run.UserID,
 				ToolName: p.ToolName, Args: p.Args, Reason: p.Reason, Status: "pending",
 			})
 		}
@@ -590,7 +586,7 @@ func (r *botRunner) execute(parent context.Context, run *storage.BotRun) {
 			startParentID = resumeRows[len(resumeRows)-1].ID
 		}
 		deferred = true
-		resumeHistoryLen = len(resumeHistory)
+		resumeSkip = knownRows(resumeRows)
 		outcome, err = s.botAgent.RunDeferred(runCtx, deps, resumeHistory,
 			golem.DeferredResults{Approvals: resolutions}, sink, tools, spec)
 	}
@@ -602,12 +598,12 @@ func (r *botRunner) execute(parent context.Context, run *storage.BotRun) {
 // for a fresh start. Context cancellations are user cancels; everything
 // else is a failure carrying the golem.RunError message.
 func (r *botRunner) settleFailure(settle, parent context.Context, run *storage.BotRun,
-	spec chat.RunSpec, startParentID string, resumeHistoryLen int, runErr error, totalIn, totalOut, totalReqs int, costMicros int64) {
+	spec chat.RunSpec, startParentID string, deferred bool, skip map[string]bool, runErr error, totalIn, totalOut, totalReqs int, costMicros int64) {
 	if parent.Err() != nil {
 		return
 	}
 	s := r.s
-	s.persistBotFailure(settle, run.UserID, run.ConversationID, spec, startParentID, resumeHistoryLen, runErr)
+	s.persistBotFailure(settle, run.UserID, run.ConversationID, spec, startParentID, deferred, skip, runErr)
 	status, msg := "failed", runErr.Error()
 	if errors.Is(runErr, context.Canceled) || errors.Is(runErr, context.DeadlineExceeded) {
 		status, msg = "cancelled", ""
@@ -617,18 +613,18 @@ func (r *botRunner) settleFailure(settle, parent context.Context, run *storage.B
 
 // persistBotFailure stores a failed/cancelled background run's partial
 // evidence (truncated), mirroring persistFailure's DB half minus the SSE.
-func (s *Server) persistBotFailure(ctx context.Context, userID, convID string, spec chat.RunSpec, startParentID string, resumeHistoryLen int, runErr error) {
+func (s *Server) persistBotFailure(ctx context.Context, userID, convID string, spec chat.RunSpec, startParentID string, deferred bool, skip map[string]bool, runErr error) {
 	var runError *golem.RunError
 	_ = errors.As(runErr, &runError)
 	if runError != nil && runError.Partial != nil && len(runError.Partial.Messages) > 0 {
-		newFrom := resumeHistoryLen
-		if newFrom < 0 {
-			newFrom = replayedPrefixLen(runError.Partial.Messages)
+		newFrom := -1 // streamed: positional replay prefix
+		if deferred {
+			newFrom = 0 // resume: payload dedupe scoped to the paused path
 		} else {
-			newFrom = resumeNewFrom(runError.Partial.Messages, resumeHistoryLen)
+			skip = nil
 		}
 		if _, err := s.persistRunMessages(ctx, userID, convID, spec.Model, runError.Partial.Messages,
-			runError.Partial.Usage, runError.Partial.Requests, true, nil,
+			runError.Partial.Usage, runError.Partial.Requests, true, skip,
 			newFrom, startParentID, nil); err != nil {
 			s.deps.Log.Error("persist bot partial", "err", err, "conv_id", convID)
 		}
