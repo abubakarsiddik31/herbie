@@ -20,6 +20,7 @@ function renderPalette(props: Partial<Parameters<typeof CommandPalette>[0]> = {}
   const onShare = vi.fn();
   const onOpenSettings = vi.fn();
   const onOpenShortcuts = vi.fn();
+  const onOpenPromptLibrary = vi.fn();
   const onOpenChange = vi.fn();
 
   render(
@@ -54,12 +55,13 @@ function renderPalette(props: Partial<Parameters<typeof CommandPalette>[0]> = {}
         onShare={onShare}
         onOpenSettings={onOpenSettings}
         onOpenShortcuts={onOpenShortcuts}
+        onOpenPromptLibrary={onOpenPromptLibrary}
         {...props}
       />
     </MemoryRouter>,
   );
 
-  return { onNewChat, onExport, onShare, onOpenSettings, onOpenShortcuts, onOpenChange };
+  return { onNewChat, onExport, onShare, onOpenSettings, onOpenShortcuts, onOpenPromptLibrary, onOpenChange };
 }
 
 describe("CommandPalette", () => {
@@ -67,6 +69,7 @@ describe("CommandPalette", () => {
     renderPalette();
     expect(screen.getByPlaceholderText(/type a command/i)).toBeInTheDocument();
     expect(screen.getByText("New chat")).toBeInTheDocument();
+    expect(screen.getByText("Prompt library")).toBeInTheDocument();
     expect(screen.getByText("Moon landing exploration")).toBeInTheDocument();
   });
 

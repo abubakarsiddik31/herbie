@@ -2,6 +2,7 @@ import { useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { useTheme } from "next-themes";
 import {
+  BookMarked,
   Download,
   FileText,
   FileUp,
@@ -32,6 +33,7 @@ interface Props {
   onShare: () => void;
   onOpenSettings: () => void;
   onOpenShortcuts: () => void;
+  onOpenPromptLibrary: () => void;
 }
 
 interface PaletteItem {
@@ -53,6 +55,7 @@ export function CommandPalette({
   onShare,
   onOpenSettings,
   onOpenShortcuts,
+  onOpenPromptLibrary,
 }: Props) {
   const [query, setQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -105,6 +108,13 @@ export function CommandPalette({
     }
 
     list.push(
+      {
+        id: "nav-prompts",
+        category: "Navigation",
+        title: "Prompt library",
+        icon: BookMarked,
+        run: onOpenPromptLibrary,
+      },
       {
         id: "nav-documents",
         category: "Navigation",
@@ -170,6 +180,7 @@ export function CommandPalette({
     navigate,
     onExport,
     onNewChat,
+    onOpenPromptLibrary,
     onOpenSettings,
     onOpenShortcuts,
     onShare,

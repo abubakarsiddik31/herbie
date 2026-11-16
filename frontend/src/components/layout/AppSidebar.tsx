@@ -3,6 +3,8 @@ import { Link, useLocation, useNavigate } from "react-router";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
+  Archive,
+  ArchiveRestore,
   Bot as BotIcon,
   Calendar,
   ChevronDown,
@@ -16,6 +18,8 @@ import {
   MoreHorizontal,
   PanelLeftClose,
   Pencil,
+  Pin,
+  PinOff,
   Plug,
   Plus,
   Search,
@@ -56,7 +60,12 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { BrandMark } from "@/components/BrandMark";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { ShareDialog } from "@/features/chat/ShareDialog";
-import { useConversations, useDeleteConversation } from "@/features/chat/useConversations";
+import {
+  useArchiveConversation,
+  useConversations,
+  useDeleteConversation,
+  usePinConversation,
+} from "@/features/chat/useConversations";
 import { useBots } from "@/features/bots/useBots";
 import { useTools } from "@/features/tools/useTools";
 import { useProjects, useProject, type Project } from "@/features/projects/useProjects";
@@ -211,6 +220,12 @@ export function AppSidebar() {
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
   const { data: conversations, isLoading: conversationsLoading } = useConversations(debouncedFilter.trim());
+  const [archivedExpanded, setArchivedExpanded] = useState(false);
+  const { data: archivedConversations, isLoading: archivedLoading } = useConversations(
+    debouncedFilter.trim(),
+    { archived: true },
+    archivedExpanded,
+  );
   const { data: botsData } = useBots();
   const { data: tools } = useTools();
   const { data: projects } = useProjects();
@@ -220,6 +235,8 @@ export function AppSidebar() {
   const [mcpDialogOpen, setMcpDialogOpen] = useState(false);
   const [appsExpanded, setAppsExpanded] = useState(true);
   const deleteConversation = useDeleteConversation();
+  const pinConversation = usePinConversation();
+  const archiveConversation = useArchiveConversation();
 
   const gcalProvider = oauthProviders?.find((p) => p.id === "google_calendar");
   const ghProvider = oauthProviders?.find((p) => p.id === "github");
@@ -290,11 +307,14 @@ export function AppSidebar() {
     });
   }
 
-  // Group conversations
+  // Group conversations. Pinned chats live in their own section above, not
+  // duplicated in the date buckets.
+  const pinnedConversations = (conversations ?? []).filter((c) => c.pinnedAt);
   const groups: Array<{ label: string; items: Conversation[] }> = [];
   if (conversations) {
     const buckets: Record<string, Conversation[]> = {};
     for (const c of conversations) {
+      if (c.pinnedAt) continue;
       const key = groupKey(c.updatedAt);
       (buckets[key] ??= []).push(c);
     }
@@ -307,6 +327,7 @@ export function AppSidebar() {
   const nothingMatches =
     !conversationsLoading &&
     debouncedFilter.trim() !== "" &&
+    pinnedConversations.length === 0 &&
     groups.every((g) => g.items.length === 0);
 
   const isNavActive = (path: string) => {
@@ -315,6 +336,154 @@ export function AppSidebar() {
     }
     return location.pathname.startsWith(path);
   };
+
+  function togglePin(c: Conversation) {
+    pinConversation.mutate(
+      { id: c.id, pinned: !c.pinnedAt },
+      {
+        onSuccess: () => toast.success(c.pinnedAt ? "Unpinned conversation" : "Pinned conversation"),
+        onError: (err) => toast.error(err instanceof ApiError ? err.message : "Failed to update pin"),
+      },
+    );
+  }
+
+  function toggleArchive(c: Conversation) {
+    archiveConversation.mutate(
+      { id: c.id, archived: !c.archivedAt },
+      {
+        onSuccess: () => toast.success(c.archivedAt ? "Conversation unarchived" : "Conversation archived"),
+        onError: (err) => toast.error(err instanceof ApiError ? err.message : "Failed to archive conversation"),
+      },
+    );
+  }
+
+  function renderConversationRow(c: Conversation) {
+    const isSelected = c.id === selectedId;
+    const displayTitle = cleanConversationTitle(c.title);
+    const isFile = isFileTitle(c.title);
+    return (
+      <div
+        key={c.id}
+        className={cn(
+          "group relative flex items-center rounded-lg px-2 py-1 text-xs transition-colors",
+          isSelected
+            ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium border-l-2 border-brand pl-1.5"
+            : "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
+        )}
+      >
+        <button
+          type="button"
+          onClick={() => selectConversation(c.id)}
+          className="flex items-center gap-2 min-w-0 flex-1 truncate text-left outline-none py-1 pr-7"
+        >
+          {isFile ? (
+            <FileText
+              className={cn(
+                "size-3.5 shrink-0 transition-colors",
+                isSelected ? "text-primary" : "text-primary/70 group-hover:text-primary"
+              )}
+            />
+          ) : (
+            <MessageSquare
+              className={cn(
+                "size-3.5 shrink-0 transition-opacity",
+                isSelected ? "opacity-100 text-sidebar-accent-foreground" : "opacity-60 group-hover:opacity-100"
+              )}
+            />
+          )}
+          <span className="truncate">{displayTitle}</span>
+          {c.pinnedAt && <Pin className="size-3 shrink-0 text-primary/70" aria-label="Pinned" />}
+        </button>
+        <div
+          className={cn(
+            "absolute right-1 top-1/2 -translate-y-1/2 flex items-center z-10 transition-opacity",
+            openMenuId === c.id
+              ? "opacity-100"
+              : "opacity-0 group-hover:opacity-100 focus-within:opacity-100 max-md:opacity-75"
+          )}
+        >
+          <DropdownMenu
+            open={openMenuId === c.id}
+            onOpenChange={(open) => setOpenMenuId(open ? c.id : null)}
+          >
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                aria-label={`Options for ${displayTitle}`}
+                className={cn(
+                  "size-6 rounded-md hover:bg-background/80 hover:text-foreground text-muted-foreground transition-all",
+                  isSelected ? "text-sidebar-accent-foreground" : ""
+                )}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <MoreHorizontal className="size-3.5" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-44">
+              <DropdownMenuItem
+                aria-label={`${c.pinnedAt ? "Unpin" : "Pin"} ${displayTitle}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  togglePin(c);
+                }}
+              >
+                {c.pinnedAt ? (
+                  <PinOff className="size-3.5 text-muted-foreground" />
+                ) : (
+                  <Pin className="size-3.5 text-muted-foreground" />
+                )}
+                <span>{c.pinnedAt ? "Unpin" : "Pin"}</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                aria-label={`Archive ${displayTitle}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toggleArchive(c);
+                }}
+              >
+                <Archive className="size-3.5 text-muted-foreground" />
+                <span>Archive</span>
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                aria-label={`Rename ${displayTitle}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  openRename(c);
+                }}
+              >
+                <Pencil className="size-3.5 text-muted-foreground" />
+                <span>Rename</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                aria-label={`Share ${displayTitle}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setSharing(c);
+                }}
+              >
+                <Share2 className="size-3.5 text-muted-foreground" />
+                <span>Share link</span>
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                variant="destructive"
+                aria-label={`Delete ${displayTitle}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setPendingDelete(c);
+                }}
+              >
+                <Trash2 className="size-3.5 text-destructive" />
+                <span>Delete chat</span>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <>
@@ -749,118 +918,82 @@ export function AppSidebar() {
             {nothingMatches && (
               <p className="px-3 py-6 text-center text-muted-foreground text-xs">No conversations match.</p>
             )}
+            {pinnedConversations.length > 0 && (
+              <div className="pt-2">
+                <p className="px-2 pb-1 text-[10px] font-semibold tracking-wider text-muted-foreground/60 uppercase">
+                  Pinned
+                </p>
+                {pinnedConversations.map(renderConversationRow)}
+              </div>
+            )}
             {groups.map((group) => (
               <div key={group.label} className="pt-2">
                 <p className="px-2 pb-1 text-[10px] font-semibold tracking-wider text-muted-foreground/60 uppercase">
                   {group.label}
                 </p>
-                {group.items.map((c) => {
-                  const isSelected = c.id === selectedId;
-                  const displayTitle = cleanConversationTitle(c.title);
-                  const isFile = isFileTitle(c.title);
-                  return (
-                    <div
-                      key={c.id}
-                      className={cn(
-                        "group relative flex items-center rounded-lg px-2 py-1 text-xs transition-colors",
-                        isSelected
-                          ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium border-l-2 border-brand pl-1.5"
-                          : "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
-                      )}
-                    >
-                      <button
-                        type="button"
-                        onClick={() => selectConversation(c.id)}
-                        className="flex items-center gap-2 min-w-0 flex-1 truncate text-left outline-none py-1 pr-7"
-                      >
-                        {isFile ? (
-                          <FileText
-                            className={cn(
-                              "size-3.5 shrink-0 transition-colors",
-                              isSelected
-                                ? "text-primary"
-                                : "text-primary/70 group-hover:text-primary"
-                            )}
-                          />
-                        ) : (
-                          <MessageSquare
-                            className={cn(
-                              "size-3.5 shrink-0 transition-opacity",
-                              isSelected
-                                ? "opacity-100 text-sidebar-accent-foreground"
-                                : "opacity-60 group-hover:opacity-100"
-                            )}
-                          />
-                        )}
-                        <span className="truncate">{displayTitle}</span>
-                      </button>
-                      <div
-                        className={cn(
-                          "absolute right-1 top-1/2 -translate-y-1/2 flex items-center z-10 transition-opacity",
-                          openMenuId === c.id
-                            ? "opacity-100"
-                            : "opacity-0 group-hover:opacity-100 focus-within:opacity-100 max-md:opacity-75"
-                        )}
-                      >
-                        <DropdownMenu
-                          open={openMenuId === c.id}
-                          onOpenChange={(open) => setOpenMenuId(open ? c.id : null)}
-                        >
-                          <DropdownMenuTrigger asChild>
-                            <Button
-                              variant="ghost"
-                              size="icon-xs"
-                              aria-label={`Options for ${displayTitle}`}
-                              className={cn(
-                                "size-6 rounded-md hover:bg-background/80 hover:text-foreground text-muted-foreground transition-all",
-                                isSelected ? "text-sidebar-accent-foreground" : ""
-                              )}
-                              onClick={(e) => e.stopPropagation()}
-                            >
-                              <MoreHorizontal className="size-3.5" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end" className="w-44">
-                            <DropdownMenuItem
-                              aria-label={`Rename ${displayTitle}`}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                openRename(c);
-                              }}
-                            >
-                              <Pencil className="size-3.5 text-muted-foreground" />
-                              <span>Rename</span>
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              aria-label={`Share ${displayTitle}`}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setSharing(c);
-                              }}
-                            >
-                              <Share2 className="size-3.5 text-muted-foreground" />
-                              <span>Share link</span>
-                            </DropdownMenuItem>
-                            <DropdownMenuSeparator />
-                            <DropdownMenuItem
-                              variant="destructive"
-                              aria-label={`Delete ${displayTitle}`}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setPendingDelete(c);
-                              }}
-                            >
-                              <Trash2 className="size-3.5 text-destructive" />
-                              <span>Delete chat</span>
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </div>
-                    </div>
-                  );
-                })}
+                {group.items.map(renderConversationRow)}
               </div>
             ))}
+            <div className="pt-2">
+              <button
+                type="button"
+                onClick={() => setArchivedExpanded((v) => !v)}
+                aria-expanded={archivedExpanded}
+                className="flex w-full items-center justify-between rounded-lg px-2 py-1 text-[10px] font-semibold tracking-wider text-muted-foreground/60 uppercase hover:text-sidebar-foreground"
+              >
+                <span className="flex items-center gap-1.5">
+                  <Archive className="size-3" />
+                  Archived
+                  <ChevronDown className={cn("size-3 transition-transform", archivedExpanded && "rotate-180")} />
+                </span>
+                {(archivedConversations?.length ?? 0) > 0 && (
+                  <Badge variant="secondary" className="px-1.5 py-0 text-[10px] font-mono h-4">
+                    {archivedConversations?.length}
+                  </Badge>
+                )}
+              </button>
+              {archivedExpanded && (
+                <div className="mt-1 space-y-0.5">
+                  {archivedLoading && <Skeleton className="mx-1 h-7 w-full rounded-md" />}
+                  {!archivedLoading && (archivedConversations?.length ?? 0) === 0 && (
+                    <p className="px-2 py-1 text-[11px] text-muted-foreground/60">No archived chats.</p>
+                  )}
+                  {archivedConversations?.map((c) => {
+                    const displayTitle = cleanConversationTitle(c.title);
+                    return (
+                      <div
+                        key={c.id}
+                        className={cn(
+                          "group flex items-center rounded-lg px-2 py-1 text-xs transition-colors",
+                          c.id === selectedId
+                            ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
+                            : "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
+                        )}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => selectConversation(c.id)}
+                          className="flex min-w-0 flex-1 items-center gap-2 truncate py-1 text-left outline-none"
+                        >
+                          <MessageSquare className="size-3.5 shrink-0 opacity-60" />
+                          <span className="truncate">{displayTitle}</span>
+                        </button>
+                        <Button
+                          variant="ghost"
+                          size="icon-xs"
+                          aria-label={`Unarchive ${displayTitle}`}
+                          title="Unarchive conversation"
+                          onClick={() => toggleArchive(c)}
+                          className="size-6 text-muted-foreground hover:text-foreground"
+                        >
+                          <ArchiveRestore className="size-3.5" />
+                        </Button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           </nav>
         </ScrollArea>
 
