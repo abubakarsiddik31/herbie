@@ -124,6 +124,12 @@ func TestListConversationViews(t *testing.T) {
 	if got := conversationTitles(listConversationDTOs(t, h, token, "?q=moon")); len(got) != 2 {
 		t.Fatalf("q must exclude archived: %v", got)
 	}
+	if err := convs.SetPinned(context.Background(), archived.ID, "u-1", true); err != nil {
+		t.Fatal(err)
+	}
+	if got := conversationTitles(listConversationDTOs(t, h, token, "?pinned=true&archived=true")); len(got) != 1 || got[0] != "Archived moon" {
+		t.Fatalf("pinned+archived view = %v", got)
+	}
 	if rec := doAuthed(t, h, token, http.MethodGet, "/api/conversations?archived=maybe", nil); rec.Code != http.StatusBadRequest {
 		t.Fatalf("invalid archived bool = %d", rec.Code)
 	}
@@ -173,6 +179,26 @@ func TestArchiveDuringActiveRun(t *testing.T) {
 	}
 }
 
+func TestArchiveWhileParkedApproval(t *testing.T) {
+	msgs := newFakeMsgs()
+	convs := newFakeConvos(msgs)
+	pending := &fakePending{}
+	h, token := newHandlerServerFull(t, newTestAgent(t, scriptedPongModel()), convs, msgs, newFakeUsage(), newFakeToolStore(), pending)
+	conv := convs.mustCreate("u-1", "Parked")
+	if err := pending.Add(context.Background(), []storage.PendingToolCall{{
+		CallID: "call-1", ConversationID: conv.ID, UserID: "u-1", ToolName: "t",
+		Args: json.RawMessage(`{}`), Status: "pending",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if rec := doAuthed(t, h, token, http.MethodPut, "/api/conversations/"+conv.ID+"/archive", map[string]bool{"archived": true}); rec.Code != http.StatusConflict || errorCode(t, rec) != "approval_pending" {
+		t.Fatalf("archive with parked approval = %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := doAuthed(t, h, token, http.MethodPut, "/api/conversations/"+conv.ID+"/archive", map[string]bool{"archived": false}); rec.Code != http.StatusNoContent {
+		t.Fatalf("unarchive with parked approval = %d %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestSendEditRegenerateUnarchive(t *testing.T) {
 	agent := newTestAgent(t, testmodel.New().
 		Respond(model.Response{Message: model.Message{Role: model.RoleAssistant, Content: "one"}}).
@@ -183,6 +209,7 @@ func TestSendEditRegenerateUnarchive(t *testing.T) {
 	h, token := newHandlerServer(t, agent, convs, msgs, newFakeUsage())
 	conv := convs.mustCreate("u-1", "Archive me")
 	ctx := context.Background()
+	_ = convs.SetArchived(ctx, conv.ID, "u-1", true)
 
 	if rec := postMessage(t, h, token, conv.ID, "first"); rec.Code != http.StatusOK {
 		t.Fatalf("send: %d %s", rec.Code, rec.Body.String())
@@ -315,7 +342,18 @@ type fakePrompts struct {
 
 func newFakePrompts() *fakePrompts { return &fakePrompts{rows: map[string]storage.SavedPrompt{}} }
 
-func (f *fakePrompts) Create(_ context.Context, userID, title, body string) (storage.SavedPrompt, error) {
+func (f *fakePrompts) Create(_ context.Context, userID, title, body string, limit int) (storage.SavedPrompt, error) {
+	if limit > 0 {
+		n := 0
+		for _, p := range f.rows {
+			if p.UserID == userID {
+				n++
+			}
+		}
+		if n >= limit {
+			return storage.SavedPrompt{}, storage.ErrLimit
+		}
+	}
 	f.seq++
 	now := time.Now()
 	p := storage.SavedPrompt{ID: fmt.Sprintf("p-%d", f.seq), UserID: userID, Title: title, Body: body, CreatedAt: now, UpdatedAt: now}
@@ -417,6 +455,9 @@ func TestSavedPromptCRUD(t *testing.T) {
 		t.Fatalf("list = %d %+v", rec.Code, listed)
 	}
 
+	if rec := doAuthed(t, h, token, http.MethodPatch, "/api/prompts/"+created.ID, map[string]any{}); rec.Code != http.StatusBadRequest {
+		t.Fatalf("empty prompt patch = %d %s", rec.Code, rec.Body.String())
+	}
 	rec = doAuthed(t, h, token, http.MethodPatch, "/api/prompts/"+created.ID, map[string]string{"title": "Daily", "body": "Recap"})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("patch: %d %s", rec.Code, rec.Body.String())
@@ -460,7 +501,7 @@ func TestSavedPromptValidationLimitAndOwnership(t *testing.T) {
 	}
 
 	for i := 0; i < maxSavedPrompts; i++ {
-		if _, err := prompts.Create(context.Background(), "u-1", "t", "b"); err != nil {
+		if _, err := prompts.Create(context.Background(), "u-1", "t", "b", maxSavedPrompts); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -469,7 +510,7 @@ func TestSavedPromptValidationLimitAndOwnership(t *testing.T) {
 		t.Fatalf("limit = %d %s", rec.Code, rec.Body.String())
 	}
 
-	theirs, _ := prompts.Create(context.Background(), "u-2", "theirs", "secret")
+	theirs, _ := prompts.Create(context.Background(), "u-2", "theirs", "secret", maxSavedPrompts)
 	for _, tc := range []struct {
 		method, path string
 		body         any

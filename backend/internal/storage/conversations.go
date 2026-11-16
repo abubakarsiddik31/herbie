@@ -110,7 +110,7 @@ func (c *Conversations) List(ctx context.Context, userID, q string, pinned, arch
 func (c *Conversations) ListByProject(ctx context.Context, projectID, userID string) ([]Conversation, error) {
 	rows, err := c.pool.Query(ctx,
 		`SELECT `+conversationColumns+` FROM conversations
-		 WHERE user_id = $1 AND project_id = $2
+		 WHERE user_id = $1 AND project_id = $2 AND archived_at IS NULL
 		 ORDER BY updated_at DESC`, userID, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("list project conversations: %w", err)
@@ -131,7 +131,7 @@ func (c *Conversations) ListByProject(ctx context.Context, projectID, userID str
 func (c *Conversations) ListByBot(ctx context.Context, botID, userID string) ([]Conversation, error) {
 	rows, err := c.pool.Query(ctx,
 		`SELECT `+conversationColumns+` FROM conversations
-		 WHERE user_id = $1 AND bot_id = $2
+		 WHERE user_id = $1 AND bot_id = $2 AND archived_at IS NULL
 		 ORDER BY updated_at DESC`, userID, botID)
 	if err != nil {
 		return nil, fmt.Errorf("list bot conversations: %w", err)
@@ -154,7 +154,7 @@ func (c *Conversations) ListByBot(ctx context.Context, botID, userID string) ([]
 func (c *Conversations) LatestForBot(ctx context.Context, botID, userID string) (Conversation, error) {
 	conv, err := scanConversation(c.pool.QueryRow(ctx,
 		`SELECT `+conversationColumns+` FROM conversations
-		 WHERE user_id = $1 AND bot_id = $2
+		 WHERE user_id = $1 AND bot_id = $2 AND archived_at IS NULL
 		 ORDER BY updated_at DESC LIMIT 1`, userID, botID))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -172,7 +172,7 @@ func (c *Conversations) LatestForBot(ctx context.Context, botID, userID string) 
 func (c *Conversations) LatestIDsByUser(ctx context.Context, userID string) (map[string]string, error) {
 	rows, err := c.pool.Query(ctx,
 		`SELECT DISTINCT ON (bot_id) bot_id::text, id::text FROM conversations
-		 WHERE user_id = $1 AND bot_id IS NOT NULL
+		 WHERE user_id = $1 AND bot_id IS NOT NULL AND archived_at IS NULL
 		 ORDER BY bot_id, updated_at DESC`, userID)
 	if err != nil {
 		return nil, fmt.Errorf("latest conversation ids by bot: %w", err)

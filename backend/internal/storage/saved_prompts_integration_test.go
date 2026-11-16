@@ -30,18 +30,18 @@ func TestSavedPromptsIntegration(t *testing.T) {
 	}
 	store := NewSavedPrompts(pool)
 
-	created, err := store.Create(ctx, user.ID, "Standup", "Summarize yesterday")
+	created, err := store.Create(ctx, user.ID, "Standup", "Summarize yesterday", 0)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
 	if created.ID == "" || created.Title != "Standup" || created.Body != "Summarize yesterday" {
 		t.Fatalf("created = %+v", created)
 	}
-	second, err := store.Create(ctx, user.ID, "Second", "Body")
+	second, err := store.Create(ctx, user.ID, "Second", "Body", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.Create(ctx, other.ID, "Theirs", "Secret"); err != nil {
+	if _, err := store.Create(ctx, other.ID, "Theirs", "Secret", 0); err != nil {
 		t.Fatal(err)
 	}
 
@@ -71,5 +71,20 @@ func TestSavedPromptsIntegration(t *testing.T) {
 	}
 	if n, _ := store.Count(ctx, user.ID); n != 1 {
 		t.Fatalf("count after delete = %d", n)
+	}
+
+	// The limit is enforced inside the create transaction (advisory lock), so
+	// two concurrent callers cannot both slip past a count-then-insert check.
+	if _, err := pool.Exec(ctx, `DELETE FROM saved_prompts WHERE user_id = $1`, user.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Create(ctx, user.ID, "one", "body", 2); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Create(ctx, user.ID, "two", "body", 2); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Create(ctx, user.ID, "three", "body", 2); !errors.Is(err, ErrLimit) {
+		t.Fatalf("third prompt = %v, want ErrLimit", err)
 	}
 }

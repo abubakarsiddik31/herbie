@@ -196,3 +196,52 @@ func TestConversationOrganizationIntegration(t *testing.T) {
 		t.Fatalf("foreign settings = %v", err)
 	}
 }
+
+// TestArchivedConversationsHiddenFromProjectAndBotSurfaces covers the review
+// finding that archiving only filtered the main sidebar list: project trees,
+// bot lists, and the bot's latest-conversation lookup must hide archived rows
+// (routines then start a fresh chat instead of appending to a hidden one).
+func TestArchivedConversationsHiddenFromProjectAndBotSurfaces(t *testing.T) {
+	pool := newTestPool(t)
+	ctx := context.Background()
+	users := NewUsers(pool)
+	user, err := users.Create(ctx, "archive-surfaces@test.dev", "hash")
+	if err != nil {
+		user, err = users.ByEmail(ctx, "archive-surfaces@test.dev")
+	}
+	if err != nil {
+		t.Fatalf("user setup: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id = $1`, user.ID)
+	})
+	convs := NewConversations(pool)
+	project, err := NewProjects(pool).Create(ctx, Project{UserID: user.ID, Name: "P"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bot, err := NewBots(pool).Create(ctx, Bot{UserID: user.ID, Name: "B"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pid, bid := project.ID, bot.ID
+	projectLive, _ := convs.Create(ctx, user.ID, "project live", ConversationPatch{ProjectID: &pid})
+	projectArchived, _ := convs.Create(ctx, user.ID, "project archived", ConversationPatch{ProjectID: &pid})
+	botLive, _ := convs.Create(ctx, user.ID, "bot live", ConversationPatch{BotID: &bid})
+	botArchived, _ := convs.Create(ctx, user.ID, "bot archived", ConversationPatch{BotID: &bid})
+	_ = convs.SetArchived(ctx, projectArchived.ID, user.ID, true)
+	_ = convs.SetArchived(ctx, botArchived.ID, user.ID, true)
+
+	rows, err := convs.ListByProject(ctx, pid, user.ID)
+	if err != nil || len(rows) != 1 || rows[0].ID != projectLive.ID {
+		t.Fatalf("project list = %+v %v", rows, err)
+	}
+	rows, err = convs.ListByBot(ctx, bid, user.ID)
+	if err != nil || len(rows) != 1 || rows[0].ID != botLive.ID {
+		t.Fatalf("bot list = %+v %v", rows, err)
+	}
+	latest, err := convs.LatestForBot(ctx, bid, user.ID)
+	if err != nil || latest.ID != botLive.ID {
+		t.Fatalf("latest bot conversation = %+v %v", latest, err)
+	}
+}

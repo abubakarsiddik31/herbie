@@ -80,17 +80,12 @@ func (s *Server) handleCreateSavedPrompt(w http.ResponseWriter, r *http.Request)
 	if !validatePromptText(w, &req.Title, &req.Body) {
 		return
 	}
-	n, err := s.deps.Prompts.Count(r.Context(), userID)
+	p, err := s.deps.Prompts.Create(r.Context(), userID, req.Title, req.Body, maxSavedPrompts)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal", "could not create prompt")
-		return
-	}
-	if n >= maxSavedPrompts {
-		writeError(w, http.StatusConflict, "prompt_limit", "prompt limit reached")
-		return
-	}
-	p, err := s.deps.Prompts.Create(r.Context(), userID, req.Title, req.Body)
-	if err != nil {
+		if errors.Is(err, storage.ErrLimit) {
+			writeError(w, http.StatusConflict, "prompt_limit", "prompt limit reached")
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "internal", "could not create prompt")
 		return
 	}
@@ -105,6 +100,10 @@ func (s *Server) handlePatchSavedPrompt(w http.ResponseWriter, r *http.Request) 
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", "invalid body")
+		return
+	}
+	if req.Title == nil && req.Body == nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "title or body is required")
 		return
 	}
 	if !validatePromptText(w, req.Title, req.Body) {

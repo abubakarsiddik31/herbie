@@ -159,7 +159,7 @@ func (f *fakeConvos) List(_ context.Context, userID, q string, pinned, archived 
 func (f *fakeConvos) ListByProject(_ context.Context, projectID, userID string) ([]storage.Conversation, error) {
 	var out []storage.Conversation
 	for _, c := range f.convs {
-		if c.UserID == userID && c.ProjectID != nil && *c.ProjectID == projectID {
+		if c.UserID == userID && c.ArchivedAt == nil && c.ProjectID != nil && *c.ProjectID == projectID {
 			out = append(out, c)
 		}
 	}
@@ -171,7 +171,7 @@ func (f *fakeConvos) ListByProject(_ context.Context, projectID, userID string) 
 func (f *fakeConvos) ListByBot(_ context.Context, botID, userID string) ([]storage.Conversation, error) {
 	var out []storage.Conversation
 	for _, c := range f.convs {
-		if c.UserID == userID && c.BotID != nil && *c.BotID == botID {
+		if c.UserID == userID && c.ArchivedAt == nil && c.BotID != nil && *c.BotID == botID {
 			out = append(out, c)
 		}
 	}
@@ -182,7 +182,7 @@ func (f *fakeConvos) LatestForBot(_ context.Context, botID, userID string) (stor
 	var best storage.Conversation
 	found := false
 	for _, c := range f.convs {
-		if c.UserID != userID || c.BotID == nil || *c.BotID != botID {
+		if c.UserID != userID || c.ArchivedAt != nil || c.BotID == nil || *c.BotID != botID {
 			continue
 		}
 		if !found || c.ID > best.ID {

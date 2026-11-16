@@ -20,6 +20,9 @@ type SavedPrompt struct {
 	UpdatedAt time.Time
 }
 
+// ErrLimit reports that the per-user saved-prompt limit is reached.
+var ErrLimit = errors.New("saved prompt limit reached")
+
 type SavedPrompts struct{ pool *pgxpool.Pool }
 
 func NewSavedPrompts(pool *pgxpool.Pool) *SavedPrompts { return &SavedPrompts{pool: pool} }
@@ -32,13 +35,34 @@ func scanSavedPrompt(row pgx.Row) (SavedPrompt, error) {
 	return p, err
 }
 
-func (s *SavedPrompts) Create(ctx context.Context, userID, title, body string) (SavedPrompt, error) {
-	p, err := scanSavedPrompt(s.pool.QueryRow(ctx,
+// Create inserts a prompt under a per-user advisory lock so the limit cannot
+// be exceeded by concurrent requests (count-then-insert is a TOCTOU race).
+func (s *SavedPrompts) Create(ctx context.Context, userID, title, body string, limit int) (SavedPrompt, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return SavedPrompt{}, fmt.Errorf("begin saved prompt: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1)::bigint)`, userID); err != nil {
+		return SavedPrompt{}, fmt.Errorf("lock saved prompts: %w", err)
+	}
+	var n int
+	if err := tx.QueryRow(ctx, `SELECT count(*) FROM saved_prompts WHERE user_id = $1`, userID).Scan(&n); err != nil {
+		return SavedPrompt{}, fmt.Errorf("count saved prompts: %w", err)
+	}
+	if limit > 0 && n >= limit {
+		return SavedPrompt{}, ErrLimit
+	}
+	p, err := scanSavedPrompt(tx.QueryRow(ctx,
 		`INSERT INTO saved_prompts (user_id, title, body) VALUES ($1, $2, $3)
 		 RETURNING `+savedPromptColumns,
 		userID, SanitizeText(title), SanitizeText(body)))
 	if err != nil {
 		return SavedPrompt{}, fmt.Errorf("create saved prompt: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return SavedPrompt{}, fmt.Errorf("commit saved prompt: %w", err)
 	}
 	return p, nil
 }

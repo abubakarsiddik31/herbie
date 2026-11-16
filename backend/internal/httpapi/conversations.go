@@ -552,9 +552,34 @@ func (s *Server) handleArchiveConversation(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	id := r.PathValue("id")
-	if *req.Archived && s.runActive(id) {
-		writeError(w, http.StatusConflict, "run_active", "a run is active on this conversation")
+	// Ownership first: a foreign/unknown conversation is 404 even when a run
+	// happens to be active.
+	if _, err := s.deps.Convos.ByID(r.Context(), id, userID); err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "not_found", "conversation not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "internal", "could not load conversation")
 		return
+	}
+	if *req.Archived {
+		if s.runActive(id) {
+			writeError(w, http.StatusConflict, "run_active", "a run is active on this conversation")
+			return
+		}
+		// A paused approval holds no run slot; archiving would hide the
+		// conversation and resume writes would land in an archived chat.
+		if s.deps.Pending != nil {
+			pending, err := s.deps.Pending.ForConversation(r.Context(), id, userID)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "internal", "could not check approvals")
+				return
+			}
+			if len(pending) > 0 {
+				writeError(w, http.StatusConflict, "approval_pending", "resolve the pending approval first")
+				return
+			}
+		}
 	}
 	if err := s.deps.Convos.SetArchived(r.Context(), id, userID, *req.Archived); err != nil {
 		if errors.Is(err, storage.ErrNotFound) {

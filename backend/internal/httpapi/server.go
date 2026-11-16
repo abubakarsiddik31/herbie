@@ -73,11 +73,10 @@ type ServerDeps struct {
 
 // PromptStore bridges the saved-prompt library to storage.
 type PromptStore interface {
-	Create(ctx context.Context, userID, title, body string) (storage.SavedPrompt, error)
+	Create(ctx context.Context, userID, title, body string, limit int) (storage.SavedPrompt, error)
 	List(ctx context.Context, userID string) ([]storage.SavedPrompt, error)
 	Update(ctx context.Context, id, userID string, title, body *string) (storage.SavedPrompt, error)
 	Delete(ctx context.Context, id, userID string) error
-	Count(ctx context.Context, userID string) (int, error)
 }
 
 var _ PromptStore = (*storage.SavedPrompts)(nil)

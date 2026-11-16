@@ -246,7 +246,6 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer release()
-	s.unarchiveForTurn(ctx, conv)
 
 	// Auto-title from the first user message.
 	if n, err := s.deps.Convos.CountMessages(ctx, convID, userID); err == nil && n == 0 {
@@ -274,6 +273,7 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal", "could not load history")
 		return
 	}
+	s.unarchiveForTurn(ctx, conv)
 	promptID, err := s.deps.Msgs.Add(ctx, storage.Message{
 		ConversationID: convID, UserID: userID, Role: string(model.RoleUser),
 		ParentID: leaf,

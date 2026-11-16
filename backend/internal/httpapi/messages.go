@@ -59,7 +59,6 @@ func (s *Server) handleEditMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer release()
-	s.unarchiveForTurn(ctx, conv)
 
 	target, err := s.deps.Msgs.ByID(ctx, msgID, userID)
 	if err != nil {
@@ -107,6 +106,7 @@ func (s *Server) handleEditMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	payload.Content = req.Content
+	s.unarchiveForTurn(ctx, conv)
 	siblingID, err := s.deps.Msgs.Add(ctx, storage.Message{
 		ConversationID: convID, UserID: userID, Role: string(model.RoleUser),
 		ParentID: target.ParentID,
@@ -154,7 +154,6 @@ func (s *Server) handleRegenerate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer release()
-	s.unarchiveForTurn(ctx, conv)
 
 	rows, err := s.deps.Msgs.ForConversation(ctx, convID, userID)
 	if err != nil {
@@ -187,6 +186,7 @@ func (s *Server) handleRegenerate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = s.deps.Convos.Touch(ctx, convID)
+	s.unarchiveForTurn(ctx, conv)
 	s.runTurn(ctx, userID, convID, spec, conv.BotID, historyFrom(path, lastUser), path[lastUser].Content, payload.Parts, knownRows(path), path[lastUser].ID, w)
 }
 
