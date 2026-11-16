@@ -11,7 +11,11 @@ import (
 // PendingToolCall is one deferred tool call awaiting a human decision.
 // CallID is golem's tool-call ID from the paused run.
 type PendingToolCall struct {
-	CallID         string
+	CallID string
+	// MessageID is the persisted assistant row that requested this call; a
+	// resume rebuilds history from the path ending at that row. Empty on
+	// legacy rows created before the message tree existed.
+	MessageID      string
 	ConversationID string
 	UserID         string
 	ToolName       string
@@ -37,10 +41,14 @@ func (p *PendingCalls) Add(ctx context.Context, calls []PendingToolCall) error {
 	defer tx.Rollback(ctx)
 
 	for _, c := range calls {
+		var messageID any
+		if c.MessageID != "" {
+			messageID = c.MessageID
+		}
 		_, err := tx.Exec(ctx,
-			`INSERT INTO pending_tool_calls (call_id, conversation_id, user_id, tool_name, args, reason)
-			 VALUES ($1,$2,$3,$4,$5,$6)`,
-			c.CallID, c.ConversationID, c.UserID, c.ToolName, c.Args, c.Reason)
+			`INSERT INTO pending_tool_calls (call_id, conversation_id, user_id, tool_name, args, reason, message_id)
+			 VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+			c.CallID, c.ConversationID, c.UserID, c.ToolName, c.Args, c.Reason, messageID)
 		if err != nil {
 			return fmt.Errorf("add pending tool call: %w", err)
 		}
@@ -51,7 +59,7 @@ func (p *PendingCalls) Add(ctx context.Context, calls []PendingToolCall) error {
 // ForConversation returns the conversation's unresolved (pending) calls.
 func (p *PendingCalls) ForConversation(ctx context.Context, convID, userID string) ([]PendingToolCall, error) {
 	rows, err := p.pool.Query(ctx,
-		`SELECT call_id, conversation_id::text, user_id::text, tool_name, args, reason, status, created_at
+		`SELECT call_id, COALESCE(message_id::text, '') AS message_id, conversation_id::text, user_id::text, tool_name, args, reason, status, created_at
 		 FROM pending_tool_calls
 		 WHERE conversation_id = $1 AND user_id = $2 AND status = 'pending'
 		 ORDER BY created_at, call_id`, convID, userID)
@@ -62,7 +70,7 @@ func (p *PendingCalls) ForConversation(ctx context.Context, convID, userID strin
 	var out []PendingToolCall
 	for rows.Next() {
 		var c PendingToolCall
-		if err := rows.Scan(&c.CallID, &c.ConversationID, &c.UserID, &c.ToolName, &c.Args, &c.Reason, &c.Status, &c.CreatedAt); err != nil {
+		if err := rows.Scan(&c.CallID, &c.MessageID, &c.ConversationID, &c.UserID, &c.ToolName, &c.Args, &c.Reason, &c.Status, &c.CreatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, c)
@@ -94,7 +102,7 @@ func (p *PendingCalls) SetStatus(ctx context.Context, userID, callID, status str
 // undecided ones. Oldest first, so the newest pause cycle's calls land last.
 func (p *PendingCalls) ListAll(ctx context.Context, convID, userID string) ([]PendingToolCall, error) {
 	rows, err := p.pool.Query(ctx,
-		`SELECT call_id, conversation_id::text, user_id::text, tool_name, args, reason, status, created_at
+		`SELECT call_id, COALESCE(message_id::text, '') AS message_id, conversation_id::text, user_id::text, tool_name, args, reason, status, created_at
 		 FROM pending_tool_calls
 		 WHERE conversation_id = $1 AND user_id = $2
 		 ORDER BY created_at, call_id`, convID, userID)
@@ -105,7 +113,7 @@ func (p *PendingCalls) ListAll(ctx context.Context, convID, userID string) ([]Pe
 	var out []PendingToolCall
 	for rows.Next() {
 		var c PendingToolCall
-		if err := rows.Scan(&c.CallID, &c.ConversationID, &c.UserID, &c.ToolName, &c.Args, &c.Reason, &c.Status, &c.CreatedAt); err != nil {
+		if err := rows.Scan(&c.CallID, &c.MessageID, &c.ConversationID, &c.UserID, &c.ToolName, &c.Args, &c.Reason, &c.Status, &c.CreatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, c)

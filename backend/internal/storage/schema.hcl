@@ -214,6 +214,14 @@ table "conversations" {
     type = uuid
     null = true
   }
+  column "project_id" {
+    type = uuid
+    null = true
+  }
+  column "active_leaf_id" {
+    type = uuid
+    null = true
+  }
   primary_key {
     columns = [column.id]
   }
@@ -227,6 +235,16 @@ table "conversations" {
     ref_columns = [table.bots.column.id]
     on_delete   = SET_NULL
   }
+  foreign_key "conversations_project_id_fkey" {
+    columns     = [column.project_id]
+    ref_columns = [table.projects.column.id]
+    on_delete   = CASCADE
+  }
+  foreign_key "conversations_active_leaf_id_fkey" {
+    columns     = [column.active_leaf_id]
+    ref_columns = [table.messages.column.id]
+    on_delete   = SET_NULL
+  }
   index "idx_conversations_user" {
     on {
       column = column.user_id
@@ -238,6 +256,9 @@ table "conversations" {
   }
   index "idx_conversations_bot" {
     columns = [column.bot_id]
+  }
+  index "idx_conversations_project" {
+    columns = [column.project_id]
   }
 }
 
@@ -255,6 +276,10 @@ table "messages" {
   column "user_id" {
     type = uuid
     null = false
+  }
+  column "parent_id" {
+    type = uuid
+    null = true
   }
   column "role" {
     type = text
@@ -321,8 +346,16 @@ table "messages" {
     ref_columns = [table.users.column.id]
     on_delete   = CASCADE
   }
+  foreign_key "messages_parent_id_fkey" {
+    columns     = [column.parent_id]
+    ref_columns = [table.messages.column.id]
+    on_delete   = CASCADE
+  }
   index "idx_messages_conversation" {
     columns = [column.conversation_id, column.created_at, column.id]
+  }
+  index "idx_messages_parent" {
+    columns = [column.parent_id]
   }
 }
 
@@ -502,6 +535,10 @@ table "pending_tool_calls" {
     type = uuid
     null = false
   }
+  column "message_id" {
+    type = uuid
+    null = true
+  }
   column "tool_name" {
     type = text
     null = false
@@ -538,6 +575,11 @@ table "pending_tool_calls" {
     ref_columns = [table.users.column.id]
     on_delete   = CASCADE
   }
+  foreign_key "pending_tool_calls_message_id_fkey" {
+    columns     = [column.message_id]
+    ref_columns = [table.messages.column.id]
+    on_delete   = CASCADE
+  }
   index "idx_pending_tool_calls_conversation" {
     columns = [column.conversation_id, column.status]
   }
@@ -553,6 +595,10 @@ table "documents" {
   column "user_id" {
     type = uuid
     null = false
+  }
+  column "project_id" {
+    type = uuid
+    null = true
   }
   column "object_key" {
     type = text
@@ -597,8 +643,16 @@ table "documents" {
     ref_columns = [table.users.column.id]
     on_delete   = CASCADE
   }
+  foreign_key "documents_project_id_fkey" {
+    columns     = [column.project_id]
+    ref_columns = [table.projects.column.id]
+    on_delete   = CASCADE
+  }
   index "idx_documents_user" {
     columns = [column.user_id, column.created_at]
+  }
+  index "idx_documents_project" {
+    columns = [column.project_id]
   }
 }
 
@@ -1480,4 +1534,70 @@ table "bot_files" {
 }
 
 
-
+table "mcp_servers" {
+  schema = schema.public
+  column "id" {
+    type    = uuid
+    null    = false
+    default = sql("gen_random_uuid()")
+  }
+  column "user_id" {
+    type = uuid
+    null = false
+  }
+  column "name" {
+    type = text
+    null = false
+  }
+  column "url" {
+    type = text
+    null = false
+  }
+  column "transport" {
+    type    = text
+    null    = false
+    default = "http"
+  }
+  column "enabled" {
+    type    = boolean
+    null    = false
+    default = true
+  }
+  column "headers" {
+    type    = jsonb
+    null    = false
+    default = sql("'{}'::jsonb")
+  }
+  column "app_id" {
+    type = text
+    null = true
+  }
+  column "created_at" {
+    type    = timestamptz
+    null    = false
+    default = sql("now()")
+  }
+  column "updated_at" {
+    type    = timestamptz
+    null    = false
+    default = sql("now()")
+  }
+  primary_key {
+    columns = [column.id]
+  }
+  foreign_key "mcp_servers_user_id_fkey" {
+    columns     = [column.user_id]
+    ref_columns = [table.users.column.id]
+    on_delete   = CASCADE
+  }
+  index "mcp_servers_user_id_name_key" {
+    unique  = true
+    columns = [column.user_id, column.name]
+  }
+  index "idx_mcp_servers_user_enabled" {
+    columns = [column.user_id, column.enabled]
+  }
+  index "idx_mcp_servers_user_app" {
+    columns = [column.user_id, column.app_id]
+  }
+}

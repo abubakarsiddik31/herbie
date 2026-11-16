@@ -366,11 +366,14 @@ func TestRunnerParksAndResumesOnApproval(t *testing.T) {
 				}},
 			},
 		},
-		{ // the resumed call completes
+		{ // the resumed call completes; golem echoes the paused history first
 			outcome: chat.Outcome{
 				Output: "It is 21C",
 				Messages: []model.Message{
 					{Role: model.RoleUser, Content: "check the weather"},
+					{Role: model.RoleAssistant, ToolCalls: []model.ToolCall{
+						{ID: "call-1", Name: "get_weather", Args: json.RawMessage(`{"city":"x"}`)},
+					}},
 					{Role: model.RoleAssistant, Content: "It is 21C"},
 				},
 				Usage:    model.Usage{InputTokens: 8, OutputTokens: 4},
@@ -796,7 +799,7 @@ func TestRunnerCompactsHistory(t *testing.T) {
 			role = model.RoleAssistant
 			content = fmt.Sprintf("older answer %d", i)
 		}
-		if err := msgs.Add(context.Background(), storage.Message{
+		if _, err := msgs.Add(context.Background(), storage.Message{
 			ConversationID: conv.ID, UserID: "u-1", Role: string(role),
 			Content: content, Data: mustJSON(model.Message{Role: role, Content: content}),
 		}); err != nil {

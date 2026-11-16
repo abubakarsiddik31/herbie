@@ -35,7 +35,7 @@ func TestGetConversationIncludesContextMetadata(t *testing.T) {
 	convs := newFakeConvos(msgs)
 	h, token := newHandlerServer(t, newTestAgent(t, scriptedPongModel()), convs, msgs, newFakeUsage())
 	conv := convs.mustCreate("u-1", "Test Chat")
-	_ = msgs.Add(nil, storage.Message{
+	_, _ = msgs.Add(nil, storage.Message{
 		ConversationID: conv.ID,
 		UserID:         "u-1",
 		Role:           "user",

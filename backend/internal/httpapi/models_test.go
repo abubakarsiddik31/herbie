@@ -264,7 +264,7 @@ func newEndlessAgent(t *testing.T, content string) *chat.Agent {
 	return agent
 }
 
-func TestEditMessageTruncatesAndReruns(t *testing.T) {
+func TestEditMessageCreatesSiblingAndReruns(t *testing.T) {
 	msgs := newFakeMsgs()
 	convs := newFakeConvos(msgs)
 	h, token := newHandlerServer(t, newEndlessAgent(t, "again"), convs, msgs, newFakeUsage())
@@ -291,14 +291,20 @@ func TestEditMessageTruncatesAndReruns(t *testing.T) {
 		t.Fatalf("edit must re-run to a done event:\n%s", rec.Body.String())
 	}
 	rows := msgs.forConv(conv.ID, "u-1")
-	if len(rows) != 2 { // edited user row + fresh assistant row
-		t.Fatalf("rows after edit = %d, want 2 (truncated then re-run)", len(rows))
+	if len(rows) != 6 { // both old turns kept plus the sibling user row and answer
+		t.Fatalf("rows after edit = %d, want 6 (sibling branch)", len(rows))
 	}
-	if rows[0].Content != "rewritten" || rows[0].ID != "m-1" {
-		t.Fatalf("edited row wrong: %+v", rows[0])
+	if rows[0].Content != "hello" || rows[0].ID != "m-1" {
+		t.Fatalf("original first prompt must stay intact: %+v", rows[0])
 	}
-	if rows[1].Role != "assistant" {
-		t.Fatalf("last row should be the fresh assistant answer: %+v", rows[1])
+	if rows[4].Content != "rewritten" || rows[4].Role != string(model.RoleUser) || rows[4].ParentID != "" {
+		t.Fatalf("edited row must be a sibling root: %+v", rows[4])
+	}
+	if rows[5].Role != string(model.RoleAssistant) || rows[5].ParentID != rows[4].ID {
+		t.Fatalf("fresh answer must chain under the sibling prompt: %+v", rows[5])
+	}
+	if leaf := convs.convs[conv.ID].ActiveLeafID; leaf == nil || *leaf != rows[5].ID {
+		t.Fatalf("active leaf must follow the new branch: %v", leaf)
 	}
 }
 
@@ -328,7 +334,7 @@ func TestEditMessageValidation(t *testing.T) {
 	}
 }
 
-func TestRegenerateReplacesLastAnswer(t *testing.T) {
+func TestRegenerateCreatesSiblingAnswer(t *testing.T) {
 	msgs := newFakeMsgs()
 	convs := newFakeConvos(msgs)
 	h, token := newHandlerServer(t, newEndlessAgent(t, "fresh"), convs, msgs, newFakeUsage())
@@ -347,14 +353,20 @@ func TestRegenerateReplacesLastAnswer(t *testing.T) {
 		t.Fatalf("regenerate status %d: %s", rec.Code, rec.Body.String())
 	}
 	rows := msgs.forConv(conv.ID, "u-1")
-	if len(rows) != 4 { // both turns kept; only the last answer was replaced
-		t.Fatalf("rows after regenerate = %d, want 4", len(rows))
+	if len(rows) != 5 { // both turns kept plus the sibling answer
+		t.Fatalf("rows after regenerate = %d, want 5", len(rows))
 	}
 	if rows[2].Role != "user" || rows[2].Content != "again" {
 		t.Fatalf("history truncated past the last user message: %+v", rows)
 	}
 	if rows[3].Role != "assistant" {
-		t.Fatalf("last row should be a fresh assistant answer: %+v", rows[3])
+		t.Fatalf("old answer must stay: %+v", rows[3])
+	}
+	if rows[4].Role != string(model.RoleAssistant) || rows[4].ParentID != rows[2].ID {
+		t.Fatalf("regenerated answer must be a sibling under the last user row: %+v", rows[4])
+	}
+	if leaf := convs.convs[conv.ID].ActiveLeafID; leaf == nil || *leaf != rows[4].ID {
+		t.Fatalf("active leaf must follow the new answer: %v", leaf)
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	"math"
 	"net/http"
 	"regexp"
+	"sort"
 	"strings"
 	"unicode/utf8"
 
@@ -24,15 +25,17 @@ type conversationDTO struct {
 	SystemPrompt string   `json:"systemPrompt"`
 	RagEnabled   bool     `json:"ragEnabled"`
 	// BotID is set only for bot-scoped conversations (always-on teammates).
-	BotID     *string `json:"botId,omitempty"`
-	CreatedAt string  `json:"createdAt"`
-	UpdatedAt string  `json:"updatedAt"`
+	BotID *string `json:"botId,omitempty"`
+	// ActiveLeafID is the visible message-tree leaf; null for empty chats.
+	ActiveLeafID *string `json:"activeLeafId"`
+	CreatedAt    string  `json:"createdAt"`
+	UpdatedAt    string  `json:"updatedAt"`
 }
 
 func toConversationDTO(c storage.Conversation) conversationDTO {
 	return conversationDTO{
 		ID: c.ID, Title: c.Title, Model: c.Model, Temperature: c.Temperature, SystemPrompt: c.SystemPrompt,
-		RagEnabled: c.RagEnabled, BotID: c.BotID,
+		RagEnabled: c.RagEnabled, BotID: c.BotID, ActiveLeafID: c.ActiveLeafID,
 		CreatedAt: c.CreatedAt.UTC().Format(timeRFC3339), UpdatedAt: c.UpdatedAt.UTC().Format(timeRFC3339),
 	}
 }
@@ -127,6 +130,16 @@ func (s *Server) handleGetConversation(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal", "could not load messages")
 		return
 	}
+	leaf, err := s.resolveActiveLeaf(r.Context(), conv, msgs)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "could not load messages")
+		return
+	}
+	path, err := s.pathToLeaf(r.Context(), conv.ID, userID, leaf)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "could not load messages")
+		return
+	}
 	compThreshold := 40000
 	compKeepRecent := 10
 	if s.deps.Compactor != nil {
@@ -136,17 +149,20 @@ func (s *Server) handleGetConversation(w http.ResponseWriter, r *http.Request) {
 		compThreshold = s.deps.Cfg.RAG.CompactionThreshold
 		compKeepRecent = s.deps.Cfg.RAG.CompactionKeepRecent
 	}
-	estimatedTokens := chat.EstimateStorageTokens(msgs)
+	estimatedTokens := chat.EstimateStorageTokens(path)
 	hasCompacted := false
-	for _, m := range msgs {
+	for _, m := range path {
 		if strings.Contains(m.Content, "[Compacted earlier context") || strings.Contains(m.Content, "[input auto-compacted") {
 			hasCompacted = true
 			break
 		}
 	}
+	if leaf != "" {
+		conv.ActiveLeafID = &leaf
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"conversation": toConversationDTO(conv),
-		"messages":     transcriptMessages(msgs, true),
+		"messages":     transcriptMessages(msgs, leaf, true),
 		"context": map[string]any{
 			"estimatedTokens": estimatedTokens,
 			"thresholdTokens": compThreshold,
@@ -172,6 +188,15 @@ type msgDTO struct {
 	Usage     *usageDTO        `json:"usage,omitempty"`
 	Images    []imageDTO       `json:"images,omitempty"`
 	Sources   *json.RawMessage `json:"sources,omitempty"`
+	Branch    *branchDTO       `json:"branch,omitempty"`
+}
+
+// branchDTO describes a variant switcher for a user row or a whole assistant
+// chain. index is the row's 0-based position in ids (ordered by created_at, id).
+type branchDTO struct {
+	Count int      `json:"count"`
+	Index int      `json:"index"`
+	IDs   []string `json:"ids"`
 }
 
 var webSearchResultRe = regexp.MustCompile(`\[(\d+)\]\s*([^\n]+)\nURL:\s*([^\n]+)`)
@@ -209,14 +234,109 @@ func extractWebSourcesFromToolMsgs(toolMsgs []string) []map[string]any {
 	return rows
 }
 
-// transcriptMessages renders stored rows for display, skipping tool
-// plumbing (tool-result rows and empty assistant tool-call rows are history
-// replay data only). Usage/cost ride along unless public is set — shared
-// threads never leak spend.
-func transcriptMessages(msgs []storage.Message, includeUsage bool) []msgDTO {
-	out := make([]msgDTO, 0, len(msgs))
-	var pendingToolContents []string
+// transcriptMessages renders the active path through stored rows for
+// display, skipping tool plumbing (tool-result rows and empty assistant
+// tool-call rows are history replay data only). Branch metadata rides user
+// variants (sibling user rows) and assistant variants per chain: the roots
+// are the direct assistant children of the nearest ancestor user row (often
+// hidden tool-call rows), and the switcher attaches to the LAST visible
+// assistant row of each chain segment on the path. Usage/cost ride along
+// unless public is set — shared threads never leak spend.
+func transcriptMessages(msgs []storage.Message, leafID string, includeUsage bool) []msgDTO {
+	if leafID == "" {
+		return []msgDTO{}
+	}
+	byID := make(map[string]storage.Message, len(msgs))
 	for _, m := range msgs {
+		byID[m.ID] = m
+	}
+	// Walk parent links to get the visible path in root→leaf order.
+	var reversed []storage.Message
+	seen := map[string]bool{}
+	for id := leafID; id != "" && !seen[id]; {
+		m, ok := byID[id]
+		if !ok {
+			break
+		}
+		seen[id] = true
+		reversed = append(reversed, m)
+		id = m.ParentID
+	}
+	path := make([]storage.Message, len(reversed))
+	for i := range reversed {
+		path[len(reversed)-1-i] = reversed[i]
+	}
+
+	assistantChildren := make(map[string][]storage.Message)
+	for _, m := range msgs {
+		if m.Role == string(model.RoleAssistant) {
+			assistantChildren[m.ParentID] = append(assistantChildren[m.ParentID], m)
+		}
+	}
+	sortRows := func(rows []storage.Message) {
+		sort.Slice(rows, func(i, j int) bool {
+			if rows[i].CreatedAt.Equal(rows[j].CreatedAt) {
+				return rows[i].ID < rows[j].ID
+			}
+			return rows[i].CreatedAt.Before(rows[j].CreatedAt)
+		})
+	}
+	for parent := range assistantChildren {
+		sortRows(assistantChildren[parent])
+	}
+
+	branches := make(map[int]*branchDTO)
+	// User variants: sibling user rows sharing the same parent.
+	for i, m := range path {
+		if m.Role != string(model.RoleUser) {
+			continue
+		}
+		var siblings []storage.Message
+		for _, other := range msgs {
+			if other.Role == string(model.RoleUser) && other.ParentID == m.ParentID {
+				siblings = append(siblings, other)
+			}
+		}
+		if len(siblings) > 1 {
+			sortRows(siblings)
+			branches[i] = branchMeta(siblings, m.ID)
+		}
+	}
+	// Assistant variants: per chain, attached to the last visible assistant
+	// row of that chain on the path.
+	lastVisible := make(map[string]int) // chain root ID → path index
+	for i, m := range path {
+		if m.Role != string(model.RoleAssistant) || m.Content == "" {
+			continue
+		}
+		root := m
+		for root.ParentID != "" {
+			parent, ok := byID[root.ParentID]
+			if !ok || parent.Role == string(model.RoleUser) {
+				break
+			}
+			root = parent
+		}
+		lastVisible[root.ID] = i
+	}
+	for rootID, i := range lastVisible {
+		root, ok := byID[rootID]
+		if !ok || root.ParentID == "" {
+			continue
+		}
+		parent, ok := byID[root.ParentID]
+		if !ok || parent.Role != string(model.RoleUser) {
+			continue
+		}
+		roots := assistantChildren[parent.ID]
+		if len(roots) > 1 {
+			branches[i] = branchMeta(roots, rootID)
+		}
+	}
+
+	out := make([]msgDTO, 0, len(path))
+	var pendingToolContents []string
+	for i, m := range path {
 		if m.Role == string(model.RoleTool) {
 			pendingToolContents = append(pendingToolContents, m.Content)
 			continue
@@ -248,10 +368,26 @@ func transcriptMessages(msgs []storage.Message, includeUsage bool) []msgDTO {
 		out = append(out, msgDTO{
 			ID: m.ID, Role: m.Role, Content: m.Content, Truncated: m.Truncated,
 			CreatedAt: m.CreatedAt.UTC().Format(timeRFC3339), Usage: usage,
-			Images: imagesOf(m.Data), Sources: sources,
+			Images: imagesOf(m.Data), Sources: sources, Branch: branches[i],
 		})
 	}
 	return out
+}
+
+// branchMeta builds the switcher payload for rows ordered by (created_at, id).
+func branchMeta(rows []storage.Message, currentID string) *branchDTO {
+	ids := make([]string, len(rows))
+	index := -1
+	for i, m := range rows {
+		ids[i] = m.ID
+		if m.ID == currentID {
+			index = i
+		}
+	}
+	if index < 0 {
+		return nil
+	}
+	return &branchDTO{Count: len(ids), Index: index, IDs: ids}
 }
 
 // storedSources returns the persisted citation rows for a history message,

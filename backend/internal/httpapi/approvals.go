@@ -12,6 +12,7 @@ import (
 	"github.com/abubakarsiddik31/golem-chatbot/internal/chat"
 	"github.com/abubakarsiddik31/golem-chatbot/internal/rag"
 	"github.com/abubakarsiddik31/golem-chatbot/internal/storage"
+	"github.com/abubakarsiddik31/golem/model"
 )
 
 type approvalDecision struct {
@@ -40,6 +41,13 @@ func (s *Server) handleApprovals(w http.ResponseWriter, r *http.Request) {
 	}
 	// The resume runs under the conversation's current model settings.
 	spec := s.runSpecFor(ctx, conv)
+
+	release, ok := s.beginRun(convID)
+	if !ok {
+		s.blockedByActiveRun(w, convID)
+		return
+	}
+	defer release()
 
 	var req struct {
 		Decisions []approvalDecision `json:"decisions"`
@@ -116,7 +124,7 @@ func (s *Server) handleApprovals(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	msgs, err := s.deps.Msgs.ForConversation(ctx, convID, userID)
+	history, startParentID, err := s.resumeHistory(ctx, convID, userID, pending)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal", "could not load history")
 		return
@@ -134,28 +142,22 @@ func (s *Server) handleApprovals(w http.ResponseWriter, r *http.Request) {
 	}
 	var sources []rag.Scored
 	var sourcesMu sync.Mutex
-	history := pausedRunHistory(msgs)
 	spec, history, compacted := s.maybeCompact(ctx, userID, convID, spec, history)
 	if compacted {
 		_ = sink.event("meta", map[string]any{"type": "compacted"})
 	}
+	// Resume dedupe is positional: everything handed to RunDeferred is the
+	// paused tail and already stored. No conversation-global payload skip.
 	outcome, err := s.deps.Agent.RunDeferred(ctx,
 		s.buildDeps(userID, convID, &sources, &sourcesMu, s.botFor(ctx, userID, conv.BotID)),
 		history, golem.DeferredResults{Approvals: resolutions},
 		sink, tools, spec)
 	if err != nil {
-		s.persistFailure(ctx, userID, convID, spec, err, sink)
+		s.persistFailure(ctx, userID, convID, spec, startParentID, len(history), err, sink)
 		return
 	}
-	// The resume run's Messages replay the paused history; skip rows that
-	// already exist (message JSON is stable across round-trips). newFrom 0
-	// disables the positional rule — the known-payload map alone is correct
-	// here because the paused history ends with an unanswered tool call.
-	known := make(map[string]bool, len(msgs))
-	for _, row := range msgs {
-		known[string(row.Data)] = true
-	}
-	idMap, err := s.persistRunMessages(ctx, userID, convID, spec.Model, outcome.Messages, outcome.Usage, outcome.Requests, false, known, 0, sourceJSON(sources))
+	newFrom := resumeNewFrom(outcome.Messages, len(history))
+	res, err := s.persistRunMessages(ctx, userID, convID, spec.Model, outcome.Messages, outcome.Usage, outcome.Requests, false, nil, newFrom, startParentID, sourceJSON(sources))
 	if err != nil {
 		s.deps.Log.Error("persist resumed messages", "err", err)
 	}
@@ -163,26 +165,74 @@ func (s *Server) handleApprovals(w http.ResponseWriter, r *http.Request) {
 	if len(outcome.Pending) > 0 {
 		// The resumed run paused again: park the new pending calls and ask
 		// again. Message rows are already persisted above.
-		s.parkPending(ctx, userID, convID, spec, outcome, sink, idMap)
+		s.parkPending(ctx, userID, convID, spec, outcome, sink, res)
 		return
 	}
 	s.finishResumed(ctx, userID, convID, spec, outcome, sink)
 }
 
+// resumeHistory rebuilds the paused run's history from the path ending at the
+// parked call's assistant row. Legacy pending rows carry no message ID; they
+// fall back to the active-leaf path, which after the backfill is the same
+// chain. startParentID is the last paused row new rows chain under.
+func (s *Server) resumeHistory(ctx context.Context, convID, userID string, pending []storage.PendingToolCall) ([]model.Message, string, error) {
+	parked := ""
+	for _, p := range pending {
+		if p.MessageID != "" {
+			parked = p.MessageID
+		}
+	}
+	if parked == "" {
+		conv, err := s.deps.Convos.ByID(ctx, convID, userID)
+		if err != nil {
+			return nil, "", err
+		}
+		rows, err := s.deps.Msgs.ForConversation(ctx, convID, userID)
+		if err != nil {
+			return nil, "", err
+		}
+		leaf, err := s.resolveActiveLeaf(ctx, conv, rows)
+		if err != nil {
+			return nil, "", err
+		}
+		parked = leaf
+	}
+	path, err := s.pathToLeaf(ctx, convID, userID, parked)
+	if err != nil {
+		return nil, "", err
+	}
+	if len(path) == 0 {
+		// Stale pointer: recover through the active leaf instead.
+		rows, rerr := s.deps.Msgs.ForConversation(ctx, convID, userID)
+		if rerr != nil {
+			return nil, "", rerr
+		}
+		leafID := latestRowID(rows)
+		if path, err = s.pathToLeaf(ctx, convID, userID, leafID); err != nil {
+			return nil, "", err
+		}
+	}
+	startParentID := ""
+	if len(path) > 0 {
+		startParentID = path[len(path)-1].ID
+	}
+	return pausedRunHistory(path), startParentID, nil
+}
+
 // parkPending persists the pending calls of a paused run and announces them.
 // Unlike pauseRun it does not touch message rows — the caller persisted them.
-func (s *Server) parkPending(ctx context.Context, userID, convID string, spec chat.RunSpec, outcome chat.Outcome, sink *sseSink, idMap map[string]string) {
+func (s *Server) parkPending(ctx context.Context, userID, convID string, spec chat.RunSpec, outcome chat.Outcome, sink *sseSink, res persistRunResult) {
 	if err := s.deps.Usage.Add(ctx, usageEventFor(userID, convID, spec.Model, outcome.Usage, outcome.Requests, s.deps.Rates)); err != nil {
 		s.deps.Log.Error("record usage", "err", err)
 	}
 	calls := make([]storage.PendingToolCall, 0, len(outcome.Pending))
 	announced := make([]chat.PendingApproval, 0, len(outcome.Pending))
 	for _, p := range outcome.Pending {
-		if mapped, ok := idMap[p.CallID]; ok {
+		if mapped, ok := res.IDMap[p.CallID]; ok {
 			p.CallID = mapped
 		}
 		calls = append(calls, storage.PendingToolCall{
-			CallID: p.CallID, ConversationID: convID, UserID: userID,
+			CallID: p.CallID, MessageID: res.CallRows[p.CallID], ConversationID: convID, UserID: userID,
 			ToolName: p.ToolName, Args: p.Args, Reason: p.Reason, Status: "pending",
 		})
 		announced = append(announced, p)
@@ -201,8 +251,8 @@ func (s *Server) finishResumed(ctx context.Context, userID, convID string, spec 
 	}
 	_ = s.deps.Convos.Touch(ctx, convID)
 	msgID := ""
-	if msgs, err := s.deps.Msgs.ForConversation(ctx, convID, userID); err == nil && len(msgs) > 0 {
-		msgID = msgs[len(msgs)-1].ID
+	if conv, err := s.deps.Convos.ByID(ctx, convID, userID); err == nil && conv.ActiveLeafID != nil {
+		msgID = *conv.ActiveLeafID
 	}
 	cost := s.deps.Rates.ChatCostMicrosFor(spec.Model, outcome.Usage.InputTokens, outcome.Usage.OutputTokens)
 	_ = sink.event("done", map[string]any{
