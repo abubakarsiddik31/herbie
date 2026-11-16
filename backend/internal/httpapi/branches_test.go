@@ -604,8 +604,9 @@ func TestSendRecoversNullLeafWithoutSecondRoot(t *testing.T) {
 }
 
 func TestResumeFailureDoesNotDuplicatePausedTail(t *testing.T) {
-	// The resume model fails after echoing the paused history; positional
-	// dedupe must not re-persist that tail.
+	// The resume model fails after replaying the paused history; the failure
+	// path must persist only genuinely new partial rows. (jsonb-normalized
+	// dedupe is covered by the mixed-batch and bot mixed-tail tests.)
 	var calls int
 	var mu sync.Mutex
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -642,7 +643,6 @@ func TestResumeFailureDoesNotDuplicatePausedTail(t *testing.T) {
 		t.Fatalf("pause leg failed:\n%s", rec.Body.String())
 	}
 	callID := announcedCallID(t, rec.Body.String())
-	normalizeJSONB(t, msgs)
 	before := msgs.forConv(conv.ID, "u-1")
 
 	req := reqJSON(http.MethodPost, "/api/conversations/"+conv.ID+"/approvals", map[string]any{
@@ -991,5 +991,19 @@ func TestBotResumeMixedTailDedupes(t *testing.T) {
 	}
 	if users != 1 || callRows != 1 || toolRows != 1 {
 		t.Fatalf("bot mixed resume duplicated rows: users=%d calls=%d tools=%d", users, callRows, toolRows)
+	}
+}
+
+func TestPausedKnownRowsScopesToLastTurn(t *testing.T) {
+	older := storage.Message{ID: "m1", Role: "user", Data: mustJSON(model.Message{Role: model.RoleUser, Content: "old"})}
+	olderReply := storage.Message{ID: "m2", Role: "assistant", Data: mustJSON(model.Message{Role: model.RoleAssistant, Content: "old answer"})}
+	prompt := storage.Message{ID: "m3", Role: "user", Data: mustJSON(model.Message{Role: model.RoleUser, Content: "new"})}
+	call := storage.Message{ID: "m4", Role: "assistant", Data: mustJSON(model.Message{Role: model.RoleAssistant, Content: "call"})}
+	known := pausedKnownRows([]storage.Message{older, olderReply, prompt, call})
+	if known[canonicalJSON(older.Data)] || known[canonicalJSON(olderReply.Data)] {
+		t.Fatal("paused skip set leaked rows from an older turn")
+	}
+	if !known[canonicalJSON(prompt.Data)] || !known[canonicalJSON(call.Data)] {
+		t.Fatal("paused skip set is missing the paused turn")
 	}
 }

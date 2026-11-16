@@ -334,7 +334,10 @@ func pausedKnownRows(path []storage.Message) map[string]bool {
 
 // canonicalJSON re-encodes JSON deterministically (sorted keys, no whitespace,
 // numbers preserved) so a payload read back from jsonb compares equal to a
-// message marshaled in Go.
+// message marshaled in Go. Numbers keep their literal text: resume replays
+// decode from the stored jsonb text, so both sides already carry Postgres's
+// normalized numeric form (1e2 reads back as 100); no pre-normalization
+// comparison exists on the skip path.
 func canonicalJSON(raw []byte) string {
 	dec := json.NewDecoder(strings.NewReader(string(raw)))
 	dec.UseNumber()
