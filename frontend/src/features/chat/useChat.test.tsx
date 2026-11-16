@@ -114,3 +114,25 @@ describe("useChat send", () => {
     });
   });
 });
+
+describe("useChat prompt id remap", () => {
+  it("replaces the optimistic user id with the persisted prompt row id", async () => {
+    server.use(
+      http.post("*/api/conversations/c1/messages", () =>
+        new HttpResponse(
+          sseBody([
+            'event: delta\ndata: {"text":"pong"}\n\n',
+            'event: done\ndata: {"messageId":"m1","promptMessageId":"srv-user","inputTokens":1,"outputTokens":2,"requests":1,"costUsd":0.00001}\n\n',
+          ]),
+          { headers: { "Content-Type": "text/event-stream" } },
+        ),
+      ),
+    );
+    const { result } = renderHook(() => useChat());
+    await act(async () => {
+      await result.current.send("hi", "c1");
+    });
+    const user = result.current.messages.find((m) => m.role === "user");
+    expect(user?.id).toBe("srv-user");
+  });
+});
