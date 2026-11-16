@@ -154,23 +154,23 @@ found 6 blockers (tsvector insert limit, generated-column rewrite, title-source
 backfill, bot/fork titles, SetTitle overloading, quote composition) and 9 majors.
 
 **PR1 `feat/chat-pins-prompts` (current)**
-- [ ] Migration: `conversations.pinned_at`, `archived_at`, `title_source`
+- [x] Migration: `conversations.pinned_at`, `archived_at`, `title_source`
       (ADD with DEFAULT 'manual' so existing rows keep their titles, then
       SET DEFAULT 'heuristic'); `saved_prompts`; partial indexes. schema.hcl +
       atlas.sum. No generated columns, no message rewrite.
-- [ ] Title source: split `SetHeuristicTitle` (first-message heuristic) from
+- [x] Title source: split `SetHeuristicTitle` (first-message heuristic) from
       `RenameTitle` (user rename → manual); bot creation and forks stamp manual;
       PATCH title uses RenameTitle and returns 404 for unknown/foreign rows.
-- [ ] Pin/archive: dedicated `PUT /api/conversations/{id}/pin|archive`
+- [x] Pin/archive: dedicated `PUT /api/conversations/{id}/pin|archive`
       ({pinned|archived:bool}), 404 on unknown/foreign, archive 409 while a run
       is active, unarchive always allowed; list params `pinned`/`archived`
       (default excludes archived; title `q` excludes archived); send/edit/
       regenerate auto-unarchive before the turn.
-- [ ] Prompt library: `saved_prompts` CRUD (`GET/POST /api/prompts`,
+- [x] Prompt library: `saved_prompts` CRUD (`GET/POST /api/prompts`,
       `PATCH/DELETE /api/prompts/{id}`), ownership + limits (100/user, title 200,
       body 8000 runes), sidebar/composer picker + command-palette entry; no
       variables in v1.
-- [ ] Frontend: pinned section + actions, archived section/unarchive, prompt
+- [x] Frontend: pinned section + actions, archived section/unarchive, prompt
       library dialog with insert, tests (vitest + msw). Checked PATCH/SetSettings
       404s (no more silent 204s).
 
