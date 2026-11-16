@@ -1,4 +1,4 @@
-h1:FQsj+g06Cd7G/ZFEG2KbP4yuR4xhcpafCZ/idzuyb1g=
+h1:5JuR/Cp9lly6Ne3nltkV8NAuKOuYeDEuwAWWJzWTLZE=
 00001_init.sql h1:JzcSZ+hS8j4FBAEasJFC0KyqFe8QRjnFIzvK0l53Y8c=
 20260831070441_add_user_tools.sql h1:n33/K0eZGdHtRI+bx6ZatvlLEfNacVO1BPCCAkewmAE=
 20260831144933_pending_call_surrogate_id.sql h1:5IOIo7ZQte1f++QNHqs1eJrsPbsQdLaoi1kE0JyxefQ=
@@ -22,3 +22,4 @@ h1:FQsj+g06Cd7G/ZFEG2KbP4yuR4xhcpafCZ/idzuyb1g=
 20261025120000_bot_routines.sql h1:q9TfZVgvDml/5do5xZs4IxxwZI2CQLVZ60JIYCT4iMo=
 20261025130000_bot_files.sql h1:lyJhPdhLt4Ae37SyWnNC65pwhdMgGNO3KHPnK4vjPcw=
 20261116180000_message_branches.sql h1:R97oCqv2pK0uzIqyhlg5QoZceSgX+X0kSi2jtMxxJCY=
+20261116210000_chat_organization.sql h1:6YoqW/eJsHCXGroE8dPipwiZFuvLkp6wU3VslHLHKnQ=

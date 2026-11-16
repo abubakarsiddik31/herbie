@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"errors"
 	"testing"
 )
 
@@ -19,23 +20,23 @@ func TestConversationSearch(t *testing.T) {
 		}
 	}
 
-	all, err := convs.List(ctx, user.ID, "")
+	all, err := convs.List(ctx, user.ID, "", false, false)
 	if err != nil || len(all) < 3 {
 		t.Fatalf("unfiltered list: %+v %v", all, err)
 	}
-	moon, err := convs.List(ctx, user.ID, "moon")
+	moon, err := convs.List(ctx, user.ID, "moon", false, false)
 	if err != nil || len(moon) != 2 {
 		t.Fatalf("case-insensitive title search: %+v %v", moon, err)
 	}
-	none, err := convs.List(ctx, user.ID, "zzz-no-match")
+	none, err := convs.List(ctx, user.ID, "zzz-no-match", false, false)
 	if err != nil || len(none) != 0 {
 		t.Fatalf("empty search: %+v %v", none, err)
 	}
-	literal, err := convs.List(ctx, user.ID, "%")
+	literal, err := convs.List(ctx, user.ID, "%", false, false)
 	if err != nil || len(literal) != 0 {
 		t.Fatalf("metacharacters must match literally: %+v %v", literal, err)
 	}
-	foreign, err := convs.List(ctx, "00000000-0000-0000-0000-000000000000", "moon")
+	foreign, err := convs.List(ctx, "00000000-0000-0000-0000-000000000000", "moon", false, false)
 	if err != nil || len(foreign) != 0 {
 		t.Fatalf("cross-user leak: %+v %v", foreign, err)
 	}
@@ -64,7 +65,7 @@ func TestNullByteSanitizationIntegration(t *testing.T) {
 		t.Fatalf("expected title without null byte, got %q", conv.Title)
 	}
 
-	if err := convs.SetTitle(ctx, conv.ID, user.ID, "Updated\x00Title"); err != nil {
+	if err := convs.RenameTitle(ctx, conv.ID, user.ID, "Updated\x00Title"); err != nil {
 		t.Fatalf("set title with null byte: %v", err)
 	}
 
@@ -87,5 +88,111 @@ func TestNullByteSanitizationIntegration(t *testing.T) {
 	}
 	if list[0].Content != "HelloWorld from PDF extraction!" {
 		t.Fatalf("expected sanitized content, got %q", list[0].Content)
+	}
+}
+
+func TestConversationOrganizationIntegration(t *testing.T) {
+	pool := newTestPool(t)
+	ctx := context.Background()
+	convs := NewConversations(pool)
+	users := NewUsers(pool)
+	user, err := users.Create(ctx, "organization@test.dev", "hash")
+	if err != nil {
+		user, err = users.ByEmail(ctx, "organization@test.dev")
+	}
+	if err != nil {
+		t.Fatalf("user setup: %v", err)
+	}
+	other, err := users.Create(ctx, "organization-other@test.dev", "hash")
+	if err != nil {
+		other, err = users.ByEmail(ctx, "organization-other@test.dev")
+	}
+	if err != nil {
+		t.Fatalf("other user setup: %v", err)
+	}
+	// Keep the test re-runnable against the shared integration database.
+	if _, err := pool.Exec(ctx, `DELETE FROM conversations WHERE user_id = $1`, user.ID); err != nil {
+		t.Fatalf("clean conversations: %v", err)
+	}
+
+	plain, err := convs.Create(ctx, user.ID, "Plain moon", ConversationPatch{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pinned, err := convs.Create(ctx, user.ID, "Pinned moon", ConversationPatch{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	archived, err := convs.Create(ctx, user.ID, "Archived moon", ConversationPatch{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plain.TitleSource != "heuristic" {
+		t.Fatalf("new conversation title source = %q, want heuristic", plain.TitleSource)
+	}
+	manual := "manual"
+	if conv, err := convs.Create(ctx, user.ID, "Manual title", ConversationPatch{TitleSource: &manual}); err != nil || conv.TitleSource != "manual" {
+		t.Fatalf("manual create = %+v %v", conv, err)
+	}
+
+	if err := convs.RenameTitle(ctx, plain.ID, user.ID, "Renamed moon"); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := convs.ByID(ctx, plain.ID, user.ID); got.TitleSource != "manual" || got.Title != "Renamed moon" {
+		t.Fatalf("rename = %+v", got)
+	}
+	if err := convs.SetHeuristicTitle(ctx, plain.ID, user.ID, "Overwritten"); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := convs.ByID(ctx, plain.ID, user.ID); got.Title != "Renamed moon" {
+		t.Fatalf("heuristic overwrote a manual title: %q", got.Title)
+	}
+
+	if err := convs.SetPinned(ctx, pinned.ID, user.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := convs.SetArchived(ctx, archived.ID, user.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := convs.SetArchived(ctx, plain.ID, user.ID, true); err != nil {
+		t.Fatal(err)
+	}
+
+	active, err := convs.List(ctx, user.ID, "", false, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(active) != 2 {
+		t.Fatalf("default list = %+v", active)
+	}
+	for _, c := range active {
+		if c.ArchivedAt != nil {
+			t.Fatalf("default list leaked archived row %+v", c)
+		}
+	}
+	pinnedRows, err := convs.List(ctx, user.ID, "", true, false)
+	if err != nil || len(pinnedRows) != 1 || pinnedRows[0].ID != pinned.ID || pinnedRows[0].PinnedAt == nil {
+		t.Fatalf("pinned list = %+v %v", pinnedRows, err)
+	}
+	archivedRows, err := convs.List(ctx, user.ID, "", false, true)
+	if err != nil || len(archivedRows) != 2 {
+		t.Fatalf("archived list = %+v %v", archivedRows, err)
+	}
+	moon, err := convs.List(ctx, user.ID, "moon", false, false)
+	if err != nil || len(moon) != 1 || moon[0].ID != pinned.ID {
+		t.Fatalf("q must exclude archived rows: %+v %v", moon, err)
+	}
+
+	if err := convs.SetPinned(ctx, plain.ID, other.ID, true); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("foreign pin = %v", err)
+	}
+	if err := convs.SetArchived(ctx, "00000000-0000-0000-0000-000000000000", user.ID, true); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("unknown archive = %v", err)
+	}
+	if err := convs.RenameTitle(ctx, plain.ID, other.ID, "Hijack"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("foreign rename = %v", err)
+	}
+	if err := convs.SetSettings(ctx, plain.ID, other.ID, ConversationPatch{Model: &manual}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("foreign settings = %v", err)
 	}
 }

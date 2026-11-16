@@ -222,6 +222,19 @@ table "conversations" {
     type = uuid
     null = true
   }
+  column "pinned_at" {
+    type = timestamptz
+    null = true
+  }
+  column "archived_at" {
+    type = timestamptz
+    null = true
+  }
+  column "title_source" {
+    type    = text
+    null    = false
+    default = "heuristic"
+  }
   primary_key {
     columns = [column.id]
   }
@@ -259,6 +272,26 @@ table "conversations" {
   }
   index "idx_conversations_project" {
     columns = [column.project_id]
+  }
+  index "idx_conversations_pinned" {
+    on {
+      column = column.user_id
+    }
+    on {
+      column = column.pinned_at
+      desc   = true
+    }
+    where = sql("pinned_at IS NOT NULL")
+  }
+  index "idx_conversations_archived" {
+    on {
+      column = column.user_id
+    }
+    on {
+      column = column.archived_at
+      desc   = true
+    }
+    where = sql("archived_at IS NOT NULL")
   }
 }
 
@@ -1599,5 +1632,53 @@ table "mcp_servers" {
   }
   index "idx_mcp_servers_user_app" {
     columns = [column.user_id, column.app_id]
+  }
+}
+
+table "saved_prompts" {
+  schema = schema.public
+  column "id" {
+    type    = uuid
+    null    = false
+    default = sql("gen_random_uuid()")
+  }
+  column "user_id" {
+    type = uuid
+    null = false
+  }
+  column "title" {
+    type = text
+    null = false
+  }
+  column "body" {
+    type = text
+    null = false
+  }
+  column "created_at" {
+    type    = timestamptz
+    null    = false
+    default = sql("now()")
+  }
+  column "updated_at" {
+    type    = timestamptz
+    null    = false
+    default = sql("now()")
+  }
+  primary_key {
+    columns = [column.id]
+  }
+  foreign_key "saved_prompts_user_id_fkey" {
+    columns     = [column.user_id]
+    ref_columns = [table.users.column.id]
+    on_delete   = CASCADE
+  }
+  index "idx_saved_prompts_user" {
+    on {
+      column = column.user_id
+    }
+    on {
+      column = column.updated_at
+      desc   = true
+    }
   }
 }

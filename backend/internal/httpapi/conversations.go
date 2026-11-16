@@ -4,12 +4,14 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"math"
 	"net/http"
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/abubakarsiddik31/golem-chatbot/internal/chat"
@@ -28,14 +30,28 @@ type conversationDTO struct {
 	BotID *string `json:"botId,omitempty"`
 	// ActiveLeafID is the visible message-tree leaf; null for empty chats.
 	ActiveLeafID *string `json:"activeLeafId"`
-	CreatedAt    string  `json:"createdAt"`
-	UpdatedAt    string  `json:"updatedAt"`
+	// PinnedAt/ArchivedAt are nullable organization timestamps.
+	PinnedAt   *string `json:"pinnedAt"`
+	ArchivedAt *string `json:"archivedAt"`
+	// TitleSource records the title's provenance ("heuristic" or "manual").
+	TitleSource string `json:"titleSource"`
+	CreatedAt   string `json:"createdAt"`
+	UpdatedAt   string `json:"updatedAt"`
+}
+
+func rfc3339Ptr(t *time.Time) *string {
+	if t == nil {
+		return nil
+	}
+	v := t.UTC().Format(timeRFC3339)
+	return &v
 }
 
 func toConversationDTO(c storage.Conversation) conversationDTO {
 	return conversationDTO{
 		ID: c.ID, Title: c.Title, Model: c.Model, Temperature: c.Temperature, SystemPrompt: c.SystemPrompt,
 		RagEnabled: c.RagEnabled, BotID: c.BotID, ActiveLeafID: c.ActiveLeafID,
+		PinnedAt: rfc3339Ptr(c.PinnedAt), ArchivedAt: rfc3339Ptr(c.ArchivedAt), TitleSource: c.TitleSource,
 		CreatedAt: c.CreatedAt.UTC().Format(timeRFC3339), UpdatedAt: c.UpdatedAt.UTC().Format(timeRFC3339),
 	}
 }
@@ -71,9 +87,34 @@ func (s *Server) settingsPatch(modelID *string, temperature *float64, clearTempe
 	return patch, nil
 }
 
+// queryBool parses an optional strict boolean query parameter: "true"/"1"
+// and "false"/"0" only, an empty value meaning false.
+func queryBool(r *http.Request, key string) (bool, error) {
+	v := strings.TrimSpace(r.URL.Query().Get(key))
+	switch v {
+	case "":
+		return false, nil
+	case "true", "1":
+		return true, nil
+	case "false", "0":
+		return false, nil
+	}
+	return false, fmt.Errorf("%s must be true or false", key)
+}
+
 func (s *Server) handleListConversations(w http.ResponseWriter, r *http.Request) {
 	userID, _ := userIDFrom(r.Context())
-	convs, err := s.deps.Convos.List(r.Context(), userID, strings.TrimSpace(r.URL.Query().Get("q")))
+	pinned, err := queryBool(r, "pinned")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	archived, err := queryBool(r, "archived")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	convs, err := s.deps.Convos.List(r.Context(), userID, strings.TrimSpace(r.URL.Query().Get("q")), pinned, archived)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal", "could not list conversations")
 		return
@@ -456,13 +497,71 @@ func (s *Server) handlePatchConversation(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if req.Title != nil {
-		if err := s.deps.Convos.SetTitle(r.Context(), r.PathValue("id"), userID, *req.Title); err != nil {
+		if err := s.deps.Convos.RenameTitle(r.Context(), r.PathValue("id"), userID, *req.Title); err != nil {
+			if errors.Is(err, storage.ErrNotFound) {
+				writeError(w, http.StatusNotFound, "not_found", "conversation not found")
+				return
+			}
 			writeError(w, http.StatusInternalServerError, "internal", "could not rename")
 			return
 		}
 	}
 	if err := s.deps.Convos.SetSettings(r.Context(), r.PathValue("id"), userID, patch); err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "not_found", "conversation not found")
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "internal", "could not update settings")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handlePinConversation flips pinned_at; pinning is allowed during a run
+// because it never touches the message tree.
+func (s *Server) handlePinConversation(w http.ResponseWriter, r *http.Request) {
+	userID, _ := userIDFrom(r.Context())
+	var req struct {
+		Pinned *bool `json:"pinned"`
+	}
+	if err := decodeJSON(r, &req); err != nil || req.Pinned == nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "pinned is required")
+		return
+	}
+	if err := s.deps.Convos.SetPinned(r.Context(), r.PathValue("id"), userID, *req.Pinned); err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "not_found", "conversation not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "internal", "could not update pin")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleArchiveConversation flips archived_at. Archiving is refused while a
+// run (including a parked approval) owns the conversation; unarchiving is
+// always allowed.
+func (s *Server) handleArchiveConversation(w http.ResponseWriter, r *http.Request) {
+	userID, _ := userIDFrom(r.Context())
+	var req struct {
+		Archived *bool `json:"archived"`
+	}
+	if err := decodeJSON(r, &req); err != nil || req.Archived == nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "archived is required")
+		return
+	}
+	id := r.PathValue("id")
+	if *req.Archived && s.runActive(id) {
+		writeError(w, http.StatusConflict, "run_active", "a run is active on this conversation")
+		return
+	}
+	if err := s.deps.Convos.SetArchived(r.Context(), id, userID, *req.Archived); err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "not_found", "conversation not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "internal", "could not update archive")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

@@ -442,11 +442,13 @@ func (s *Server) handleCreateBotConversation(w http.ResponseWriter, r *http.Requ
 	}
 	model := bot.Model
 	rag := bot.RagEnabled
+	manualTitle := "manual"
 	conv, err := s.deps.Convos.Create(r.Context(), userID, bot.Name, storage.ConversationPatch{
 		Model:        &model,
 		SystemPrompt: nil, // "" stays; the run spec builds the bot persona at send time
 		RagEnabled:   &rag,
 		BotID:        &botID,
+		TitleSource:  &manualTitle,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal", "could not create conversation")

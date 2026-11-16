@@ -136,10 +136,12 @@ func (s *Server) handleCreateBotTask(w http.ResponseWriter, r *http.Request) {
 	} else {
 		botModel := bot.Model
 		rag := bot.RagEnabled
+		manualTitle := "manual"
 		conv, err = s.deps.Convos.Create(r.Context(), userID, bot.Name, storage.ConversationPatch{
-			Model:      &botModel,
-			RagEnabled: &rag,
-			BotID:      &botID,
+			Model:       &botModel,
+			RagEnabled:  &rag,
+			BotID:       &botID,
+			TitleSource: &manualTitle,
 		})
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "internal", "could not create conversation")

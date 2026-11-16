@@ -59,6 +59,7 @@ func (s *Server) handleEditMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer release()
+	s.unarchiveForTurn(ctx, conv)
 
 	target, err := s.deps.Msgs.ByID(ctx, msgID, userID)
 	if err != nil {
@@ -153,6 +154,7 @@ func (s *Server) handleRegenerate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer release()
+	s.unarchiveForTurn(ctx, conv)
 
 	rows, err := s.deps.Msgs.ForConversation(ctx, convID, userID)
 	if err != nil {
@@ -414,12 +416,14 @@ func (s *Server) handleForkConversation(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusInternalServerError, "internal", "could not load messages")
 		return
 	}
+	manualTitle := "manual"
 	convPatch := storage.ConversationPatch{
 		Model:        &conv.Model,
 		Temperature:  conv.Temperature,
 		SystemPrompt: &conv.SystemPrompt,
 		RagEnabled:   &conv.RagEnabled,
 		ProjectID:    conv.ProjectID,
+		TitleSource:  &manualTitle,
 	}
 	forked, err := s.deps.Convos.Create(ctx, userID, "Fork of "+conv.Title, convPatch)
 	if err != nil {
