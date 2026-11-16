@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -242,5 +243,96 @@ func TestMessageBranchesMigrationBackfillAndDown(t *testing.T) {
 	}
 	if err := pool.QueryRow(ctx, `SELECT active_leaf_id::text FROM conversations WHERE id = $1`, conv1).Scan(&leaf1); err != nil || leaf1 != m4 {
 		t.Fatalf("leaf after re-Up = %q %v", leaf1, err)
+	}
+}
+
+func TestChatOrganizationMigration(t *testing.T) {
+	pool, dsn := newTempTestDatabase(t)
+	ctx := context.Background()
+	if err := Migrate(ctx, pool); err != nil {
+		t.Fatalf("initial migrate: %v", err)
+	}
+	db := openGoose(t, dsn)
+	defer db.Close()
+
+	const beforeOrganization = int64(20261116180000)
+	if err := goose.DownToContext(ctx, db, "migrations", beforeOrganization); err != nil {
+		t.Fatalf("down to pre-organization: %v", err)
+	}
+
+	var userID string
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO users (email, password_hash) VALUES ('migrate-organization@test.dev', 'hash') RETURNING id`).Scan(&userID); err != nil {
+		t.Fatalf("insert user: %v", err)
+	}
+	var legacyID string
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO conversations (user_id, title) VALUES ($1, 'legacy') RETURNING id`, userID).Scan(&legacyID); err != nil {
+		t.Fatalf("insert legacy conversation: %v", err)
+	}
+
+	if err := goose.UpContext(ctx, db, "migrations"); err != nil {
+		t.Fatalf("up organization: %v", err)
+	}
+
+	var source string
+	if err := pool.QueryRow(ctx, `SELECT title_source FROM conversations WHERE id = $1`, legacyID).Scan(&source); err != nil || source != "manual" {
+		t.Fatalf("legacy title source = %q %v, want manual", source, err)
+	}
+	var columnDefault string
+	if err := pool.QueryRow(ctx, `SELECT column_default FROM information_schema.columns
+		WHERE table_name = 'conversations' AND column_name = 'title_source'`).Scan(&columnDefault); err != nil ||
+		!strings.Contains(columnDefault, "heuristic") {
+		t.Fatalf("title_source default = %q %v, want heuristic", columnDefault, err)
+	}
+	var freshID string
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO conversations (user_id, title) VALUES ($1, 'fresh') RETURNING id`, userID).Scan(&freshID); err != nil {
+		t.Fatalf("insert fresh conversation: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT title_source FROM conversations WHERE id = $1`, freshID).Scan(&source); err != nil || source != "heuristic" {
+		t.Fatalf("fresh title source = %q %v, want heuristic", source, err)
+	}
+	var promptID string
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO saved_prompts (user_id, title, body) VALUES ($1, 'Standup', 'Summarize') RETURNING id`, userID).Scan(&promptID); err != nil {
+		t.Fatalf("insert saved prompt: %v", err)
+	}
+
+	if err := goose.DownToContext(ctx, db, "migrations", beforeOrganization); err != nil {
+		t.Fatalf("down organization: %v", err)
+	}
+	for _, tc := range []struct{ table, column string }{
+		{"conversations", "pinned_at"},
+		{"conversations", "archived_at"},
+		{"conversations", "title_source"},
+	} {
+		var n int
+		if err := pool.QueryRow(ctx, `SELECT count(*) FROM information_schema.columns
+			WHERE table_name = $1 AND column_name = $2`, tc.table, tc.column).Scan(&n); err != nil || n != 0 {
+			t.Fatalf("%s.%s survived Down: %d %v", tc.table, tc.column, n, err)
+		}
+	}
+	var tables int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM information_schema.tables WHERE table_name = 'saved_prompts'`).Scan(&tables); err != nil || tables != 0 {
+		t.Fatalf("saved_prompts survived Down: %d %v", tables, err)
+	}
+	// Earlier migrations stay applied: the branch tree is untouched.
+	for _, tc := range []struct{ table, column string }{
+		{"messages", "parent_id"},
+		{"conversations", "active_leaf_id"},
+		{"pending_tool_calls", "message_id"},
+	} {
+		var n int
+		if err := pool.QueryRow(ctx, `SELECT count(*) FROM information_schema.columns
+			WHERE table_name = $1 AND column_name = $2`, tc.table, tc.column).Scan(&n); err != nil || n != 1 {
+			t.Fatalf("%s.%s missing after Down: %d %v", tc.table, tc.column, n, err)
+		}
+	}
+	if err := goose.UpContext(ctx, db, "migrations"); err != nil {
+		t.Fatalf("up after down: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT title_source FROM conversations WHERE id = $1`, legacyID).Scan(&source); err != nil || source != "manual" {
+		t.Fatalf("re-up must reclassify legacy rows manual: %q %v", source, err)
 	}
 }

@@ -147,17 +147,53 @@ incorporated below (2 blockers, 11 major, 4 minor).
 - [ ] Gates: `make check` (+ storage integration with TEST_DATABASE_URL),
       `make fe-check`, live-verify on `:8090`.
 
-### Phase 1B — organization & discovery (feature: `feat/chat-organization`)
+### Phase 1B — organization & discovery (split per adversarial review 2026-11-16)
 
-- [ ] `pinned_at` / `archived_at` + sidebar sections and list filters.
-- [ ] Prompt library: `saved_prompts` CRUD, composer insert, command palette.
-- [ ] Quote/reply to a message (`reply_to_id` + rendered quote).
-- [ ] Message feedback thumbs (`message_feedback`, unique per user/message).
-- [ ] Auto-titles: cheap-model async title after first exchange, heuristic fallback,
-      `title_source`, inline rename + regenerate title.
-- [ ] Postgres FTS over messages + titles (`simple` config, GIN, `ts_headline`),
-      `GET /api/search`, command-palette results with jump-to-message; in-conversation
-      find with highlight.
+Adversarial review: PROCEED WITH CHANGES, split into four PRs; the review
+found 6 blockers (tsvector insert limit, generated-column rewrite, title-source
+backfill, bot/fork titles, SetTitle overloading, quote composition) and 9 majors.
+
+**PR1 `feat/chat-pins-prompts` (current)**
+- [x] Migration: `conversations.pinned_at`, `archived_at`, `title_source`
+      (ADD with DEFAULT 'manual' so existing rows keep their titles, then
+      SET DEFAULT 'heuristic'); `saved_prompts`; partial indexes. schema.hcl +
+      atlas.sum. No generated columns, no message rewrite.
+- [x] Title source: split `SetHeuristicTitle` (first-message heuristic) from
+      `RenameTitle` (user rename → manual); bot creation and forks stamp manual;
+      PATCH title uses RenameTitle and returns 404 for unknown/foreign rows.
+- [x] Pin/archive: dedicated `PUT /api/conversations/{id}/pin|archive`
+      ({pinned|archived:bool}), 404 on unknown/foreign, archive 409 while a run
+      is active, unarchive always allowed; list params `pinned`/`archived`
+      (default excludes archived; title `q` excludes archived); send/edit/
+      regenerate auto-unarchive before the turn.
+- [x] Prompt library: `saved_prompts` CRUD (`GET/POST /api/prompts`,
+      `PATCH/DELETE /api/prompts/{id}`), ownership + limits (100/user, title 200,
+      body 8000 runes), sidebar/composer picker + command-palette entry; no
+      variables in v1.
+- [x] Frontend: pinned section + actions, archived section/unarchive, prompt
+      library dialog with insert, tests (vitest + msw). Checked PATCH/SetSettings
+      404s (no more silent 204s).
+
+**PR2 `feat/chat-feedback-quote`**
+- [ ] `message_feedback` (unique per user/message, assistant rows only, IDOR
+      checks, omitted from shared transcripts), thumbs UI.
+- [ ] `reply_to_id` + server-snapshotted `quote_text` (capped), compose the
+      model-facing text in ONE place for send/edit/regenerate, keep raw `content`
+      for transcript/search, carry quotes through edit/regenerate and fork.
+
+**PR3 `feat/chat-search`**
+- [ ] FTS with a truncated vector (no unbounded generated tsvector; state the
+      index/lock cost), `simple` config, escaped prefix queries, `ts_headline`
+      sentinel markers rendered as text (no HTML injection), limits + pagination,
+      archived excluded; activate-the-branch-then-jump for off-path hits;
+      in-conversation find; PathToLeaf selects explicit columns.
+
+**PR4 `feat/chat-autotitle`**
+- [ ] Async title in `finishRun`/`finishResumed` only (approval-paused first turn
+      included), `TITLE_MODEL` via registry at request time, sanitized input
+      (strip file blocks, truncate, never memories/instructions), first user turn
+      only, bot/fork excluded, manual rename wins, timeout/fallback to heuristic,
+      `title` usage kind + label.
 
 ### Phase 2 — models 2.0 (feature: `feat/models-2`)
 

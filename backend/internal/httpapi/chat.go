@@ -35,13 +35,16 @@ import (
 // production wiring at compile time.
 type ConvoStore interface {
 	Create(ctx context.Context, userID, title string, patch storage.ConversationPatch) (storage.Conversation, error)
-	List(ctx context.Context, userID, q string) ([]storage.Conversation, error)
+	List(ctx context.Context, userID, q string, pinned, archived bool) ([]storage.Conversation, error)
 	ListByProject(ctx context.Context, projectID, userID string) ([]storage.Conversation, error)
 	ListByBot(ctx context.Context, botID, userID string) ([]storage.Conversation, error)
 	LatestForBot(ctx context.Context, botID, userID string) (storage.Conversation, error)
 	LatestIDsByUser(ctx context.Context, userID string) (map[string]string, error)
 	ByID(ctx context.Context, id, userID string) (storage.Conversation, error)
-	SetTitle(ctx context.Context, id, userID, title string) error
+	SetHeuristicTitle(ctx context.Context, id, userID, title string) error
+	RenameTitle(ctx context.Context, id, userID, title string) error
+	SetPinned(ctx context.Context, id, userID string, pinned bool) error
+	SetArchived(ctx context.Context, id, userID string, archived bool) error
 	SetActiveLeaf(ctx context.Context, id, userID, leafID string) error
 	SetSettings(ctx context.Context, id, userID string, patch storage.ConversationPatch) error
 	Touch(ctx context.Context, id string) error
@@ -246,7 +249,7 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 
 	// Auto-title from the first user message.
 	if n, err := s.deps.Convos.CountMessages(ctx, convID, userID); err == nil && n == 0 {
-		_ = s.deps.Convos.SetTitle(ctx, convID, userID, deriveConversationTitle(req.Content))
+		_ = s.deps.Convos.SetHeuristicTitle(ctx, convID, userID, deriveConversationTitle(req.Content))
 	}
 
 	// History is the path to the current leaf; the new prompt becomes its
@@ -270,6 +273,7 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal", "could not load history")
 		return
 	}
+	s.unarchiveForTurn(ctx, conv)
 	promptID, err := s.deps.Msgs.Add(ctx, storage.Message{
 		ConversationID: convID, UserID: userID, Role: string(model.RoleUser),
 		ParentID: leaf,
@@ -285,6 +289,18 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 		s.deps.Log.Error("could not set active leaf", "err", err, "conv_id", convID)
 	}
 	s.runTurn(ctx, userID, convID, spec, conv.BotID, historyFrom(path, len(path)), req.Content, parts, knownRows(path), promptID, w)
+}
+
+// unarchiveForTurn clears the archived flag before a new turn is persisted.
+// Failure is logged and the turn continues: a stale flag must never block a
+// send, edit, or regenerate.
+func (s *Server) unarchiveForTurn(ctx context.Context, conv storage.Conversation) {
+	if conv.ArchivedAt == nil {
+		return
+	}
+	if err := s.deps.Convos.SetArchived(ctx, conv.ID, conv.UserID, false); err != nil {
+		s.deps.Log.Warn("could not unarchive conversation", "err", err, "conv_id", conv.ID)
+	}
 }
 
 // blockedByPendingApproval writes the response and reports true when the

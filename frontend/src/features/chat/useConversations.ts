@@ -1,12 +1,22 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/api";
-import type { Conversation, ConversationSettings } from "@/lib/types";
+import type { Conversation, ConversationSettings, SavedPrompt, SavedPromptsResponse } from "@/lib/types";
 
-export function useConversations(search = "") {
+export interface ConversationFilters {
+  pinned?: boolean;
+  archived?: boolean;
+}
+
+export function useConversations(search = "", filters: ConversationFilters = {}, enabled = true) {
+  const params = new URLSearchParams();
+  if (search) params.set("q", search);
+  if (filters.pinned) params.set("pinned", "true");
+  if (filters.archived) params.set("archived", "true");
+  const query = params.toString();
   return useQuery({
-    queryKey: ["conversations", search],
-    queryFn: () =>
-      apiFetch<Conversation[]>(search ? `/api/conversations?q=${encodeURIComponent(search)}` : "/api/conversations"),
+    queryKey: ["conversations", search, filters.pinned ?? false, filters.archived ?? false],
+    queryFn: () => apiFetch<Conversation[]>(query ? `/api/conversations?${query}` : "/api/conversations"),
+    enabled,
   });
 }
 
@@ -19,10 +29,7 @@ export function useCreateConversation() {
         : {};
       return apiFetch<Conversation>("/api/conversations", { method: "POST", json: body });
     },
-    onSuccess: (conversation) => {
-      queryClient.setQueryData<Conversation[]>(["conversations"], (old) =>
-        old ? [conversation, ...old.filter((c) => c.id !== conversation.id)] : [conversation],
-      );
+    onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["conversations"] });
     },
   });
@@ -50,6 +57,30 @@ export function useDeleteConversation() {
     mutationFn: (id: string) => apiFetch<void>(`/api/conversations/${id}`, { method: "DELETE" }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["conversations"] });
+    },
+  });
+}
+
+export function usePinConversation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, pinned }: { id: string; pinned: boolean }) =>
+      apiFetch<void>(`/api/conversations/${id}/pin`, { method: "PUT", json: { pinned } }),
+    onSuccess: (_data, { id }) => {
+      void queryClient.invalidateQueries({ queryKey: ["conversations"] });
+      void queryClient.invalidateQueries({ queryKey: ["conversation", id] });
+    },
+  });
+}
+
+export function useArchiveConversation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, archived }: { id: string; archived: boolean }) =>
+      apiFetch<void>(`/api/conversations/${id}/archive`, { method: "PUT", json: { archived } }),
+    onSuccess: (_data, { id }) => {
+      void queryClient.invalidateQueries({ queryKey: ["conversations"] });
+      void queryClient.invalidateQueries({ queryKey: ["conversation", id] });
     },
   });
 }
@@ -87,6 +118,46 @@ export function useDeleteMessage(convID: string | null) {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["conversation", convID] });
       void queryClient.invalidateQueries({ queryKey: ["conversations"] });
+    },
+  });
+}
+
+export function useSavedPrompts(enabled = true) {
+  return useQuery({
+    queryKey: ["prompts"],
+    queryFn: async () => (await apiFetch<SavedPromptsResponse>("/api/prompts")).prompts,
+    enabled,
+  });
+}
+
+export function useCreateSavedPrompt() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { title: string; body: string }) =>
+      apiFetch<SavedPrompt>("/api/prompts", { method: "POST", json: input }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["prompts"] });
+    },
+  });
+}
+
+export function useUpdateSavedPrompt() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, title, body }: { id: string; title?: string; body?: string }) =>
+      apiFetch<SavedPrompt>(`/api/prompts/${id}`, { method: "PATCH", json: { title, body } }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["prompts"] });
+    },
+  });
+}
+
+export function useDeleteSavedPrompt() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => apiFetch<void>(`/api/prompts/${id}`, { method: "DELETE" }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["prompts"] });
     },
   });
 }

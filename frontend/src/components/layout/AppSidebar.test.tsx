@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
@@ -28,6 +28,28 @@ const mockConversations = [
     temperature: 0.7,
     systemPrompt: "",
     ragEnabled: false,
+  },
+  {
+    id: "conv-pinned",
+    title: "Pinned planning",
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    model: "gpt-4o",
+    temperature: 0.7,
+    systemPrompt: "",
+    ragEnabled: false,
+    pinnedAt: new Date().toISOString(),
+  },
+  {
+    id: "conv-archived",
+    title: "Old archived chat",
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    model: "gpt-4o",
+    temperature: 0.7,
+    systemPrompt: "",
+    ragEnabled: false,
+    archivedAt: new Date().toISOString(),
   },
   {
     id: "conv-3",
@@ -67,7 +89,14 @@ const mockProjectDetail = {
 };
 
 const server = setupServer(
-  http.get("*/api/conversations", () => HttpResponse.json(mockConversations)),
+  http.get("*/api/conversations", ({ request }) => {
+    const params = new URL(request.url).searchParams;
+    const archived = params.get("archived") === "true";
+    const pinned = params.get("pinned") === "true";
+    let rows = mockConversations.filter((c) => (archived ? Boolean(c.archivedAt) : !c.archivedAt));
+    if (pinned) rows = rows.filter((c) => Boolean(c.pinnedAt));
+    return HttpResponse.json(rows);
+  }),
   http.get("*/api/tools", () => HttpResponse.json([])),
   http.get("*/api/projects", () => HttpResponse.json({ projects: mockProjects })),
   http.get("*/api/projects/proj-1", () => HttpResponse.json(mockProjectDetail)),
@@ -220,5 +249,47 @@ describe("AppSidebar", () => {
     const optionsContainer = optionsBtn.parentElement;
     expect(optionsContainer?.className).toContain("opacity-0");
     expect(optionsContainer?.className).toContain("group-hover:opacity-100");
+  });
+
+  it("renders pinned and archived sections and calls pin/archive/unarchive", async () => {
+    const user = userEvent.setup();
+    const calls: Array<{ kind: string; id: string; body: Record<string, unknown> }> = [];
+    server.use(
+      http.put("*/api/conversations/:id/pin", async ({ request, params }) => {
+        calls.push({ kind: "pin", id: params.id as string, body: (await request.json()) as Record<string, unknown> });
+        return new HttpResponse(null, { status: 204 });
+      }),
+      http.put("*/api/conversations/:id/archive", async ({ request, params }) => {
+        calls.push({ kind: "archive", id: params.id as string, body: (await request.json()) as Record<string, unknown> });
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
+    renderSidebar();
+
+    // Pinned section above the date groups, excluded from the normal list.
+    expect(await screen.findByText("Pinned")).toBeInTheDocument();
+    expect(screen.getByText("Pinned planning")).toBeInTheDocument();
+    expect(screen.getAllByText("Pinned planning")).toHaveLength(1);
+    expect(screen.queryByText("Old archived chat")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Options for Pinned planning" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Unpin Pinned planning" }));
+    await waitFor(() =>
+      expect(calls.some((c) => c.kind === "pin" && c.id === "conv-pinned" && c.body.pinned === false)).toBe(true),
+    );
+
+    await user.click(screen.getByRole("button", { name: "Options for Regular discussion without files" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Archive Regular discussion without files" }));
+    await waitFor(() =>
+      expect(calls.some((c) => c.kind === "archive" && c.id === "conv-3" && c.body.archived === true)).toBe(true),
+    );
+
+    // Archived loads lazily and offers an unarchive action.
+    await user.click(screen.getByRole("button", { name: /Archived/ }));
+    expect(await screen.findByText("Old archived chat")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Unarchive Old archived chat" }));
+    await waitFor(() =>
+      expect(calls.some((c) => c.kind === "archive" && c.id === "conv-archived" && c.body.archived === false)).toBe(true),
+    );
   });
 });

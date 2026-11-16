@@ -5,7 +5,11 @@ export interface Conversation {
   id: string; title: string; createdAt: string; updatedAt: string;
   model: string; temperature: number | null; systemPrompt: string; ragEnabled: boolean;
   botId?: string | null; activeLeafId?: string | null;
+  pinnedAt?: string | null; archivedAt?: string | null;
+  titleSource?: "heuristic" | "manual" | string;
 }
+export interface SavedPrompt { id: string; title: string; body: string; createdAt: string; updatedAt: string }
+export interface SavedPromptsResponse { prompts: SavedPrompt[] }
 export interface ModelInfo { id: string; label: string; provider: string }
 export interface ModelsResponse { default: string; models: ModelInfo[] }
 export interface ConversationSettings { model: string; temperature: number | null; systemPrompt: string; ragEnabled: boolean }

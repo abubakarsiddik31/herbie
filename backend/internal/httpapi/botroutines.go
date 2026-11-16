@@ -180,10 +180,12 @@ func (s *Server) routineConversation(ctx context.Context, routine storage.BotRou
 	}
 	model, rag := bot.Model, bot.RagEnabled
 	botID := routine.BotID
+	manualTitle := "manual"
 	return s.deps.Convos.Create(ctx, routine.UserID, bot.Name, storage.ConversationPatch{
-		Model:      &model,
-		RagEnabled: &rag,
-		BotID:      &botID,
+		Model:       &model,
+		RagEnabled:  &rag,
+		BotID:       &botID,
+		TitleSource: &manualTitle,
 	})
 }
 

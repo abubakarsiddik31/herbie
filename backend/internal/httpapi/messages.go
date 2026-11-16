@@ -106,6 +106,7 @@ func (s *Server) handleEditMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	payload.Content = req.Content
+	s.unarchiveForTurn(ctx, conv)
 	siblingID, err := s.deps.Msgs.Add(ctx, storage.Message{
 		ConversationID: convID, UserID: userID, Role: string(model.RoleUser),
 		ParentID: target.ParentID,
@@ -185,6 +186,7 @@ func (s *Server) handleRegenerate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = s.deps.Convos.Touch(ctx, convID)
+	s.unarchiveForTurn(ctx, conv)
 	s.runTurn(ctx, userID, convID, spec, conv.BotID, historyFrom(path, lastUser), path[lastUser].Content, payload.Parts, knownRows(path), path[lastUser].ID, w)
 }
 
@@ -414,12 +416,14 @@ func (s *Server) handleForkConversation(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusInternalServerError, "internal", "could not load messages")
 		return
 	}
+	manualTitle := "manual"
 	convPatch := storage.ConversationPatch{
 		Model:        &conv.Model,
 		Temperature:  conv.Temperature,
 		SystemPrompt: &conv.SystemPrompt,
 		RagEnabled:   &conv.RagEnabled,
 		ProjectID:    conv.ProjectID,
+		TitleSource:  &manualTitle,
 	}
 	forked, err := s.deps.Convos.Create(ctx, userID, "Fork of "+conv.Title, convPatch)
 	if err != nil {

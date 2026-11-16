@@ -432,4 +432,36 @@ describe("ChatPage conversation actions", () => {
     expect((await screen.findAllByText("A run is in progress")).length).toBeGreaterThan(0);
     expect(screen.queryByRole("button", { name: "Stop generating" })).not.toBeInTheDocument();
   });
+
+  it("shows an archived badge and clears it after sending", async () => {
+    let archived = true;
+    let sends = 0;
+    server.use(
+      http.get("*/api/conversations/c1", () =>
+        HttpResponse.json(detail({ activeLeafId: "a1", archivedAt: archived ? createdAt : null }, [
+          message({ id: "u1", role: "user", content: "hello" }),
+          message({ id: "a1", role: "assistant", content: "answer" }),
+        ])),
+      ),
+      http.post("*/api/conversations/c1/messages", () => {
+        sends++;
+        archived = false;
+        return new HttpResponse(
+          sseBody([
+            'event: delta\ndata: {"text":"reply"}\n\n',
+            'event: done\ndata: {"messageId":"a2","inputTokens":1,"outputTokens":1,"requests":1,"costUsd":0}\n\n',
+          ]),
+          { headers: { "Content-Type": "text/event-stream" } },
+        );
+      }),
+    );
+    renderChat();
+    expect(await screen.findByText("Archived")).toBeInTheDocument();
+
+    await userEvent.type(screen.getByPlaceholderText(/Message Herbie/), "continue");
+    await userEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    await waitFor(() => expect(sends).toBe(1));
+    await waitFor(() => expect(screen.queryByText("Archived")).not.toBeInTheDocument());
+  });
 });

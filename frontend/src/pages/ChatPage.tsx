@@ -3,7 +3,9 @@ import { useNavigate, useParams, useSearchParams } from "react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
+  ArchiveRestore,
   ArrowUp,
+  BookMarked,
   BookOpen,
   Bot,
   Calendar,
@@ -65,6 +67,7 @@ import { ThinkingTrace } from "@/components/ai/ThinkingTrace";
 import { useSidebar } from "@/components/layout/SidebarContext";
 import { BranchSwitcher } from "@/features/chat/BranchSwitcher";
 import { CommandPalette } from "@/features/chat/CommandPalette";
+import { PromptLibraryDialog } from "@/features/chat/PromptLibraryDialog";
 import { extractCitationsFromContent } from "@/features/chat/citations";
 import { ConversationSettingsDialog } from "@/features/chat/ConversationSettingsDialog";
 import { conversationFilename, downloadMarkdown, toMarkdown } from "@/features/chat/exportMarkdown";
@@ -75,6 +78,7 @@ import { useModels } from "@/features/chat/useModels";
 import { useVoiceInput } from "@/features/chat/useVoiceInput";
 import {
   useActivateBranch,
+  useArchiveConversation,
   useConversations,
   useCreateConversation,
   useDeleteMessage,
@@ -162,6 +166,7 @@ export function ChatPage() {
   const [sharing, setSharing] = useState<Conversation | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [promptLibraryOpen, setPromptLibraryOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [editing, setEditing] = useState<{ id: string; draft: string } | null>(null);
@@ -245,6 +250,23 @@ export function ChatPage() {
     }
   };
 
+  const insertPrompt = (body: string) => {
+    const textarea = textareaRef.current;
+    if (!textarea) {
+      setInput((prev) => (prev ? `${prev}\n${body}` : body));
+      return;
+    }
+    const start = textarea.selectionStart ?? input.length;
+    const end = textarea.selectionEnd ?? start;
+    const next = input.slice(0, start) + body + input.slice(end);
+    setInput(next);
+    setTimeout(() => {
+      textarea.focus();
+      const pos = start + body.length;
+      textarea.setSelectionRange(pos, pos);
+    }, 0);
+  };
+
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const val = e.target.value;
     setInput(val);
@@ -322,6 +344,7 @@ export function ChatPage() {
   const activateBranch = useActivateBranch(selectedId);
   const forkConversation = useForkConversation(selectedId);
   const updateSettings = useUpdateConversationSettings(selectedId);
+  const archiveConversation = useArchiveConversation();
 
   const { data: detail, isFetching: detailLoading, isError: detailError } = useQuery({
     queryKey: ["conversation", selectedId],
@@ -688,6 +711,29 @@ export function ChatPage() {
           <h1 className="min-w-0 truncate text-xs font-medium text-muted-foreground">
             {activeConversation ? cleanConversationTitle(activeConversation.title) : (selectedId ? "Conversation" : "New chat")}
           </h1>
+          {activeConversation?.archivedAt && (
+            <span className="flex shrink-0 items-center gap-1">
+              <Badge variant="outline" className="h-5 px-1.5 text-[10px] font-normal">Archived</Badge>
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                aria-label="Unarchive conversation"
+                title="Unarchive conversation"
+                className="text-muted-foreground hover:text-foreground"
+                onClick={() =>
+                  archiveConversation.mutate(
+                    { id: activeConversation.id, archived: false },
+                    {
+                      onSuccess: () => toast.success("Conversation unarchived"),
+                      onError: (err) => toast.error(err instanceof ApiError ? err.message : "Failed to unarchive"),
+                    },
+                  )
+                }
+              >
+                <ArchiveRestore className="size-3.5" />
+              </Button>
+            </span>
+          )}
         </div>
 
         <div className="flex shrink-0 items-center gap-1">
@@ -1181,6 +1227,19 @@ export function ChatPage() {
                 <Button
                   type="button"
                   variant="ghost"
+                  size="icon-xs"
+                  className="rounded-lg text-muted-foreground hover:text-foreground"
+                  onClick={() => setPromptLibraryOpen(true)}
+                  disabled={running || pending.length > 0}
+                  aria-label="Prompt library"
+                  title="Prompt library"
+                >
+                  <BookMarked className="size-3.5" />
+                </Button>
+
+                <Button
+                  type="button"
+                  variant="ghost"
                   size="xs"
                   onClick={() => setSettingsOpen(true)}
                   className="rounded-lg text-[11px] text-muted-foreground hover:text-foreground gap-1 px-2 h-7"
@@ -1271,6 +1330,12 @@ export function ChatPage() {
         saving={updateSettings.isPending}
       />
 
+      <PromptLibraryDialog
+        open={promptLibraryOpen}
+        onOpenChange={setPromptLibraryOpen}
+        onInsert={insertPrompt}
+      />
+
       <ShareDialog conversation={sharing} onOpenChange={(open) => { if (!open) setSharing(null); }} />
 
       <Dialog open={pendingMessageDelete !== null} onOpenChange={(open) => { if (!open) setPendingMessageDelete(null); }}>
@@ -1304,6 +1369,7 @@ export function ChatPage() {
         onShare={() => activeConversation && setSharing(activeConversation)}
         onOpenSettings={() => setSettingsOpen(true)}
         onOpenShortcuts={() => setShortcutsOpen(true)}
+        onOpenPromptLibrary={() => setPromptLibraryOpen(true)}
       />
 
       <ShortcutsDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} />

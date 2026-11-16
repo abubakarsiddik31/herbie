@@ -100,7 +100,11 @@ func newFakeConvos(msgs *fakeMsgs) *fakeConvos {
 var _ ConvoStore = (*fakeConvos)(nil)
 
 func (f *fakeConvos) Create(_ context.Context, userID, title string, patch storage.ConversationPatch) (storage.Conversation, error) {
-	conv := storage.Conversation{ID: fmt.Sprintf("c-%d", len(f.convs)+1), UserID: userID, Title: title, RagEnabled: true}
+	titleSource := "heuristic"
+	if patch.TitleSource != nil && *patch.TitleSource != "" {
+		titleSource = *patch.TitleSource
+	}
+	conv := storage.Conversation{ID: fmt.Sprintf("c-%d", len(f.convs)+1), UserID: userID, Title: title, RagEnabled: true, TitleSource: titleSource}
 	if patch.Model != nil {
 		conv.Model = *patch.Model
 	}
@@ -126,12 +130,28 @@ func (f *fakeConvos) Create(_ context.Context, userID, title string, patch stora
 	return conv, nil
 }
 
-func (f *fakeConvos) List(_ context.Context, userID, q string) ([]storage.Conversation, error) {
+func (f *fakeConvos) List(_ context.Context, userID, q string, pinned, archived bool) ([]storage.Conversation, error) {
 	var out []storage.Conversation
 	for _, c := range f.convs {
-		if c.UserID == userID && (q == "" || strings.Contains(strings.ToLower(c.Title), strings.ToLower(q))) {
-			out = append(out, c)
+		if c.UserID != userID {
+			continue
 		}
+		if archived {
+			if c.ArchivedAt == nil {
+				continue
+			}
+		} else {
+			if c.ArchivedAt != nil {
+				continue
+			}
+			if pinned && c.PinnedAt == nil {
+				continue
+			}
+		}
+		if q != "" && !strings.Contains(strings.ToLower(c.Title), strings.ToLower(q)) {
+			continue
+		}
+		out = append(out, c)
 	}
 	return out, nil
 }
@@ -139,7 +159,7 @@ func (f *fakeConvos) List(_ context.Context, userID, q string) ([]storage.Conver
 func (f *fakeConvos) ListByProject(_ context.Context, projectID, userID string) ([]storage.Conversation, error) {
 	var out []storage.Conversation
 	for _, c := range f.convs {
-		if c.UserID == userID && c.ProjectID != nil && *c.ProjectID == projectID {
+		if c.UserID == userID && c.ArchivedAt == nil && c.ProjectID != nil && *c.ProjectID == projectID {
 			out = append(out, c)
 		}
 	}
@@ -151,7 +171,7 @@ func (f *fakeConvos) ListByProject(_ context.Context, projectID, userID string) 
 func (f *fakeConvos) ListByBot(_ context.Context, botID, userID string) ([]storage.Conversation, error) {
 	var out []storage.Conversation
 	for _, c := range f.convs {
-		if c.UserID == userID && c.BotID != nil && *c.BotID == botID {
+		if c.UserID == userID && c.ArchivedAt == nil && c.BotID != nil && *c.BotID == botID {
 			out = append(out, c)
 		}
 	}
@@ -162,7 +182,7 @@ func (f *fakeConvos) LatestForBot(_ context.Context, botID, userID string) (stor
 	var best storage.Conversation
 	found := false
 	for _, c := range f.convs {
-		if c.UserID != userID || c.BotID == nil || *c.BotID != botID {
+		if c.UserID != userID || c.ArchivedAt != nil || c.BotID == nil || *c.BotID != botID {
 			continue
 		}
 		if !found || c.ID > best.ID {
@@ -193,9 +213,9 @@ func (f *fakeConvos) mustCreate(userID, title string) storage.Conversation {
 	return conv
 }
 
-func (f *fakeConvos) SetSettings(_ context.Context, id, _ string, patch storage.ConversationPatch) error {
+func (f *fakeConvos) SetSettings(_ context.Context, id, userID string, patch storage.ConversationPatch) error {
 	conv, ok := f.convs[id]
-	if !ok {
+	if !ok || conv.UserID != userID {
 		return storage.ErrNotFound
 	}
 	if patch.Model != nil {
@@ -234,9 +254,57 @@ func (f *fakeConvos) ByID(_ context.Context, id, userID string) (storage.Convers
 	return conv, nil
 }
 
-func (f *fakeConvos) SetTitle(_ context.Context, id, _, title string) error {
-	conv := f.convs[id]
+func (f *fakeConvos) SetHeuristicTitle(_ context.Context, id, userID, title string) error {
+	conv, ok := f.convs[id]
+	if !ok || conv.UserID != userID {
+		return storage.ErrNotFound
+	}
+	if conv.TitleSource != "" && conv.TitleSource != "heuristic" {
+		return nil
+	}
 	conv.Title = title
+	conv.TitleSource = "heuristic"
+	f.convs[id] = conv
+	return nil
+}
+
+func (f *fakeConvos) RenameTitle(_ context.Context, id, userID, title string) error {
+	conv, ok := f.convs[id]
+	if !ok || conv.UserID != userID {
+		return storage.ErrNotFound
+	}
+	conv.Title = title
+	conv.TitleSource = "manual"
+	f.convs[id] = conv
+	return nil
+}
+
+func (f *fakeConvos) SetPinned(_ context.Context, id, userID string, pinned bool) error {
+	conv, ok := f.convs[id]
+	if !ok || conv.UserID != userID {
+		return storage.ErrNotFound
+	}
+	if pinned {
+		now := time.Now()
+		conv.PinnedAt = &now
+	} else {
+		conv.PinnedAt = nil
+	}
+	f.convs[id] = conv
+	return nil
+}
+
+func (f *fakeConvos) SetArchived(_ context.Context, id, userID string, archived bool) error {
+	conv, ok := f.convs[id]
+	if !ok || conv.UserID != userID {
+		return storage.ErrNotFound
+	}
+	if archived {
+		now := time.Now()
+		conv.ArchivedAt = &now
+	} else {
+		conv.ArchivedAt = nil
+	}
 	f.convs[id] = conv
 	return nil
 }

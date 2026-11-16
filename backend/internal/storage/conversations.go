@@ -28,8 +28,15 @@ type Conversation struct {
 	Temperature  *float64
 	SystemPrompt string // "" = built-in prompt
 	RagEnabled   bool   // per-conversation document search (default true)
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
+	// PinnedAt/ArchivedAt are the organization timestamps; nil means the
+	// conversation is neither pinned nor archived. TitleSource records who
+	// named the conversation: "heuristic" (first message) or "manual" (user,
+	// bot, or fork). Only heuristic titles may be rewritten automatically.
+	PinnedAt    *time.Time
+	ArchivedAt  *time.Time
+	TitleSource string
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 // ConversationPatch carries optional conversation changes. Pointer fields
@@ -44,26 +51,30 @@ type ConversationPatch struct {
 	ClearTemperature bool
 	ProjectID        *string
 	BotID            *string
+	// TitleSource overrides the schema's heuristic default at creation
+	// ("manual" for bot chats and forks); empty keeps the default.
+	TitleSource *string
 }
 
 type Conversations struct{ pool *pgxpool.Pool }
 
 func NewConversations(pool *pgxpool.Pool) *Conversations { return &Conversations{pool: pool} }
 
-const conversationColumns = `id, user_id::text, title, model, temperature, system_prompt, rag_enabled, created_at, updated_at, project_id::text, bot_id::text, active_leaf_id::text`
+const conversationColumns = `id, user_id::text, title, model, temperature, system_prompt, rag_enabled, created_at, updated_at, project_id::text, bot_id::text, active_leaf_id::text, pinned_at, archived_at, title_source`
 
 func scanConversation(row pgx.Row) (Conversation, error) {
 	var conv Conversation
 	err := row.Scan(&conv.ID, &conv.UserID, &conv.Title, &conv.Model, &conv.Temperature,
-		&conv.SystemPrompt, &conv.RagEnabled, &conv.CreatedAt, &conv.UpdatedAt, &conv.ProjectID, &conv.BotID, &conv.ActiveLeafID)
+		&conv.SystemPrompt, &conv.RagEnabled, &conv.CreatedAt, &conv.UpdatedAt, &conv.ProjectID, &conv.BotID, &conv.ActiveLeafID,
+		&conv.PinnedAt, &conv.ArchivedAt, &conv.TitleSource)
 	return conv, err
 }
 
 func (c *Conversations) Create(ctx context.Context, userID, title string, patch ConversationPatch) (Conversation, error) {
 	row := c.pool.QueryRow(ctx,
-		`INSERT INTO conversations (user_id, title, model, temperature, system_prompt, rag_enabled, project_id, bot_id, active_leaf_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULL)
+		`INSERT INTO conversations (user_id, title, model, temperature, system_prompt, rag_enabled, project_id, bot_id, active_leaf_id, title_source) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULL, COALESCE(NULLIF($9, ''), 'heuristic'))
 		 RETURNING `+conversationColumns,
-		userID, SanitizeText(title), derefString(patch.Model), patch.Temperature, SanitizeText(derefString(patch.SystemPrompt)), derefBool(patch.RagEnabled, true), patch.ProjectID, patch.BotID)
+		userID, SanitizeText(title), derefString(patch.Model), patch.Temperature, SanitizeText(derefString(patch.SystemPrompt)), derefBool(patch.RagEnabled, true), patch.ProjectID, patch.BotID, derefString(patch.TitleSource))
 	conv, err := scanConversation(row)
 	if err != nil {
 		return Conversation{}, fmt.Errorf("create conversation: %w", err)
@@ -71,11 +82,16 @@ func (c *Conversations) Create(ctx context.Context, userID, title string, patch 
 	return conv, nil
 }
 
-func (c *Conversations) List(ctx context.Context, userID, q string) ([]Conversation, error) {
+// List returns one view of the user's conversations: by default non-archived
+// chats, pinned=true only pinned non-archived chats, archived=true only
+// archived chats. q filters titles in every view.
+func (c *Conversations) List(ctx context.Context, userID, q string, pinned, archived bool) ([]Conversation, error) {
 	rows, err := c.pool.Query(ctx,
 		`SELECT `+conversationColumns+` FROM conversations
 		 WHERE user_id = $1 AND ($2 = '' OR title ILIKE '%' || $2 || '%' ESCAPE '\')
-		 ORDER BY updated_at DESC`, userID, escapeLike(q))
+		   AND (($4 AND archived_at IS NOT NULL)
+		        OR (NOT $4 AND archived_at IS NULL AND (NOT $3 OR pinned_at IS NOT NULL)))
+		 ORDER BY updated_at DESC`, userID, escapeLike(q), pinned, archived)
 	if err != nil {
 		return nil, fmt.Errorf("list conversations: %w", err)
 	}
@@ -94,7 +110,7 @@ func (c *Conversations) List(ctx context.Context, userID, q string) ([]Conversat
 func (c *Conversations) ListByProject(ctx context.Context, projectID, userID string) ([]Conversation, error) {
 	rows, err := c.pool.Query(ctx,
 		`SELECT `+conversationColumns+` FROM conversations
-		 WHERE user_id = $1 AND project_id = $2
+		 WHERE user_id = $1 AND project_id = $2 AND archived_at IS NULL
 		 ORDER BY updated_at DESC`, userID, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("list project conversations: %w", err)
@@ -115,7 +131,7 @@ func (c *Conversations) ListByProject(ctx context.Context, projectID, userID str
 func (c *Conversations) ListByBot(ctx context.Context, botID, userID string) ([]Conversation, error) {
 	rows, err := c.pool.Query(ctx,
 		`SELECT `+conversationColumns+` FROM conversations
-		 WHERE user_id = $1 AND bot_id = $2
+		 WHERE user_id = $1 AND bot_id = $2 AND archived_at IS NULL
 		 ORDER BY updated_at DESC`, userID, botID)
 	if err != nil {
 		return nil, fmt.Errorf("list bot conversations: %w", err)
@@ -138,7 +154,7 @@ func (c *Conversations) ListByBot(ctx context.Context, botID, userID string) ([]
 func (c *Conversations) LatestForBot(ctx context.Context, botID, userID string) (Conversation, error) {
 	conv, err := scanConversation(c.pool.QueryRow(ctx,
 		`SELECT `+conversationColumns+` FROM conversations
-		 WHERE user_id = $1 AND bot_id = $2
+		 WHERE user_id = $1 AND bot_id = $2 AND archived_at IS NULL
 		 ORDER BY updated_at DESC LIMIT 1`, userID, botID))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -156,7 +172,7 @@ func (c *Conversations) LatestForBot(ctx context.Context, botID, userID string) 
 func (c *Conversations) LatestIDsByUser(ctx context.Context, userID string) (map[string]string, error) {
 	rows, err := c.pool.Query(ctx,
 		`SELECT DISTINCT ON (bot_id) bot_id::text, id::text FROM conversations
-		 WHERE user_id = $1 AND bot_id IS NOT NULL
+		 WHERE user_id = $1 AND bot_id IS NOT NULL AND archived_at IS NULL
 		 ORDER BY bot_id, updated_at DESC`, userID)
 	if err != nil {
 		return nil, fmt.Errorf("latest conversation ids by bot: %w", err)
@@ -185,10 +201,57 @@ func (c *Conversations) ByID(ctx context.Context, id, userID string) (Conversati
 	return conv, nil
 }
 
-func (c *Conversations) SetTitle(ctx context.Context, id, userID, title string) error {
+// RenameTitle applies a user rename and marks the title manual, so the
+// first-message heuristic can never overwrite it later.
+func (c *Conversations) RenameTitle(ctx context.Context, id, userID, title string) error {
+	tag, err := c.pool.Exec(ctx,
+		`UPDATE conversations SET title = $3, title_source = 'manual' WHERE id = $1 AND user_id = $2`, id, userID, SanitizeText(title))
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// SetHeuristicTitle applies the first-message title only while the title is
+// still heuristic; a manual rename or a non-heuristic source wins and the
+// update becomes a no-op.
+func (c *Conversations) SetHeuristicTitle(ctx context.Context, id, userID, title string) error {
 	_, err := c.pool.Exec(ctx,
-		`UPDATE conversations SET title = $3 WHERE id = $1 AND user_id = $2`, id, userID, SanitizeText(title))
+		`UPDATE conversations SET title = $3, title_source = 'heuristic'
+		 WHERE id = $1 AND user_id = $2 AND title_source = 'heuristic'`, id, userID, SanitizeText(title))
 	return err
+}
+
+// SetPinned stamps or clears pinned_at; RowsAffected==0 means the
+// conversation is unknown or belongs to another user.
+func (c *Conversations) SetPinned(ctx context.Context, id, userID string, pinned bool) error {
+	tag, err := c.pool.Exec(ctx,
+		`UPDATE conversations SET pinned_at = CASE WHEN $3 THEN COALESCE(pinned_at, now()) ELSE NULL END
+		 WHERE id = $1 AND user_id = $2`, id, userID, pinned)
+	if err != nil {
+		return fmt.Errorf("set pinned: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// SetArchived stamps or clears archived_at, mirroring SetPinned.
+func (c *Conversations) SetArchived(ctx context.Context, id, userID string, archived bool) error {
+	tag, err := c.pool.Exec(ctx,
+		`UPDATE conversations SET archived_at = CASE WHEN $3 THEN COALESCE(archived_at, now()) ELSE NULL END
+		 WHERE id = $1 AND user_id = $2`, id, userID, archived)
+	if err != nil {
+		return fmt.Errorf("set archived: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // SetActiveLeaf points the conversation at the visible message-tree leaf.
@@ -233,11 +296,19 @@ func (c *Conversations) SetSettings(ctx context.Context, id, userID string, patc
 		sets = append(sets, fmt.Sprintf("rag_enabled = $%d", len(args)))
 	}
 	if len(sets) == 0 {
-		return nil
+		// No-op update still reports unknown/foreign rows instead of the
+		// old silent 204.
+		sets = append(sets, "updated_at = updated_at")
 	}
-	_, err := c.pool.Exec(ctx,
+	tag, err := c.pool.Exec(ctx,
 		`UPDATE conversations SET `+strings.Join(sets, ", ")+` WHERE id = $1 AND user_id = $2`, args...)
-	return err
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 func (c *Conversations) Touch(ctx context.Context, id string) error {

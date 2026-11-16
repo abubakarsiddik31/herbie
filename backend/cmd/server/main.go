@@ -170,6 +170,7 @@ func main() {
 		Tokens:      tokens,
 		OAuth:       oauthProviders(cfg),
 		Convos:      storage.NewConversations(pool),
+		Prompts:     storage.NewSavedPrompts(pool),
 		Msgs:        storage.NewMessages(pool),
 		Shares:      storage.NewShares(pool),
 		Profiles:    users,

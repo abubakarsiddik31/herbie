@@ -37,6 +37,7 @@ type ServerDeps struct {
 	Users       UserAdminStore
 	Memories    MemoryStore
 	Convos      ConvoStore
+	Prompts     PromptStore
 	Msgs        MsgStore
 	Usage       UsageStore
 	Tools       ToolStore
@@ -69,6 +70,16 @@ type ServerDeps struct {
 	Vectors    rag.VectorStore
 	Objects    storage.ObjectStore
 }
+
+// PromptStore bridges the saved-prompt library to storage.
+type PromptStore interface {
+	Create(ctx context.Context, userID, title, body string, limit int) (storage.SavedPrompt, error)
+	List(ctx context.Context, userID string) ([]storage.SavedPrompt, error)
+	Update(ctx context.Context, id, userID string, title, body *string) (storage.SavedPrompt, error)
+	Delete(ctx context.Context, id, userID string) error
+}
+
+var _ PromptStore = (*storage.SavedPrompts)(nil)
 
 type MCPServerStore interface {
 	Create(ctx context.Context, item storage.MCPServer) (storage.MCPServer, error)
@@ -157,6 +168,8 @@ func newServer(deps ServerDeps) (*Server, http.Handler) {
 	authed.HandleFunc("GET /api/conversations/{id}", s.handleGetConversation)
 	authed.HandleFunc("PATCH /api/conversations/{id}", s.handlePatchConversation)
 	authed.HandleFunc("DELETE /api/conversations/{id}", s.handleDeleteConversation)
+	authed.HandleFunc("PUT /api/conversations/{id}/pin", s.handlePinConversation)
+	authed.HandleFunc("PUT /api/conversations/{id}/archive", s.handleArchiveConversation)
 	authed.HandleFunc("GET /api/conversations/{id}/shares", s.handleShareState)
 	authed.HandleFunc("POST /api/conversations/{id}/shares", s.handleShareConversation)
 	authed.HandleFunc("DELETE /api/conversations/{id}/shares", s.handleUnshareConversation)
@@ -167,6 +180,10 @@ func newServer(deps ServerDeps) (*Server, http.Handler) {
 	authed.HandleFunc("POST /api/conversations/{id}/fork", s.handleForkConversation)
 	authed.HandleFunc("POST /api/conversations/{id}/regenerate", s.handleRegenerate)
 	authed.HandleFunc("POST /api/conversations/{id}/approvals", s.handleApprovals)
+	authed.HandleFunc("GET /api/prompts", s.handleListSavedPrompts)
+	authed.HandleFunc("POST /api/prompts", s.handleCreateSavedPrompt)
+	authed.HandleFunc("PATCH /api/prompts/{id}", s.handlePatchSavedPrompt)
+	authed.HandleFunc("DELETE /api/prompts/{id}", s.handleDeleteSavedPrompt)
 	authed.HandleFunc("GET /api/tools", s.handleListTools)
 	authed.HandleFunc("POST /api/tools", s.handleCreateTool)
 	authed.HandleFunc("PATCH /api/tools/{id}", s.handlePatchTool)
