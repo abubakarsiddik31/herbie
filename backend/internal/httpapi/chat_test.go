@@ -92,7 +92,9 @@ type fakeConvos struct {
 }
 
 func newFakeConvos(msgs *fakeMsgs) *fakeConvos {
-	return &fakeConvos{convs: map[string]storage.Conversation{}, msgs: msgs}
+	f := &fakeConvos{convs: map[string]storage.Conversation{}, msgs: msgs}
+	msgs.convs = f
+	return f
 }
 
 var _ ConvoStore = (*fakeConvos)(nil)
@@ -239,20 +241,48 @@ func (f *fakeConvos) SetTitle(_ context.Context, id, _, title string) error {
 	return nil
 }
 
+func (f *fakeConvos) SetActiveLeaf(_ context.Context, id, userID, leafID string) error {
+	conv, ok := f.convs[id]
+	if !ok || conv.UserID != userID {
+		return storage.ErrNotFound
+	}
+	if leafID == "" {
+		conv.ActiveLeafID = nil
+	} else {
+		leaf := leafID
+		conv.ActiveLeafID = &leaf
+	}
+	f.convs[id] = conv
+	return nil
+}
+
 func (f *fakeConvos) Touch(context.Context, string) error { return nil }
 
 func (f *fakeConvos) CountMessages(_ context.Context, id, userID string) (int, error) {
 	return len(f.msgs.forConv(id, userID)), nil
 }
 
-type fakeMsgs struct{ rows []storage.Message }
+type fakeMsgs struct {
+	rows   []storage.Message
+	nextID int
+	convs  *fakeConvos
+}
 
 func newFakeMsgs() *fakeMsgs { return &fakeMsgs{} }
 
-func (f *fakeMsgs) Add(_ context.Context, msg storage.Message) error {
-	msg.ID = fmt.Sprintf("m-%d", len(f.rows)+1)
+func (f *fakeMsgs) Add(_ context.Context, msg storage.Message) (string, error) {
+	if f.nextID == 0 {
+		f.nextID = len(f.rows)
+	}
+	f.nextID++
+	if msg.ID == "" {
+		msg.ID = fmt.Sprintf("m-%d", f.nextID)
+	}
+	if msg.CreatedAt.IsZero() {
+		msg.CreatedAt = time.Now()
+	}
 	f.rows = append(f.rows, msg)
-	return nil
+	return msg.ID, nil
 }
 
 func (f *fakeMsgs) ForConversation(_ context.Context, convID, userID string) ([]storage.Message, error) {
@@ -278,61 +308,118 @@ func (f *fakeMsgs) ByID(_ context.Context, msgID, userID string) (storage.Messag
 	return storage.Message{}, storage.ErrNotFound
 }
 
-func (f *fakeMsgs) UpdateContent(_ context.Context, msgID, userID, content string, data []byte) error {
-	for i := range f.rows {
-		if f.rows[i].ID == msgID && f.rows[i].UserID == userID {
-			f.rows[i].Content = content
-			f.rows[i].Data = data
-			return nil
-		}
+// PathToLeaf mirrors the upward recursive walk: root→leaf order, cycle-safe.
+func (f *fakeMsgs) PathToLeaf(_ context.Context, convID, userID, leafID string) ([]storage.Message, error) {
+	if leafID == "" {
+		return nil, nil
 	}
-	return storage.ErrNotFound
-}
-
-// DeleteAfter mirrors the SQL (created_at, id) tuple comparison the real
-// store performs for the truncate-and-resend endpoints.
-func (f *fakeMsgs) DeleteAfter(_ context.Context, convID, userID string, after time.Time, afterID string) (int64, error) {
-	var kept []storage.Message
-	var removed int64
+	byID := map[string]storage.Message{}
 	for _, m := range f.rows {
-		if m.ConversationID == convID && m.UserID == userID &&
-			(m.CreatedAt.After(after) || (m.CreatedAt.Equal(after) && m.ID > afterID)) {
-			removed++
-			continue
+		if m.ConversationID == convID && m.UserID == userID {
+			byID[m.ID] = m
 		}
-		kept = append(kept, m)
 	}
-	f.rows = kept
-	return removed, nil
+	var reversed []storage.Message
+	seen := map[string]bool{}
+	for id := leafID; id != "" && !seen[id]; {
+		m, ok := byID[id]
+		if !ok {
+			break
+		}
+		seen[id] = true
+		reversed = append(reversed, m)
+		id = m.ParentID
+	}
+	out := make([]storage.Message, len(reversed))
+	for i := range reversed {
+		out[len(reversed)-1-i] = reversed[i]
+	}
+	return out, nil
 }
 
-func (f *fakeMsgs) count() int { return len(f.rows) }
+func (f *fakeMsgs) LatestRowID(_ context.Context, convID, userID string) (string, error) {
+	rows := f.forConv(convID, userID)
+	return latestRowID(rows), nil
+}
 
-// DeleteMessage mirrors DeleteAfter's tuple comparison, anchored at the
-// target row: the row itself and everything after it goes.
-func (f *fakeMsgs) DeleteMessage(_ context.Context, convID, msgID, userID string) error {
-	var anchor *storage.Message
+// DeleteBranch removes a subtree and only moves the leaf when it lived in
+// that subtree, matching the storage transaction.
+func (f *fakeMsgs) DeleteBranch(_ context.Context, convID, msgID, userID string) error {
+	var target *storage.Message
 	for i := range f.rows {
 		m := &f.rows[i]
 		if m.ID == msgID && m.ConversationID == convID && m.UserID == userID {
-			anchor = m
+			target = m
 			break
 		}
 	}
-	if anchor == nil {
+	if target == nil {
 		return storage.ErrNotFound
+	}
+	subtree := map[string]bool{target.ID: true}
+	changed := true
+	for changed {
+		changed = false
+		for _, m := range f.rows {
+			if m.ConversationID != convID || m.UserID != userID || subtree[m.ID] {
+				continue
+			}
+			if m.ParentID != "" && subtree[m.ParentID] {
+				subtree[m.ID] = true
+				changed = true
+			}
+		}
 	}
 	var kept []storage.Message
 	for _, m := range f.rows {
-		if m.ConversationID == convID && m.UserID == userID &&
-			(m.CreatedAt.After(anchor.CreatedAt) || (m.CreatedAt.Equal(anchor.CreatedAt) && m.ID >= anchor.ID)) {
+		if m.ConversationID == convID && m.UserID == userID && subtree[m.ID] {
 			continue
 		}
 		kept = append(kept, m)
 	}
 	f.rows = kept
+	if f.convs != nil {
+		if conv, ok := f.convs.convs[convID]; ok && conv.ActiveLeafID != nil && subtree[*conv.ActiveLeafID] {
+			conv.ActiveLeafID = nil
+			if target.ParentID != "" {
+				parent := target.ParentID
+				conv.ActiveLeafID = &parent
+			}
+			f.convs.convs[convID] = conv
+		}
+	}
 	return nil
 }
+
+// CopyPath appends fresh-ID copies into another conversation, remapping the
+// parent chain and preserving display fields.
+func (f *fakeMsgs) CopyPath(_ context.Context, srcConvID, userID, newConvID string, path []storage.Message) (string, error) {
+	if len(path) == 0 {
+		return "", nil
+	}
+	remap := map[string]string{}
+	tail := ""
+	for _, msg := range path {
+		if msg.ConversationID != srcConvID || msg.UserID != userID {
+			return "", storage.ErrNotFound
+		}
+		f.nextID++
+		id := fmt.Sprintf("m-%d", f.nextID)
+		copy := msg
+		copy.ID = id
+		copy.ConversationID = newConvID
+		copy.ParentID = ""
+		if msg.ParentID != "" {
+			copy.ParentID = remap[msg.ParentID]
+		}
+		f.rows = append(f.rows, copy)
+		remap[msg.ID] = id
+		tail = id
+	}
+	return tail, nil
+}
+
+func (f *fakeMsgs) count() int { return len(f.rows) }
 
 type fakeUsage struct {
 	events   []storage.UsageEvent

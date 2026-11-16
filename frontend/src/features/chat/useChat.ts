@@ -15,6 +15,7 @@ export interface ContextStatus {
 
 interface DonePayload {
   messageId: string;
+  promptMessageId?: string;
   inputTokens: number;
   outputTokens: number;
   requests: number;
@@ -129,6 +130,17 @@ export function useChat(onDone?: () => void) {
                 : msg.usage,
             }
           : msg));
+        // Remap the optimistic prompt id to its persisted row before the
+        // detail refetch lands, so an immediate edit/delete/activate targets
+        // the row the server actually stored (edited messages get a new
+        // sibling id; regenerate reports the existing user row unchanged).
+        if (done.promptMessageId) {
+          setMessages((m) => {
+            const userIdx = m.map((msg) => msg.role).lastIndexOf("user");
+            if (userIdx < 0 || m[userIdx].id === done.promptMessageId) return m;
+            return m.map((msg, i) => i === userIdx ? { ...msg, id: done.promptMessageId! } : msg);
+          });
+        }
       } else if (frame.event === "error") {
         hadError = true;
         setMessages((m) => m.map((msg) => msg.id === assistantId
@@ -184,7 +196,12 @@ export function useChat(onDone?: () => void) {
           setStatus("idle");
         }
       } else {
-        if (abortRef.current === controller) setStatus("error");
+        if (abortRef.current === controller) {
+          setMessages((m) => m.map((msg) => msg.id === assistantId
+            ? { ...msg, streaming: false, error: (err as Error).message }
+            : msg));
+          setStatus("error");
+        }
         throw err;
       }
     }

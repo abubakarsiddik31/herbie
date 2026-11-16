@@ -19,8 +19,11 @@ type Conversation struct {
 	// nil for plain and project conversations. Freed (NULL) when the bot is
 	// deleted, per the schema's ON DELETE SET NULL.
 	BotID *string
-	Title string
-	Model string // "" = server default
+	// ActiveLeafID selects the visible path through the message tree; nil
+	// until the first message is persisted.
+	ActiveLeafID *string
+	Title        string
+	Model        string // "" = server default
 	// Temperature nil = provider default.
 	Temperature  *float64
 	SystemPrompt string // "" = built-in prompt
@@ -47,18 +50,18 @@ type Conversations struct{ pool *pgxpool.Pool }
 
 func NewConversations(pool *pgxpool.Pool) *Conversations { return &Conversations{pool: pool} }
 
-const conversationColumns = `id, user_id::text, title, model, temperature, system_prompt, rag_enabled, created_at, updated_at, project_id::text, bot_id::text`
+const conversationColumns = `id, user_id::text, title, model, temperature, system_prompt, rag_enabled, created_at, updated_at, project_id::text, bot_id::text, active_leaf_id::text`
 
 func scanConversation(row pgx.Row) (Conversation, error) {
 	var conv Conversation
 	err := row.Scan(&conv.ID, &conv.UserID, &conv.Title, &conv.Model, &conv.Temperature,
-		&conv.SystemPrompt, &conv.RagEnabled, &conv.CreatedAt, &conv.UpdatedAt, &conv.ProjectID, &conv.BotID)
+		&conv.SystemPrompt, &conv.RagEnabled, &conv.CreatedAt, &conv.UpdatedAt, &conv.ProjectID, &conv.BotID, &conv.ActiveLeafID)
 	return conv, err
 }
 
 func (c *Conversations) Create(ctx context.Context, userID, title string, patch ConversationPatch) (Conversation, error) {
 	row := c.pool.QueryRow(ctx,
-		`INSERT INTO conversations (user_id, title, model, temperature, system_prompt, rag_enabled, project_id, bot_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		`INSERT INTO conversations (user_id, title, model, temperature, system_prompt, rag_enabled, project_id, bot_id, active_leaf_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULL)
 		 RETURNING `+conversationColumns,
 		userID, SanitizeText(title), derefString(patch.Model), patch.Temperature, SanitizeText(derefString(patch.SystemPrompt)), derefBool(patch.RagEnabled, true), patch.ProjectID, patch.BotID)
 	conv, err := scanConversation(row)
@@ -186,6 +189,24 @@ func (c *Conversations) SetTitle(ctx context.Context, id, userID, title string) 
 	_, err := c.pool.Exec(ctx,
 		`UPDATE conversations SET title = $3 WHERE id = $1 AND user_id = $2`, id, userID, SanitizeText(title))
 	return err
+}
+
+// SetActiveLeaf points the conversation at the visible message-tree leaf.
+// An empty leafID clears the pointer (the conversation has no messages).
+func (c *Conversations) SetActiveLeaf(ctx context.Context, id, userID, leafID string) error {
+	var leaf any
+	if leafID != "" {
+		leaf = leafID
+	}
+	tag, err := c.pool.Exec(ctx,
+		`UPDATE conversations SET active_leaf_id = $3 WHERE id = $1 AND user_id = $2`, id, userID, leaf)
+	if err != nil {
+		return fmt.Errorf("set active leaf: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // SetSettings applies the non-nil fields of patch to one conversation.

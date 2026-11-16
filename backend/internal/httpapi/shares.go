@@ -84,8 +84,17 @@ func (s *Server) handleGetShared(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal", "could not load messages")
 		return
 	}
+	// Public reads never mutate: recover a NULL leaf in memory rather than
+	// persisting it (the owner's next read does that).
+	leaf := ""
+	if conv.ActiveLeafID != nil {
+		leaf = *conv.ActiveLeafID
+	}
+	if leaf == "" {
+		leaf = latestRowID(msgs)
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"title":    conv.Title,
-		"messages": transcriptMessages(msgs, false),
+		"messages": transcriptMessages(msgs, leaf, false),
 	})
 }

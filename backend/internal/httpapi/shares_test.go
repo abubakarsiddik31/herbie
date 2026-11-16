@@ -108,8 +108,8 @@ func authedReq(method, path, token string) *http.Request {
 func TestShareUnsharePublicLoop(t *testing.T) {
 	h, token, convs, msgs := newShareTestServer(t)
 	conv := convs.mustCreate("u-1", "Shared thread")
-	_ = msgs.Add(context.Background(), storage.Message{ConversationID: conv.ID, UserID: "u-1", Role: "user", Content: "hi"})
-	_ = msgs.Add(context.Background(), storage.Message{ConversationID: conv.ID, UserID: "u-1", Role: "assistant", Content: "hello", InputTokens: 3, OutputTokens: 5, CostMicros: 100, Model: "m"})
+	_, _ = msgs.Add(context.Background(), storage.Message{ConversationID: conv.ID, UserID: "u-1", Role: "user", Content: "hi"})
+	_, _ = msgs.Add(context.Background(), storage.Message{ConversationID: conv.ID, UserID: "u-1", Role: "assistant", Content: "hello", InputTokens: 3, OutputTokens: 5, CostMicros: 100, Model: "m"})
 
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, authedReq(http.MethodPost, "/api/conversations/"+conv.ID+"/shares", token))

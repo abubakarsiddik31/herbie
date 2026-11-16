@@ -4,6 +4,7 @@ export interface SharedThread { title: string; messages: ChatMessage[] }
 export interface Conversation {
   id: string; title: string; createdAt: string; updatedAt: string;
   model: string; temperature: number | null; systemPrompt: string; ragEnabled: boolean;
+  botId?: string | null; activeLeafId?: string | null;
 }
 export interface ModelInfo { id: string; label: string; provider: string }
 export interface ModelsResponse { default: string; models: ModelInfo[] }
@@ -16,6 +17,7 @@ export interface ChatMessage {
   images?: { mediaType: string; dataUrl: string }[];
   usage?: MessageUsage;
   sources?: Source[];
+  branch?: { count: number; index: number; ids: string[] };
 }
 
 export interface Source {

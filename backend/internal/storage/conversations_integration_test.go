@@ -77,7 +77,7 @@ func TestNullByteSanitizationIntegration(t *testing.T) {
 		Data:           []byte(`{"role":"user","content":"Hello\u0000World from PDF extraction!"}`),
 		Model:          "test\x00model",
 	}
-	if err := msgs.Add(ctx, msg); err != nil {
+	if _, err := msgs.Add(ctx, msg); err != nil {
 		t.Fatalf("msgs.Add with null bytes failed: %v", err)
 	}
 

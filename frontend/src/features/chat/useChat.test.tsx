@@ -70,6 +70,24 @@ describe("useChat send", () => {
     expect(result.current.trace).toContain("earlier history summarized");
   });
 
+  it("settles the assistant placeholder when a run is already active", async () => {
+    server.use(
+      http.post("*/api/conversations/c1/messages", () =>
+        HttpResponse.json(
+          { error: { code: "run_active", message: "A run is in progress" } },
+          { status: 409 },
+        ),
+      ),
+    );
+    const { result } = renderHook(() => useChat());
+    await act(async () => {
+      await expect(result.current.send("hi", "c1")).rejects.toThrow("A run is in progress");
+    });
+    const assistant = result.current.messages.find((m) => m.role === "assistant");
+    expect(assistant).toMatchObject({ streaming: false, error: "A run is in progress" });
+    expect(result.current.status).toBe("error");
+  });
+
   it("tracks context status and compaction updates from stream frames", async () => {
     server.use(
       http.post("*/api/conversations/c1/messages", () =>
@@ -94,5 +112,27 @@ describe("useChat send", () => {
       keepRecent: 10,
       compacted: true,
     });
+  });
+});
+
+describe("useChat prompt id remap", () => {
+  it("replaces the optimistic user id with the persisted prompt row id", async () => {
+    server.use(
+      http.post("*/api/conversations/c1/messages", () =>
+        new HttpResponse(
+          sseBody([
+            'event: delta\ndata: {"text":"pong"}\n\n',
+            'event: done\ndata: {"messageId":"m1","promptMessageId":"srv-user","inputTokens":1,"outputTokens":2,"requests":1,"costUsd":0.00001}\n\n',
+          ]),
+          { headers: { "Content-Type": "text/event-stream" } },
+        ),
+      ),
+    );
+    const { result } = renderHook(() => useChat());
+    await act(async () => {
+      await result.current.send("hi", "c1");
+    });
+    const user = result.current.messages.find((m) => m.role === "user");
+    expect(user?.id).toBe("srv-user");
   });
 });

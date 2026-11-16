@@ -177,6 +177,10 @@ func (f *fakeBotRuns) HasActiveForConversation(_ context.Context, userID, conver
 type fakeAgentStep struct {
 	outcome chat.Outcome
 	err     error
+	// echoPartial mirrors golem's partial evidence on a failed resume: the
+	// RunError carries the exact history handed to RunDeferred (stored rows,
+	// rewritten call IDs included), which the persistence dedupe must skip.
+	echoPartial bool
 }
 
 // fakeBotAgent scripts the runner's model calls in order and records what
@@ -211,11 +215,17 @@ func (f *fakeBotAgent) Run(_ context.Context, _ chat.Deps, history []model.Messa
 	return f.next()
 }
 
-func (f *fakeBotAgent) RunDeferred(_ context.Context, _ chat.Deps, _ []model.Message, res golem.DeferredResults, _ chat.Sink, _ []tool.Tool[chat.Deps], _ chat.RunSpec) (chat.Outcome, error) {
+func (f *fakeBotAgent) RunDeferred(_ context.Context, _ chat.Deps, history []model.Message, res golem.DeferredResults, _ chat.Sink, _ []tool.Tool[chat.Deps], _ chat.RunSpec) (chat.Outcome, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.deferredCalls++
 	f.lastResolutions = res.Approvals
+	f.lastHistory = history
+	if len(f.steps) > 0 && f.steps[0].echoPartial {
+		f.steps = f.steps[1:]
+		return chat.Outcome{}, &golem.RunError{Stage: golem.StageModel, Err: errors.New("boom"),
+			Partial: &golem.PartialResult{Messages: history}}
+	}
 	return f.next()
 }
 
@@ -366,11 +376,14 @@ func TestRunnerParksAndResumesOnApproval(t *testing.T) {
 				}},
 			},
 		},
-		{ // the resumed call completes
+		{ // the resumed call completes; golem echoes the paused history first
 			outcome: chat.Outcome{
 				Output: "It is 21C",
 				Messages: []model.Message{
 					{Role: model.RoleUser, Content: "check the weather"},
+					{Role: model.RoleAssistant, ToolCalls: []model.ToolCall{
+						{ID: "call-1", Name: "get_weather", Args: json.RawMessage(`{"city":"x"}`)},
+					}},
 					{Role: model.RoleAssistant, Content: "It is 21C"},
 				},
 				Usage:    model.Usage{InputTokens: 8, OutputTokens: 4},
@@ -796,7 +809,7 @@ func TestRunnerCompactsHistory(t *testing.T) {
 			role = model.RoleAssistant
 			content = fmt.Sprintf("older answer %d", i)
 		}
-		if err := msgs.Add(context.Background(), storage.Message{
+		if _, err := msgs.Add(context.Background(), storage.Message{
 			ConversationID: conv.ID, UserID: "u-1", Role: string(role),
 			Content: content, Data: mustJSON(model.Message{Role: role, Content: content}),
 		}); err != nil {

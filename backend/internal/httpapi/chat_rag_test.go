@@ -350,18 +350,21 @@ func TestRunTurnCompactsHotHistory(t *testing.T) {
 
 	// Seed 12 long turns so the decoded history blows past the tiny
 	// threshold below.
+	prev := ""
 	for i := 0; i < 12; i++ {
 		role := model.RoleUser
 		if i%2 == 1 {
 			role = model.RoleAssistant
 		}
 		content := strings.Repeat(fmt.Sprintf("message %d. ", i), 200)
-		if err := msgs.Add(context.Background(), storage.Message{
-			ConversationID: conv.ID, UserID: "u-1", Role: string(role),
+		id, err := msgs.Add(context.Background(), storage.Message{
+			ConversationID: conv.ID, UserID: "u-1", Role: string(role), ParentID: prev,
 			Content: content, Data: mustJSON(model.Message{Role: role, Content: content}),
-		}); err != nil {
+		})
+		if err != nil {
 			t.Fatal(err)
 		}
+		prev = id
 	}
 
 	summarizer := testmodel.New().Respond(model.Response{

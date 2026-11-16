@@ -42,6 +42,7 @@ type ConvoStore interface {
 	LatestIDsByUser(ctx context.Context, userID string) (map[string]string, error)
 	ByID(ctx context.Context, id, userID string) (storage.Conversation, error)
 	SetTitle(ctx context.Context, id, userID, title string) error
+	SetActiveLeaf(ctx context.Context, id, userID, leafID string) error
 	SetSettings(ctx context.Context, id, userID string, patch storage.ConversationPatch) error
 	Touch(ctx context.Context, id string) error
 	Delete(ctx context.Context, id, userID string) error
@@ -51,12 +52,13 @@ type ConvoStore interface {
 var _ ConvoStore = (*storage.Conversations)(nil)
 
 type MsgStore interface {
-	Add(ctx context.Context, msg storage.Message) error
+	Add(ctx context.Context, msg storage.Message) (string, error)
 	ForConversation(ctx context.Context, convID, userID string) ([]storage.Message, error)
 	ByID(ctx context.Context, msgID, userID string) (storage.Message, error)
-	UpdateContent(ctx context.Context, msgID, userID, content string, data []byte) error
-	DeleteAfter(ctx context.Context, convID, userID string, after time.Time, afterID string) (int64, error)
-	DeleteMessage(ctx context.Context, convID, msgID, userID string) error
+	PathToLeaf(ctx context.Context, convID, userID, leafID string) ([]storage.Message, error)
+	LatestRowID(ctx context.Context, convID, userID string) (string, error)
+	DeleteBranch(ctx context.Context, convID, msgID, userID string) error
+	CopyPath(ctx context.Context, srcConvID, userID, newConvID string, path []storage.Message) (string, error)
 }
 
 type UsageStore interface {
@@ -101,6 +103,97 @@ var _ ProfileStore = (*storage.Users)(nil)
 
 const maxPromptChars = 1_000_000
 
+// beginRun claims the conversation's run slot. ok is false when another run
+// (streamed send/edit/regenerate/approvals or a background bot cycle) already
+// holds it; the returned release must be called exactly once on success.
+// Single-instance deployment assumption: this in-process registry is the
+// only cross-request guard the server needs.
+func (s *Server) beginRun(convID string) (release func(), ok bool) {
+	if _, loaded := s.runs.LoadOrStore(convID, struct{}{}); loaded {
+		return nil, false
+	}
+	return func() { s.runs.Delete(convID) }, true
+}
+
+// runActive reports whether a run currently owns the conversation.
+func (s *Server) runActive(convID string) bool {
+	_, ok := s.runs.Load(convID)
+	return ok
+}
+
+// blockedByActiveRun writes the conflict response and reports true when the
+// conversation already has an in-flight run.
+func (s *Server) blockedByActiveRun(w http.ResponseWriter, convID string) bool {
+	if s.runActive(convID) {
+		writeError(w, http.StatusConflict, "run_active", "a run is already active on this conversation")
+		return true
+	}
+	return false
+}
+
+// blockedByBotConversation writes the conflict response and reports true when
+// the conversation is bot-scoped: branch mutations belong to the human chat
+// surface, while the runner always appends to the active leaf.
+func blockedByBotConversation(w http.ResponseWriter, conv storage.Conversation) bool {
+	if conv.BotID != nil {
+		writeError(w, http.StatusConflict, "bot_conversation", "branching is not available for bot conversations")
+		return true
+	}
+	return false
+}
+
+// resolveActiveLeaf returns the visible leaf, recovering a NULL pointer from
+// the newest stored row and persisting it. Recovery never invents a second
+// root: a conversation with rows always resumes its latest chain; only a
+// truly empty conversation returns "".
+func (s *Server) resolveActiveLeaf(ctx context.Context, conv storage.Conversation, rows []storage.Message) (string, error) {
+	if conv.ActiveLeafID != nil && *conv.ActiveLeafID != "" {
+		return *conv.ActiveLeafID, nil
+	}
+	if len(rows) == 0 {
+		return "", nil
+	}
+	leaf := latestRowID(rows)
+	if leaf == "" {
+		return "", nil
+	}
+	if err := s.deps.Convos.SetActiveLeaf(ctx, conv.ID, conv.UserID, leaf); err != nil {
+		return "", err
+	}
+	return leaf, nil
+}
+
+// latestRowID mirrors the storage ordering (created_at, id) for an in-memory
+// row set.
+func latestRowID(rows []storage.Message) string {
+	var best storage.Message
+	for _, m := range rows {
+		if best.ID == "" || m.CreatedAt.After(best.CreatedAt) ||
+			(m.CreatedAt.Equal(best.CreatedAt) && m.ID > best.ID) {
+			best = m
+		}
+	}
+	return best.ID
+}
+
+// pathToLeaf loads the root→leaf chain for a run. Empty leaf = empty path.
+func (s *Server) pathToLeaf(ctx context.Context, convID, userID, leafID string) ([]storage.Message, error) {
+	if leafID == "" {
+		return nil, nil
+	}
+	return s.deps.Msgs.PathToLeaf(ctx, convID, userID, leafID)
+}
+
+// rowOnPath reports the index of rowID in path, or -1.
+func rowOnPath(path []storage.Message, rowID string) int {
+	for i, m := range path {
+		if m.ID == rowID {
+			return i
+		}
+	}
+	return -1
+}
+
 func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 	userID, _ := userIDFrom(r.Context())
 	convID := r.PathValue("id")
@@ -142,36 +235,56 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 	if s.blockedByPendingApproval(w, ctx, convID, userID) {
 		return
 	}
+	// Hold the run slot from before the prompt row is written so a
+	// concurrent mutation cannot race the new branch.
+	release, ok := s.beginRun(convID)
+	if !ok {
+		s.blockedByActiveRun(w, convID)
+		return
+	}
+	defer release()
 
 	// Auto-title from the first user message.
 	if n, err := s.deps.Convos.CountMessages(ctx, convID, userID); err == nil && n == 0 {
 		_ = s.deps.Convos.SetTitle(ctx, convID, userID, deriveConversationTitle(req.Content))
 	}
 
-	// Persist the user message first, then build history from prior turns.
-	// Image parts ride in the payload, so history replay resends them.
-	if err := s.deps.Msgs.Add(ctx, storage.Message{
-		ConversationID: convID, UserID: userID, Role: string(model.RoleUser),
-		Content: req.Content,
-		Data:    mustJSON(model.Message{Role: model.RoleUser, Content: req.Content, Parts: parts}),
-	}); err != nil {
-		s.deps.Log.Error("could not store message", "err", err, "conv_id", convID)
-		writeError(w, http.StatusInternalServerError, "internal", "could not store message")
-		return
-	}
-	msgs, err := s.deps.Msgs.ForConversation(ctx, convID, userID)
+	// History is the path to the current leaf; the new prompt becomes its
+	// child and the new active leaf. Image parts ride in the payload, so
+	// history replay resends them.
+	rows, err := s.deps.Msgs.ForConversation(ctx, convID, userID)
 	if err != nil {
 		s.deps.Log.Error("could not load history", "err", err, "conv_id", convID)
 		writeError(w, http.StatusInternalServerError, "internal", "could not load history")
 		return
 	}
-	// Rows already stored before this run must not be re-persisted when the
-	// run's Messages replay them as history.
-	known := make(map[string]bool, len(msgs))
-	for _, row := range msgs {
-		known[string(row.Data)] = true
+	leaf, err := s.resolveActiveLeaf(ctx, conv, rows)
+	if err != nil {
+		s.deps.Log.Error("could not resolve active leaf", "err", err, "conv_id", convID)
+		writeError(w, http.StatusInternalServerError, "internal", "could not load history")
+		return
 	}
-	s.runTurn(ctx, userID, convID, spec, conv.BotID, historyFrom(msgs, len(msgs)-1), req.Content, parts, known, w)
+	path, err := s.pathToLeaf(ctx, convID, userID, leaf)
+	if err != nil {
+		s.deps.Log.Error("could not load path", "err", err, "conv_id", convID)
+		writeError(w, http.StatusInternalServerError, "internal", "could not load history")
+		return
+	}
+	promptID, err := s.deps.Msgs.Add(ctx, storage.Message{
+		ConversationID: convID, UserID: userID, Role: string(model.RoleUser),
+		ParentID: leaf,
+		Content:  req.Content,
+		Data:     mustJSON(model.Message{Role: model.RoleUser, Content: req.Content, Parts: parts}),
+	})
+	if err != nil {
+		s.deps.Log.Error("could not store message", "err", err, "conv_id", convID)
+		writeError(w, http.StatusInternalServerError, "internal", "could not store message")
+		return
+	}
+	if err := s.deps.Convos.SetActiveLeaf(ctx, convID, userID, promptID); err != nil {
+		s.deps.Log.Error("could not set active leaf", "err", err, "conv_id", convID)
+	}
+	s.runTurn(ctx, userID, convID, spec, conv.BotID, historyFrom(path, len(path)), req.Content, parts, knownRows(path), promptID, w)
 }
 
 // blockedByPendingApproval writes the response and reports true when the
@@ -194,22 +307,61 @@ func (s *Server) blockedByPendingApproval(w http.ResponseWriter, ctx context.Con
 }
 
 // knownRows builds the skip set of already-stored message payloads.
+// Payloads are canonicalized because messages.data is jsonb: pgx returns the
+// server's normalized text (sorted keys, spaces), while freshly marshaled
+// messages are compact in struct order. Comparing raw bytes would never match
+// in production.
 func knownRows(msgs []storage.Message) map[string]bool {
 	known := make(map[string]bool, len(msgs))
 	for _, row := range msgs {
-		known[string(row.Data)] = true
+		known[canonicalJSON(row.Data)] = true
 	}
 	return known
 }
 
+// pausedKnownRows scopes the skip set to the paused turn (from the last user
+// row to the anchor), so replay dedupe does not depend on run identity to keep
+// older turns from colliding.
+func pausedKnownRows(path []storage.Message) map[string]bool {
+	start := 0
+	for i, m := range path {
+		if m.Role == string(model.RoleUser) {
+			start = i
+		}
+	}
+	return knownRows(path[start:])
+}
+
+// canonicalJSON re-encodes JSON deterministically (sorted keys, no whitespace,
+// numbers preserved) so a payload read back from jsonb compares equal to a
+// message marshaled in Go. Numbers keep their literal text: resume replays
+// decode from the stored jsonb text, so both sides already carry Postgres's
+// normalized numeric form (1e2 reads back as 100); no pre-normalization
+// comparison exists on the skip path.
+func canonicalJSON(raw []byte) string {
+	dec := json.NewDecoder(strings.NewReader(string(raw)))
+	dec.UseNumber()
+	var v any
+	if err := dec.Decode(&v); err != nil {
+		return string(raw)
+	}
+	out, err := json.Marshal(v)
+	if err != nil {
+		return string(raw)
+	}
+	return string(out)
+}
+
 // runTurn streams one model turn to w: loads the caller's tools, opens the
 // SSE sink, runs the agent, and settles the outcome (persist + done/error).
-// Callers validate, prepare history/spec/parts, and persist the prompt;
-// known holds the payloads of rows already in the store so history replay
-// rows are not duplicated. botID routes the run's remember-tool writes to
-// the bot's memory instead of the user's (nil = plain conversation). The
-// sink opens only after those steps so failures stay plain HTTP errors.
-func (s *Server) runTurn(ctx context.Context, userID, convID string, spec chat.RunSpec, botID *string, history []model.Message, prompt string, parts []model.Part, known map[string]bool, w http.ResponseWriter) {
+// Callers validate, prepare history/spec/parts, persist the prompt, and hold
+// the conversation's run slot. startParentID is the persisted prompt row the
+// run's new rows chain under. known holds the payloads of rows already in the
+// store so history replay rows are not duplicated. botID routes the run's
+// remember-tool writes to the bot's memory instead of the user's (nil =
+// plain conversation). The sink opens only after those steps so failures
+// stay plain HTTP errors.
+func (s *Server) runTurn(ctx context.Context, userID, convID string, spec chat.RunSpec, botID *string, history []model.Message, prompt string, parts []model.Part, known map[string]bool, startParentID string, w http.ResponseWriter) {
 	spec, history, compacted := s.maybeCompact(ctx, userID, convID, spec, history)
 	// Tools load before the SSE sink goes out so failures can still be
 	// plain HTTP errors. One broken config skips that tool only (logged by
@@ -254,11 +406,11 @@ func (s *Server) runTurn(ctx context.Context, userID, convID string, spec chat.R
 	outcome, err := s.deps.Agent.Run(ctx, s.buildDeps(userID, convID, &sources, &sourcesMu, s.botFor(ctx, userID, botID)),
 		history, prompt, parts, sink, tools, spec)
 	if err != nil {
-		s.persistFailure(ctx, userID, convID, spec, err, sink)
+		s.persistFailure(ctx, userID, convID, spec, startParentID, nil, -1, err, sink)
 		return
 	}
 	emitSources(sink, sources)
-	s.settleRun(ctx, userID, convID, spec, outcome, sink, known, sourceJSON(sources))
+	s.settleRun(ctx, userID, convID, spec, outcome, sink, known, startParentID, sourceJSON(sources))
 }
 
 // buildDeps assembles the per-run tool identity for one conversation turn:
@@ -1015,13 +1167,13 @@ func (s *Server) toolEnv() chat.ToolEnv {
 // settleRun dispatches a finished run: approval pauses park the conversation,
 // everything else finishes normally. sources carries the run's retrieved
 // chunks for the concluding answer row (nil when it never searched).
-func (s *Server) settleRun(ctx context.Context, userID, convID string, spec chat.RunSpec, outcome chat.Outcome, sink *sseSink, known map[string]bool, sources json.RawMessage) {
+func (s *Server) settleRun(ctx context.Context, userID, convID string, spec chat.RunSpec, outcome chat.Outcome, sink *sseSink, known map[string]bool, startParentID string, sources json.RawMessage) {
 	newFrom := replayedPrefixLen(outcome.Messages)
 	if len(outcome.Pending) > 0 {
-		s.pauseRun(ctx, userID, convID, spec, outcome, sink, known, newFrom)
+		s.pauseRun(ctx, userID, convID, spec, outcome, sink, known, newFrom, startParentID)
 		return
 	}
-	s.finishRun(ctx, userID, convID, spec, outcome, sink, known, newFrom, sources)
+	s.finishRun(ctx, userID, convID, spec, outcome, sink, known, newFrom, startParentID, sources)
 }
 
 // replayedPrefixLen reports how many leading messages of a streamed run's
@@ -1042,8 +1194,8 @@ func replayedPrefixLen(msgs []model.Message) int {
 // pauseRun persists the paused conversation (history through the unanswered
 // tool call, usage, pending calls) and tells the client what needs a
 // decision. No done event follows — the stream ends waiting for approvals.
-func (s *Server) pauseRun(ctx context.Context, userID, convID string, spec chat.RunSpec, outcome chat.Outcome, sink *sseSink, known map[string]bool, newFrom int) {
-	idMap, err := s.persistRunMessages(ctx, userID, convID, spec.Model, outcome.Messages, outcome.Usage, outcome.Requests, false, known, newFrom, nil)
+func (s *Server) pauseRun(ctx context.Context, userID, convID string, spec chat.RunSpec, outcome chat.Outcome, sink *sseSink, known map[string]bool, newFrom int, startParentID string) {
+	res, err := s.persistRunMessages(ctx, userID, convID, spec.Model, outcome.Messages, outcome.Usage, outcome.Requests, false, known, newFrom, startParentID, nil)
 	if err != nil {
 		s.deps.Log.Error("persist paused messages", "err", err)
 	}
@@ -1055,12 +1207,12 @@ func (s *Server) pauseRun(ctx context.Context, userID, convID string, spec chat.
 	for _, p := range outcome.Pending {
 		// Reference the persisted (rewritten, conversation-unique) call ID.
 		callID := p.CallID
-		if mapped, ok := idMap[p.CallID]; ok {
+		if mapped, ok := res.IDMap[p.CallID]; ok {
 			callID = mapped
 			p.CallID = mapped
 		}
 		calls = append(calls, storage.PendingToolCall{
-			CallID: callID, ConversationID: convID, UserID: userID,
+			CallID: callID, MessageID: res.LastRowID, ConversationID: convID, UserID: userID,
 			ToolName: p.ToolName, Args: p.Args, Reason: p.Reason, Status: "pending",
 		})
 		announced = append(announced, p)
@@ -1072,10 +1224,14 @@ func (s *Server) pauseRun(ctx context.Context, userID, convID string, spec chat.
 	_ = sink.event("approval_request", map[string]any{"calls": announced})
 }
 
-// persistFailure uses golem v0.7.1 partial evidence: whatever completed is
-// kept, marked truncated. Every partial message persists so the next turn's
+// persistFailure uses golem's partial evidence: whatever completed is kept,
+// marked truncated. Every partial message persists so the next turn's
 // history — including any completed tool exchanges — replays faithfully.
-func (s *Server) persistFailure(ctx context.Context, userID, convID string, spec chat.RunSpec, runErr error, sink *sseSink) {
+// newFrom < 0 computes the positional replay prefix for a streamed run;
+// resume callers pass newFrom 0 plus the paused path's payload set, because
+// resolution rows can be merged among already-stored results (mixed deferred
+// batches), which makes a positional boundary wrong.
+func (s *Server) persistFailure(ctx context.Context, userID, convID string, spec chat.RunSpec, startParentID string, skip map[string]bool, newFrom int, runErr error, sink *sseSink) {
 	clientGone := errors.Is(runErr, context.Canceled) || errors.Is(runErr, context.DeadlineExceeded)
 	var runError *golem.RunError
 	_ = errors.As(runErr, &runError)
@@ -1085,7 +1241,10 @@ func (s *Server) persistFailure(ctx context.Context, userID, convID string, spec
 		partial = runError.Partial
 	}
 	if partial != nil && len(partial.Messages) > 0 {
-		if _, err := s.persistRunMessages(ctx, userID, convID, spec.Model, partial.Messages, partial.Usage, partial.Requests, true, nil, replayedPrefixLen(partial.Messages), nil); err != nil {
+		if newFrom < 0 {
+			newFrom = replayedPrefixLen(partial.Messages)
+		}
+		if _, err := s.persistRunMessages(ctx, userID, convID, spec.Model, partial.Messages, partial.Usage, partial.Requests, true, skip, newFrom, startParentID, nil); err != nil {
 			s.deps.Log.Error("persist partial", "err", err)
 		}
 		_ = s.deps.Usage.Add(ctx, usageEventFor(userID, convID, spec.Model, partial.Usage, partial.Requests, s.deps.Rates))
@@ -1102,20 +1261,29 @@ func (s *Server) persistFailure(ctx context.Context, userID, convID string, spec
 	s.deps.Log.Error("chat run failed", "err", runErr)
 }
 
+// persistRunResult reports what a persisted run added: the raw→persisted
+// call-ID map and the new tail rows. The last row is the paused tail parked
+// approvals anchor to.
+type persistRunResult struct {
+	IDMap           map[string]string
+	LastRowID       string
+	LastAssistantID string
+}
+
 // persistRunMessages stores every run-produced message as its own row. The
 // system message and the fresh user prompt stay out — the prompt row was
 // persisted by the handler, and replaying either would duplicate them.
 // Tool-call and tool-result rows ARE persisted: the next turn's history and
 // any deferred resume need them. Usage and cost land on the last assistant
-// row only.
+// row only. Rows chain parent-wise under startParentID so each run grows a
+// single branch; the last inserted row becomes the conversation's active leaf.
 //
 // Two skip rules keep stored rows from duplicating. Rows in the replayed
 // prefix (index < newFrom — history plus the fresh prompt, per golem's
 // "Messages is the full conversation" contract) are positional and always
 // skipped; newFrom <= 0 disables that rule. Beyond the prefix, a row whose
-// exact payload matches a stored row (skip map) is a resumed run's replay
-// and is skipped too — the approvals resume path relies on that, since a
-// resumed run's Messages start with the paused history verbatim.
+// exact payload matches a stored row (skip map) is a replayed row and is
+// skipped too.
 //
 // Provider-synthesized call IDs (Gemini's call-1, call-2, …) restart every
 // request, so they collide across runs of one conversation — golem keys
@@ -1124,15 +1292,16 @@ func (s *Server) persistFailure(ctx context.Context, userID, convID string, spec
 // persisted ones (the approval pause needs it to key pending rows). A tool
 // result is matched to the most recent unanswered raw ID, mirroring the
 // emission order golem guarantees.
-func (s *Server) persistRunMessages(ctx context.Context, userID, convID, modelStr string, msgs []model.Message, usage model.Usage, requests int, truncated bool, skip map[string]bool, newFrom int, sources json.RawMessage) (map[string]string, error) {
+func (s *Server) persistRunMessages(ctx context.Context, userID, convID, modelStr string, msgs []model.Message, usage model.Usage, requests int, truncated bool, skip map[string]bool, newFrom int, startParentID string, sources json.RawMessage) (persistRunResult, error) {
+	res := persistRunResult{IDMap: map[string]string{}}
 	lastAssistant := -1
 	for i, m := range msgs {
 		if m.Role == model.RoleAssistant {
 			lastAssistant = i
 		}
 	}
-	idMap := map[string]string{}
 	unanswered := map[string]string{} // raw call ID → persisted call ID
+	parent := startParentID
 	for i, m := range msgs {
 		if m.Role != model.RoleAssistant && m.Role != model.RoleTool {
 			continue
@@ -1145,9 +1314,9 @@ func (s *Server) persistRunMessages(ctx context.Context, userID, convID, modelSt
 			if i < newFrom {
 				continue
 			}
-		} else if skip[string(mustJSON(m))] {
-			// Deferred resume: the paused history replays verbatim from
-			// index 0, so payload equality is the replay test.
+		} else if skip[canonicalJSON(mustJSON(m))] {
+			// Deferred resume fallback: the paused history replays verbatim
+			// from index 0, so payload equality is the replay test.
 			continue
 		}
 		if m.Role == model.RoleAssistant && len(m.ToolCalls) > 0 {
@@ -1160,7 +1329,7 @@ func (s *Server) persistRunMessages(ctx context.Context, userID, convID, modelSt
 				newID := prefix + "-call-" + strings.ToLower(randomHex())
 				if call.ID != "" {
 					unanswered[call.ID] = newID
-					idMap[call.ID] = newID
+					res.IDMap[call.ID] = newID
 				}
 				m.ToolCalls[j].ID = newID
 			}
@@ -1169,11 +1338,11 @@ func (s *Server) persistRunMessages(ctx context.Context, userID, convID, modelSt
 			if newID, ok := unanswered[m.ToolCallID]; ok {
 				m = cloneMessage(m)
 				m.ToolCallID = newID
-				delete(unanswered, rawOf(idMap, newID))
+				delete(unanswered, rawOf(res.IDMap, newID))
 			}
 		}
 		row := storage.Message{
-			ConversationID: convID, UserID: userID,
+			ConversationID: convID, UserID: userID, ParentID: parent,
 			Role: string(m.Role), Content: m.Content, Data: mustJSON(m),
 			Truncated: truncated,
 		}
@@ -1188,11 +1357,22 @@ func (s *Server) persistRunMessages(ctx context.Context, userID, convID, modelSt
 			// same cards the live session showed.
 			row.Sources = sources
 		}
-		if err := s.deps.Msgs.Add(ctx, row); err != nil {
-			return idMap, err
+		id, err := s.deps.Msgs.Add(ctx, row)
+		if err != nil {
+			return res, err
+		}
+		parent = id
+		res.LastRowID = id
+		if i == lastAssistant {
+			res.LastAssistantID = id
 		}
 	}
-	return idMap, nil
+	if res.LastRowID != "" {
+		if err := s.deps.Convos.SetActiveLeaf(ctx, convID, userID, res.LastRowID); err != nil {
+			return res, fmt.Errorf("set active leaf: %w", err)
+		}
+	}
+	return res, nil
 }
 
 func cloneMessage(m model.Message) model.Message {
@@ -1219,8 +1399,9 @@ func rawOf(idMap map[string]string, persisted string) string {
 	return ""
 }
 
-func (s *Server) finishRun(ctx context.Context, userID, convID string, spec chat.RunSpec, outcome chat.Outcome, sink *sseSink, known map[string]bool, newFrom int, sources json.RawMessage) {
-	if _, err := s.persistRunMessages(ctx, userID, convID, spec.Model, outcome.Messages, outcome.Usage, outcome.Requests, false, known, newFrom, sources); err != nil {
+func (s *Server) finishRun(ctx context.Context, userID, convID string, spec chat.RunSpec, outcome chat.Outcome, sink *sseSink, known map[string]bool, newFrom int, startParentID string, sources json.RawMessage) {
+	res, err := s.persistRunMessages(ctx, userID, convID, spec.Model, outcome.Messages, outcome.Usage, outcome.Requests, false, known, newFrom, startParentID, sources)
+	if err != nil {
 		s.deps.Log.Error("persist assistant messages", "err", err)
 	}
 	if err := s.deps.Usage.Add(ctx, usageEventFor(userID, convID, spec.Model, outcome.Usage, outcome.Requests, s.deps.Rates)); err != nil {
@@ -1228,10 +1409,13 @@ func (s *Server) finishRun(ctx context.Context, userID, convID string, spec chat
 	}
 	_ = s.deps.Convos.Touch(ctx, convID)
 
-	// The stored message id is needed for `done`; fetch the latest assistant row.
-	msgID := ""
-	if msgs, err := s.deps.Msgs.ForConversation(ctx, convID, userID); err == nil && len(msgs) > 0 {
-		msgID = msgs[len(msgs)-1].ID
+	// `done` names the new active leaf — the last row this run added, or the
+	// persisted leaf when the run added nothing.
+	msgID := res.LastRowID
+	if msgID == "" {
+		if conv, cerr := s.deps.Convos.ByID(ctx, convID, userID); cerr == nil && conv.ActiveLeafID != nil {
+			msgID = *conv.ActiveLeafID
+		}
 	}
 	cost := s.deps.Rates.ChatCostMicrosFor(spec.Model, outcome.Usage.InputTokens, outcome.Usage.OutputTokens)
 	compThreshold := 40000
@@ -1251,6 +1435,7 @@ func (s *Server) finishRun(ctx context.Context, userID, convID string, spec chat
 		"requests":        outcome.Requests,
 		"costUsd":         math.Round(float64(cost)/10) / 1e5, // 5 decimal places
 		"model":           spec.Model,
+		"promptMessageId": startParentID,
 		"contextTokens":   ctxTokens,
 		"thresholdTokens": compThreshold,
 		"keepRecent":      compKeepRecent,

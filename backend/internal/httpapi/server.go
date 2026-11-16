@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 	"sync/atomic"
 
 	"github.com/abubakarsiddik31/golem-chatbot/internal/auth"
@@ -97,6 +98,11 @@ type Server struct {
 	// botAgent is the Agent narrowed to the run surface the background
 	// runner calls; defaulted to deps.Agent and swapped by runner tests.
 	botAgent botAgentAPI
+	// runs is the in-process per-conversation run registry: at most one run
+	// (send, approvals resume, or bot execute) per conversation at a time.
+	// Single-instance deployment assumption — the process is the only writer
+	// to these conversations.
+	runs sync.Map // conversation ID -> struct{}
 }
 
 // NewServer builds the root handler, CORS outermost. Auth endpoints are
@@ -156,7 +162,9 @@ func newServer(deps ServerDeps) (*Server, http.Handler) {
 	authed.HandleFunc("DELETE /api/conversations/{id}/shares", s.handleUnshareConversation)
 	authed.HandleFunc("POST /api/conversations/{id}/messages", s.handleSendMessage)
 	authed.HandleFunc("POST /api/conversations/{id}/messages/{messageId}/edit", s.handleEditMessage)
+	authed.HandleFunc("POST /api/conversations/{id}/messages/{messageId}/activate", s.handleActivateMessage)
 	authed.HandleFunc("DELETE /api/conversations/{id}/messages/{messageId}", s.handleDeleteMessage)
+	authed.HandleFunc("POST /api/conversations/{id}/fork", s.handleForkConversation)
 	authed.HandleFunc("POST /api/conversations/{id}/regenerate", s.handleRegenerate)
 	authed.HandleFunc("POST /api/conversations/{id}/approvals", s.handleApprovals)
 	authed.HandleFunc("GET /api/tools", s.handleListTools)

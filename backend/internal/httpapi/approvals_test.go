@@ -141,7 +141,7 @@ func TestApprovalsResumeWithCollidingCallIDs(t *testing.T) {
 		{Role: model.RoleUser, Content: "search hn"},
 		callMsg("search_hn"),
 	} {
-		_ = msgs.Add(context.Background(), storage.Message{
+		_, _ = msgs.Add(context.Background(), storage.Message{
 			ConversationID: conv.ID, UserID: "u-1", Role: string(m.Role),
 			Content: m.Content, Data: mustJSON(m),
 		})

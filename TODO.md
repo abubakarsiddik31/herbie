@@ -92,33 +92,60 @@ adversarial plan review before build, adversarial PR review before merge.
 
 ### Phase 1A — non-destructive history (feature: `feat/chat-branches`)
 
-- [ ] Migration: `messages.parent_id` (self-FK, CASCADE), `conversations.active_leaf_id`
-      (FK, SET NULL); backfill existing rows as one linear chain per conversation
-      (`lag(id) OVER (PARTITION BY conversation_id ORDER BY created_at, id)`),
-      active leaf = last row. Update `schema.hcl` + `atlas.sum`.
-- [ ] Storage: parent-aware insert; recursive-CTE path-to-leaf; subtree delete;
-      deepest-leaf-of-subtree lookup; `SetActiveLeaf`; fork copies the active path
-      (new IDs, same chain, usage/sources copied for display only — no ledger events).
-- [ ] Runs: prompt row parent = active leaf; persisted run rows chain parent-wise;
-      active leaf updated on finish, approval pause, and partial failure. Bot runs
-      append to the active leaf; branching UI stays hidden for bot conversations.
-- [ ] API: edit creates a sibling user row (images copied) instead of truncating;
-      regenerate creates a sibling assistant chain under the same user row;
-      `POST /api/conversations/{id}/messages/{messageId}/activate` switches to the
-      deepest leaf of that variant's subtree; `POST /api/conversations/{id}/fork`
-      (optional `messageId`); delete removes the subtree and falls the active leaf
-      back to the deleted root's parent. Transcript gains `activeLeafId` and
-      per-visible-message branch metadata `{count, index}`; shares/export follow the
-      active path. Block activate/fork/edit/regenerate while an approval is pending.
-- [ ] Variant semantics: user-row variants = sibling user rows; assistant-answer
-      variants = direct assistant children of the nearest ancestor user row (each
-      direct child starts one answer chain). Switching activates that variant's
-      deepest leaf, so each variant carries its own continuation.
-- [ ] Frontend: branch switcher (prev/next + `i/n`) on messages with variants, fork
-      action, delete wording "delete this branch", refetch after edit/regenerate to
-      sync branch metadata; types/hooks/tests (vitest + msw).
-- [ ] Gates: `make check`, `make fe-check`, live-verify on `:8090` (two edit variants,
-      two regenerations, switch both ways, fork, delete subtree, approval pause/resume).
+Adversarial plan review 2026-11-16: PROCEED WITH CHANGES — all 17 findings
+incorporated below (2 blockers, 11 major, 4 minor).
+
+- [ ] Migration HAND-WRITTEN (schema.hcl has pre-existing drift: `mcp_servers`,
+      `project_id` columns missing — reconcile HCL in this PR; never run
+      `atlas migrate diff` against the drifted HCL). Up (one tx): `messages.parent_id`
+      self-FK CASCADE + index, `conversations.active_leaf_id` FK SET NULL,
+      `pending_tool_calls.message_id` FK CASCADE; backfill linear chains via
+      `lag(id) OVER (PARTITION BY conversation_id ORDER BY created_at, id)`
+      (UUID tie-break accepted — matches today's display order), leaf = last row,
+      parked pending rows matched to their tool-call row by call ID in `data`.
+      Down: prune non-active-path rows first, then drop columns. Regenerate atlas.sum.
+- [ ] Storage: `Add` returns the new row ID; `PathToLeaf` upward recursive CTE
+      (UNION, cycle-safe) for run history; `DeleteBranch` in ONE tx (subtree CTE +
+      active-leaf fallback to the deleted root's parent ONLY when the leaf is inside
+      the subtree); NULL-leaf recovery = latest row by `(created_at,id)`, never a
+      second root; `SetActiveLeaf`; fork copies the path in one tx (new IDs, settings
+      minus `bot_id`, display-only usage/sources, no ledger events).
+- [ ] Concurrency: in-process per-conversation run registry (`beginRun`/`runActive`);
+      send/approvals/bot-execute hold it; edit/regenerate/delete/activate/fork 409
+      while a run is active OR an approval is pending (delete included — blocker fix).
+- [ ] Runs: prompt parent = active leaf; run rows chain parent-wise; active leaf =
+      last persisted row on finish/pause/partial failure; `done.messageId` = that row.
+      Resume history = path to the parked call's `message_id` (fallback: active-leaf
+      path for legacy NULL rows); resume dedupe is POSITIONAL
+      (`newFrom = len(processed history)`) on success AND failure, SSE and bot paths —
+      no conversation-global payload skip (phantom-variant fix).
+- [ ] Path-aware consumers (all of them): send history/known, edit, regenerate
+      last-user scan, bot runner history/known/resume, `finishRun`/`finishResumed`
+      done ID, transcript token estimate + compacted flag, shared transcript.
+- [ ] API: edit = sibling user row (images copied); regenerate = sibling assistant
+      chain; `POST .../messages/{messageId}/activate` → deepest leaf of the variant
+      subtree (max depth, `(created_at,id)` DESC tie-break); `POST .../fork`
+      (optional `messageId`, title "Fork of …", refuses active run/pending);
+      delete = subtree. Bot-scoped conversations: branch mutations 409 server-side;
+      runner appends to the leaf. Transcript: `activeLeafId` + branch metadata
+      `{count,index,ids}`; assistant variants computed per CHAIN (roots = direct
+      assistant children of the nearest ancestor user row, often hidden tool-call
+      rows); switcher metadata rides the LAST visible assistant row of the chain.
+- [ ] Frontend: reseed keyed on `selectedId + activeLeafId + tail message ID`
+      (not just conversation switch), skipped while streaming; `onDone` invalidates
+      the detail query so edited-row IDs remap before the next mutation; branch
+      switcher (prev/next + i/n), fork action, "delete this branch" wording;
+      mutations disabled while running; switcher hidden for bot conversations.
+- [ ] Tests (review scenarios 1–14): backfill on populated DB incl. ties/paused/
+      truncated (TEST_DATABASE_URL), edit×2 + regenerate×2 + switch both ways,
+      multi-leaf determinism, pause with newer sibling + resume approve/deny/re-pause,
+      delete-while-pending 409 / active-subtree fallback / inactive-branch no-move /
+      root delete, mutations during in-flight run 409, bot 409s + crash-restart,
+      resume-failure no duplicate tail, byte-identical regenerate persists both,
+      fork semantics, NULL-leaf recovery, FE reseed/remap/msw 409s, Up/Down on
+      populated DB, long-conversation path bounds.
+- [ ] Gates: `make check` (+ storage integration with TEST_DATABASE_URL),
+      `make fe-check`, live-verify on `:8090`.
 
 ### Phase 1B — organization & discovery (feature: `feat/chat-organization`)
 

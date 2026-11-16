@@ -285,7 +285,9 @@ func (r *botRunner) flushActivity(runID string, sink *runSink) {
 }
 
 // execute runs one claimed bot run to a terminal status. The goroutine
-// holds a queue slot for its whole life, parks included.
+// holds a queue slot for its whole life, parks included, and holds the
+// conversation's in-process run slot across every pause cycle — a parked run
+// is still live work.
 func (r *botRunner) execute(parent context.Context, run *storage.BotRun) {
 	s := r.s
 	// Settlement writes must survive the run's own cancellation.
@@ -301,6 +303,13 @@ func (r *botRunner) execute(parent context.Context, run *storage.BotRun) {
 		}
 		_ = s.deps.BotRuns.SetFinished(settle, run.ID, "failed", 0, 0, 0, 0, msg)
 	}
+
+	release, ok := s.beginRun(run.ConversationID)
+	if !ok {
+		fail("conversation already has an active run")
+		return
+	}
+	defer release()
 
 	// Fresh start: a queued run always begins from persisted history, so
 	// still-pending approval rows (left by this run's parked ancestor
@@ -329,22 +338,37 @@ func (r *botRunner) execute(parent context.Context, run *storage.BotRun) {
 		return
 	}
 
-	// The task is the turn's user row; history is everything before it —
-	// exactly the send path's split (handleSendMessage + historyFrom).
-	if err := s.deps.Msgs.Add(parent, storage.Message{
-		ConversationID: run.ConversationID, UserID: run.UserID,
-		Role: string(model.RoleUser), Content: run.Task,
-		Data: mustJSON(model.Message{Role: model.RoleUser, Content: run.Task}),
-	}); err != nil {
-		fail("could not persist task: " + err.Error())
-		return
-	}
+	// The task is the turn's user row, appended to the active leaf; history
+	// is the path that led there — exactly the send path's split.
 	rows, err := s.deps.Msgs.ForConversation(parent, run.ConversationID, run.UserID)
 	if err != nil {
 		fail("could not load history: " + err.Error())
 		return
 	}
-	known := knownRows(rows)
+	leaf, err := s.resolveActiveLeaf(parent, conv, rows)
+	if err != nil {
+		fail("could not load history: " + err.Error())
+		return
+	}
+	path, err := s.pathToLeaf(parent, run.ConversationID, run.UserID, leaf)
+	if err != nil {
+		fail("could not load history: " + err.Error())
+		return
+	}
+	promptID, err := s.deps.Msgs.Add(parent, storage.Message{
+		ConversationID: run.ConversationID, UserID: run.UserID,
+		ParentID: leaf,
+		Role:     string(model.RoleUser), Content: run.Task,
+		Data: mustJSON(model.Message{Role: model.RoleUser, Content: run.Task}),
+	})
+	if err != nil {
+		fail("could not persist task: " + err.Error())
+		return
+	}
+	if err := s.deps.Convos.SetActiveLeaf(parent, run.ConversationID, run.UserID, promptID); err != nil {
+		s.deps.Log.Error("bot run set active leaf", "err", err, "run_id", run.ID)
+	}
+	known := knownRows(path)
 
 	var sources []rag.Scored
 	var sourcesMu sync.Mutex
@@ -385,25 +409,29 @@ func (r *botRunner) execute(parent context.Context, run *storage.BotRun) {
 	// cycle, so without this they grow unbounded until runs fail.
 	// Fail-open; a summary's summarizer spend lands as a compaction
 	// usage event on the parent ctx, matching the live path's metering.
-	spec, history, _ := s.maybeCompact(parent, run.UserID, run.ConversationID, spec, historyFrom(rows, len(rows)-1))
+	spec, history, _ := s.maybeCompact(parent, run.UserID, run.ConversationID, spec, fullHistory(path))
 	outcome, err := s.botAgent.Run(runCtx, deps, history, run.Task, nil, sink, tools, spec)
-	deferred := false // cycle 0 persists positionally; resumes use payload dedupe
+	deferred := false // cycle 0 persists positionally; resumes use the paused path's payload set
 	pauses := 0
+	startParentID := promptID
+	var resumeSkip map[string]bool
 
 	for {
 		if err != nil {
-			r.settleFailure(settle, parent, run, spec, err, totalIn, totalOut, totalReqs, cost())
+			r.settleFailure(settle, parent, run, spec, startParentID, deferred, resumeSkip, err, totalIn, totalOut, totalReqs, cost())
 			return
 		}
-		newFrom := 0
-		if !deferred {
-			newFrom = replayedPrefixLen(outcome.Messages)
+		newFrom := replayedPrefixLen(outcome.Messages)
+		skip := known
+		if deferred {
+			newFrom = 0
+			skip = resumeSkip
 		}
 
 		if len(outcome.Pending) == 0 {
 			// Success: persist the run's rows, meter, finish.
 			if _, perr := s.persistRunMessages(settle, run.UserID, run.ConversationID, spec.Model,
-				outcome.Messages, outcome.Usage, outcome.Requests, false, known, newFrom, sourceJSON(sources)); perr != nil {
+				outcome.Messages, outcome.Usage, outcome.Requests, false, skip, newFrom, startParentID, sourceJSON(sources)); perr != nil {
 				s.deps.Log.Error("persist bot messages", "err", perr, "run_id", run.ID)
 			}
 			if uerr := s.deps.Usage.Add(settle, usageEventFor(run.UserID, run.ConversationID, spec.Model,
@@ -432,8 +460,8 @@ func (r *botRunner) execute(parent context.Context, run *storage.BotRun) {
 		totalIn += outcome.Usage.InputTokens
 		totalOut += outcome.Usage.OutputTokens
 		totalReqs += outcome.Requests
-		idMap, perr := s.persistRunMessages(settle, run.UserID, run.ConversationID, spec.Model,
-			outcome.Messages, outcome.Usage, outcome.Requests, false, known, newFrom, nil)
+		res, perr := s.persistRunMessages(settle, run.UserID, run.ConversationID, spec.Model,
+			outcome.Messages, outcome.Usage, outcome.Requests, false, skip, newFrom, startParentID, nil)
 		if perr != nil {
 			s.deps.Log.Error("persist paused bot messages", "err", perr, "run_id", run.ID)
 		}
@@ -444,11 +472,11 @@ func (r *botRunner) execute(parent context.Context, run *storage.BotRun) {
 		calls := make([]storage.PendingToolCall, 0, len(outcome.Pending))
 		for _, p := range outcome.Pending {
 			callID := p.CallID
-			if mapped, ok := idMap[p.CallID]; ok {
+			if mapped, ok := res.IDMap[p.CallID]; ok {
 				callID = mapped
 			}
 			calls = append(calls, storage.PendingToolCall{
-				CallID: callID, ConversationID: run.ConversationID, UserID: run.UserID,
+				CallID: callID, MessageID: res.LastRowID, ConversationID: run.ConversationID, UserID: run.UserID,
 				ToolName: p.ToolName, Args: p.Args, Reason: p.Reason, Status: "pending",
 			})
 		}
@@ -519,6 +547,7 @@ func (r *botRunner) execute(parent context.Context, run *storage.BotRun) {
 			continue
 		}
 		resolutions := make(map[string]golem.Approval, len(all))
+		parkedID := ""
 		for _, c := range all {
 			switch c.Status {
 			case "approved":
@@ -526,17 +555,39 @@ func (r *botRunner) execute(parent context.Context, run *storage.BotRun) {
 			case "denied":
 				resolutions[c.CallID] = golem.Approval{Approved: false}
 			}
+			if c.MessageID != "" {
+				parkedID = c.MessageID
+			}
 		}
 
-		// Resume exactly like the SSE approvals path: paused-run history
-		// (from the last user message on), payload-known dedupe, newFrom 0.
-		rows, err = s.deps.Msgs.ForConversation(runCtx, run.ConversationID, run.UserID)
-		if err != nil {
+		// Resume from the path ending at the parked call's assistant row
+		// (legacy rows without a message ID fall back to the active-leaf
+		// path). Dedupe is positional on the exact history handed over.
+		if parkedID == "" {
+			rows, err = s.deps.Msgs.ForConversation(runCtx, run.ConversationID, run.UserID)
+			if err != nil {
+				continue
+			}
+			leaf, lerr := s.resolveActiveLeaf(runCtx, conv, rows)
+			if lerr != nil {
+				err = lerr
+				continue
+			}
+			parkedID = leaf
+		}
+		resumeRows, rerr := s.pathToLeaf(runCtx, run.ConversationID, run.UserID, parkedID)
+		if rerr != nil {
+			err = rerr
 			continue
 		}
-		known = knownRows(rows)
+		resumeHistory := pausedRunHistory(resumeRows)
+		startParentID = ""
+		if len(resumeRows) > 0 {
+			startParentID = resumeRows[len(resumeRows)-1].ID
+		}
 		deferred = true
-		outcome, err = s.botAgent.RunDeferred(runCtx, deps, pausedRunHistory(rows),
+		resumeSkip = pausedKnownRows(resumeRows)
+		outcome, err = s.botAgent.RunDeferred(runCtx, deps, resumeHistory,
 			golem.DeferredResults{Approvals: resolutions}, sink, tools, spec)
 	}
 }
@@ -547,12 +598,12 @@ func (r *botRunner) execute(parent context.Context, run *storage.BotRun) {
 // for a fresh start. Context cancellations are user cancels; everything
 // else is a failure carrying the golem.RunError message.
 func (r *botRunner) settleFailure(settle, parent context.Context, run *storage.BotRun,
-	spec chat.RunSpec, runErr error, totalIn, totalOut, totalReqs int, costMicros int64) {
+	spec chat.RunSpec, startParentID string, deferred bool, skip map[string]bool, runErr error, totalIn, totalOut, totalReqs int, costMicros int64) {
 	if parent.Err() != nil {
 		return
 	}
 	s := r.s
-	s.persistBotFailure(settle, run.UserID, run.ConversationID, spec, runErr)
+	s.persistBotFailure(settle, run.UserID, run.ConversationID, spec, startParentID, deferred, skip, runErr)
 	status, msg := "failed", runErr.Error()
 	if errors.Is(runErr, context.Canceled) || errors.Is(runErr, context.DeadlineExceeded) {
 		status, msg = "cancelled", ""
@@ -562,13 +613,19 @@ func (r *botRunner) settleFailure(settle, parent context.Context, run *storage.B
 
 // persistBotFailure stores a failed/cancelled background run's partial
 // evidence (truncated), mirroring persistFailure's DB half minus the SSE.
-func (s *Server) persistBotFailure(ctx context.Context, userID, convID string, spec chat.RunSpec, runErr error) {
+func (s *Server) persistBotFailure(ctx context.Context, userID, convID string, spec chat.RunSpec, startParentID string, deferred bool, skip map[string]bool, runErr error) {
 	var runError *golem.RunError
 	_ = errors.As(runErr, &runError)
 	if runError != nil && runError.Partial != nil && len(runError.Partial.Messages) > 0 {
+		newFrom := -1 // streamed: positional replay prefix
+		if deferred {
+			newFrom = 0 // resume: payload dedupe scoped to the paused path
+		} else {
+			skip = nil
+		}
 		if _, err := s.persistRunMessages(ctx, userID, convID, spec.Model, runError.Partial.Messages,
-			runError.Partial.Usage, runError.Partial.Requests, true, nil,
-			replayedPrefixLen(runError.Partial.Messages), nil); err != nil {
+			runError.Partial.Usage, runError.Partial.Requests, true, skip,
+			newFrom, startParentID, nil); err != nil {
 			s.deps.Log.Error("persist bot partial", "err", err, "conv_id", convID)
 		}
 		if uerr := s.deps.Usage.Add(ctx, usageEventFor(userID, convID, spec.Model,

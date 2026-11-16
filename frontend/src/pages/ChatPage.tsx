@@ -13,6 +13,7 @@ import {
   Download,
   Eye,
   FileCode,
+  GitFork,
   Globe,
   HelpCircle,
   Loader2,
@@ -62,6 +63,7 @@ import { RunLoader } from "@/components/ai/RunLoader";
 import { StreamingText } from "@/components/ai/StreamingText";
 import { ThinkingTrace } from "@/components/ai/ThinkingTrace";
 import { useSidebar } from "@/components/layout/SidebarContext";
+import { BranchSwitcher } from "@/features/chat/BranchSwitcher";
 import { CommandPalette } from "@/features/chat/CommandPalette";
 import { extractCitationsFromContent } from "@/features/chat/citations";
 import { ConversationSettingsDialog } from "@/features/chat/ConversationSettingsDialog";
@@ -72,9 +74,11 @@ import { useChat } from "@/features/chat/useChat";
 import { useModels } from "@/features/chat/useModels";
 import { useVoiceInput } from "@/features/chat/useVoiceInput";
 import {
+  useActivateBranch,
   useConversations,
   useCreateConversation,
   useDeleteMessage,
+  useForkConversation,
   useUpdateConversationSettings,
 } from "@/features/chat/useConversations";
 import { useTools } from "@/features/tools/useTools";
@@ -102,7 +106,17 @@ function toChatMessage(m: ChatMessage): ChatMessage {
     usage: m.usage,
     images: m.images,
     sources: m.sources,
+    branch: m.branch,
   };
+}
+
+function mutationErrorMessage(err: unknown, fallback: string): string | null {
+  if (err instanceof ApiError && err.status === 409) {
+    if (err.code === "run_active") return "A run is in progress — wait for it to finish";
+    if (err.code === "approval_pending") return "Resolve the pending approval first";
+    if (err.code === "bot_conversation") return null;
+  }
+  return err instanceof ApiError ? err.message : fallback;
 }
 
 function CopyMessageButton({ text }: { text: string }) {
@@ -288,9 +302,16 @@ export function ChatPage() {
   }, [hasDocs]);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const seededRef = useRef<string | null>(null);
+  const selectedIdRef = useRef(selectedId);
+
+  useEffect(() => {
+    selectedIdRef.current = selectedId;
+  }, [selectedId]);
 
   const { messages, setMessages, status, send, edit, regenerate, resolve, stop, reset, trace, pending, contextStatus, setContextStatus } = useChat(() => {
     void queryClient.invalidateQueries({ queryKey: ["conversations"] });
+    const id = selectedIdRef.current;
+    if (id !== null) void queryClient.invalidateQueries({ queryKey: ["conversation", id] });
   });
 
   const { data: conversations } = useConversations();
@@ -298,6 +319,8 @@ export function ChatPage() {
   const { data: models } = useModels();
   const createConversation = useCreateConversation();
   const deleteMessage = useDeleteMessage(selectedId);
+  const activateBranch = useActivateBranch(selectedId);
+  const forkConversation = useForkConversation(selectedId);
   const updateSettings = useUpdateConversationSettings(selectedId);
 
   const { data: detail, isFetching: detailLoading, isError: detailError } = useQuery({
@@ -323,15 +346,17 @@ export function ChatPage() {
       reset();
       return;
     }
-    if (detail && seededRef.current !== selectedId) {
-      seededRef.current = selectedId;
-      setMessages(detail.messages.map(toChatMessage));
-      if (detail.context) {
-        setContextStatus(detail.context);
-      }
-      setSendError(null);
+    if (!detail || status === "running") return;
+    const tailId = detail.messages.at(-1)?.id ?? "";
+    const seedKey = `${selectedId}:${detail.conversation.activeLeafId ?? ""}:${tailId}`;
+    if (seededRef.current === seedKey) return;
+    seededRef.current = seedKey;
+    setMessages(detail.messages.map(toChatMessage));
+    if (detail.context) {
+      setContextStatus(detail.context);
     }
-  }, [selectedId, detail, reset, setMessages]);
+    setSendError(null);
+  }, [selectedId, detail, status, reset, setMessages, setContextStatus]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -422,7 +447,6 @@ export function ChatPage() {
       if (conversationId === null) {
         const conv = await createConversation.mutateAsync(draftSettings);
         conversationId = conv.id;
-        seededRef.current = conversationId;
         navigate(`/chat/${conversationId}`, { replace: true });
       }
       await send(outgoingText, conversationId, images);
@@ -461,10 +485,33 @@ export function ChatPage() {
           return prev.slice(0, idx);
         });
         setPendingMessageDelete(null);
-        toast.success("Message deleted");
+        toast.success("Branch deleted");
       },
-      onError: (err) =>
-        toast.error(err instanceof ApiError ? err.message : "Failed to delete message"),
+      onError: (err) => {
+        const message = mutationErrorMessage(err, "Failed to delete message");
+        if (message) toast.error(message);
+      },
+    });
+  }
+
+  function activateBranchMessage(messageId: string) {
+    if (selectedId === null || running || pending.length > 0) return;
+    activateBranch.mutate(messageId, {
+      onError: (err) => {
+        const message = mutationErrorMessage(err, "Failed to switch branch");
+        if (message) toast.error(message);
+      },
+    });
+  }
+
+  function forkCurrentConversation() {
+    if (selectedId === null || running || pending.length > 0) return;
+    forkConversation.mutate(undefined, {
+      onSuccess: (conversation) => navigate(`/chat/${conversation.id}`),
+      onError: (err) => {
+        const message = mutationErrorMessage(err, "Failed to fork conversation");
+        if (message) toast.error(message);
+      },
     });
   }
 
@@ -504,6 +551,7 @@ export function ChatPage() {
     conversations?.find((c) => c.id === selectedId) ??
     (detail?.conversation.id === selectedId ? detail.conversation : undefined);
   const running = status === "running";
+  const isBotConversation = Boolean(detail?.conversation.botId ?? activeConversation?.botId);
 
   const activeEstimatedTokens = contextStatus?.estimatedTokens ?? messages.reduce((acc, m) => acc + Math.round(m.content.length / 4) + 40, 0);
   const activeThresholdTokens = contextStatus?.thresholdTokens ?? 40000;
@@ -643,6 +691,19 @@ export function ChatPage() {
         </div>
 
         <div className="flex shrink-0 items-center gap-1">
+          {!isBotConversation && (
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              aria-label="Fork conversation"
+              title="Fork conversation"
+              disabled={!activeConversation || running || pending.length > 0 || forkConversation.isPending}
+              onClick={forkCurrentConversation}
+              className="text-muted-foreground hover:text-foreground"
+            >
+              <GitFork className="size-3.5" />
+            </Button>
+          )}
           <Button
             variant="ghost"
             size="icon-xs"
@@ -819,16 +880,25 @@ export function ChatPage() {
                             );
                           })()}
                           <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <button
-                              type="button"
-                              aria-label="Edit message"
-                              title="Edit & resend"
-                              disabled={blockInteraction}
-                              onClick={() => setEditing({ id: m.id, draft: m.content })}
-                              className="rounded-md p-1 text-muted-foreground/60 hover:text-foreground disabled:cursor-not-allowed"
-                            >
-                              <Pencil className="size-3.5" />
-                            </button>
+                            {!isBotConversation && m.branch && (
+                              <BranchSwitcher
+                                branch={m.branch}
+                                disabled={blockInteraction || activateBranch.isPending}
+                                onActivate={activateBranchMessage}
+                              />
+                            )}
+                            {!isBotConversation && (
+                              <button
+                                type="button"
+                                aria-label="Edit message"
+                                title="Edit & resend"
+                                disabled={blockInteraction}
+                                onClick={() => setEditing({ id: m.id, draft: m.content })}
+                                className="rounded-md p-1 text-muted-foreground/60 hover:text-foreground disabled:cursor-not-allowed"
+                              >
+                                <Pencil className="size-3.5" />
+                              </button>
+                            )}
                             <button
                               type="button"
                               aria-label="Delete message"
@@ -904,6 +974,13 @@ export function ChatPage() {
                           )}
                           {!m.streaming && (
                             <div className="flex items-center gap-1.5 pt-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+                              {!isBotConversation && m.branch && (
+                                <BranchSwitcher
+                                  branch={m.branch}
+                                  disabled={blockInteraction || activateBranch.isPending}
+                                  onActivate={activateBranchMessage}
+                                />
+                              )}
                               <CopyMessageButton text={m.content} />
                               <button
                                 type="button"
@@ -915,7 +992,7 @@ export function ChatPage() {
                               >
                                 <Trash2 className="size-3.5" />
                               </button>
-                              {isLast && (
+                              {isLast && !isBotConversation && (
                                 <button
                                   type="button"
                                   aria-label="Regenerate answer"
@@ -1199,14 +1276,18 @@ export function ChatPage() {
       <Dialog open={pendingMessageDelete !== null} onOpenChange={(open) => { if (!open) setPendingMessageDelete(null); }}>
         <DialogContent showCloseButton={false}>
           <DialogHeader>
-            <DialogTitle>Delete message?</DialogTitle>
+            <DialogTitle>Delete this branch?</DialogTitle>
             <DialogDescription>
-              This message and everything after it will be permanently removed.
+              This message and its continuation in this branch will be permanently removed. Other variants stay available.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="outline" onClick={() => setPendingMessageDelete(null)}>Cancel</Button>
-            <Button variant="destructive" onClick={confirmDeleteMessage} disabled={deleteMessage.isPending}>
+            <Button
+              variant="destructive"
+              onClick={confirmDeleteMessage}
+              disabled={deleteMessage.isPending || running || pending.length > 0}
+            >
               {deleteMessage.isPending ? "Deleting…" : "Delete"}
             </Button>
           </DialogFooter>
