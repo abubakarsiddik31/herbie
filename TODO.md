@@ -34,7 +34,125 @@ Build in order. One branch per item, merge to `main` before starting the next.
 - [x] **17. App Linking via Model Context Protocol (MCP) and Presets**: Full app linking pipeline allowing any Chat App (GitHub, Slack, Google Calendar) to be linked via external MCP servers or OAuth; App MCP presets for GitHub, Slack, Google Calendar with URL templates, header builders, live testing, and tool discovery; unified LinkAppDialog accessible across Sidebar, In-Chat AppConnectCard, and Settings Tools tab; seamless chat agent tool execution for MCP-linked apps.
 - [x] **18. 1-Click Curated MCP Catalog & Built-in Engine**: Zero-configuration curated MCP apps (GitHub, Slack, Google Calendar, Web Reader, Code Sandbox) with 1-click Link/Unlink; server-side built-in execution engine eliminating manual server setup; 1-click controls in Sidebar, Settings, and in-chat AppConnectCard with optional token accordion and developer custom server fallback.
 
-## Future roadmap / Bigger bets (each its own project)
+## Capability audit — 2026-11-16
 
-- Voice output / Read Aloud (dictation input only today).
-- Image generation tool (input-only today).
+Goal: the open-source ChatGPT/Claude alternative for knowledge work, not coding.
+Rule: fix correctness and trust in existing features before adding surface area.
+Golem is on v1.1.0; its new seams are called out where they unlock an item.
+
+### P0 — correctness, trust, production readiness (first)
+
+- [ ] CI gate: GitHub Actions runs `make check`, `make fe-check`, Docker build, and `scripts/smoke.sh`; protect `main`.
+- [ ] Project isolation bug: enforce the conversation's project scope inside `search_documents` and `read_document`. Search currently defaults to all user documents and read accepts any document ID. Add cross-project tests.
+- [ ] Auth lifecycle: password reset, email verification, login/register rate limiting, session list + revoke, account deletion, full data export (JSON + original files).
+- [ ] Per-user budgets: daily/monthly token and USD caps with warning thresholds and admin suspension; keep the golem per-run limit as the hard stop.
+- [ ] Admin control plane: configure providers/keys/model catalog, set quotas, inspect per-user usage. Routine operations should not require editing `.env`.
+- [ ] Observability: wire `golem/telemetry` to OpenTelemetry, add metrics, `/readyz` for Postgres/Weaviate/MinIO, structured error reporting, and audit every privileged action.
+- [ ] RAG hardening: OCR scanned PDFs (golem Indra/Model OCR), re-index/retry failed documents, duplicate detection, upload quotas, page-level source preview, document sets scoped to projects.
+- [ ] Data safety: documented Postgres/MinIO backup + restore drill, migration rollback policy, secret rotation.
+
+### P1 — improve existing features (parity gaps users notice)
+
+- [ ] Memory 2.0: edit/pin/delete, scopes (global/project/bot), automatic capture with review, dedupe/merge, import/export. Turn the `remember` tool into a memory lifecycle.
+- [ ] Conversation UX: branch/fork from a message, regenerate with another model, prompt library, pin/archive, in-conversation search, semantic conversation search, mobile polish.
+- [ ] Attachments 2.0: persist chat attachments as documents, auto-ingest into the conversation/project corpus, OCR/vision, audio/video transcription, paste/drag-drop, larger limits under quotas.
+- [ ] Voice 2.0: server-side STT fallback for Firefox/Safari, TTS read-aloud, hands-free voice mode with interruption, per-message play.
+- [ ] MCP 2.0: resources/prompts, elicitation, progress, auth-challenge re-auth, tool annotations in approval cards, catalog CRUD/discovery (golem v1.1 APIs).
+- [ ] Bots 2.0: in-app/email/webhook notifications, run inbox, retries/backoff, failure alerts, per-bot budgets, template gallery, clearer timezone UX.
+- [ ] Workflows 2.0: cron/schedule trigger, retries and error branches, loops, versioning + rollback, run replay, template gallery.
+- [ ] Sharing/export 2.0: fork shared chat, link expiry/password, JSON/PDF export, import ChatGPT/Claude exports.
+- [ ] Models 2.0: user BYOK, admin-managed catalog, automatic fallback/router, reasoning-effort and max-token controls, context-budget UI.
+- [ ] Golem adoption: `guard` for moderation, deferred tools/tool search for large catalogs, `WithSessionRequired`, `SummarizeHistory`, prompt-context seam, OpenAI reasoning replay.
+
+### P2 — new differentiators (after P0/P1)
+
+- [ ] Deep Research: plan -> parallel web searches -> read sources -> verify -> cited report, runnable in the background through bots (golem `planning`).
+- [ ] Artifacts/Canvas 2.0: editable documents, downloadable MD/PDF/DOCX/XLSX/PPTX, iterate on generated files; reuse the existing HTML/SVG/Mermaid preview.
+- [ ] Image generation and editing (OpenAI/Gemini/local), gallery, image-aware follow-ups.
+- [ ] Audio: TTS voices, podcast/meeting transcription, audio messages, read-aloud for long documents.
+- [ ] Connectors: Google Drive, Notion, Gmail, Slack, Obsidian; scheduled digests/briefings; email/Slack/WhatsApp assistant channels.
+- [ ] Collaboration: teams/workspaces, shared projects, roles, comments, presence.
+- [ ] Public API: API keys, OpenAI-compatible chat endpoint, webhooks, MCP app marketplace.
+- [ ] Reach: PWA/installable app, push notifications, i18n, accessibility audit, native mobile shells.
+- [ ] Enterprise: OIDC/SAML SSO, SCIM, retention/PII policies, content moderation, audit export.
+
+### Release sequence
+
+1. **Trust & isolation** — CI, project scoping, auth lifecycle, quotas, observability.
+2. **Knowledge & memory** — OCR, re-index, attachments, memory 2.0, conversation UX.
+3. **Voice & creation** — STT/TTS/voice mode, file generation + canvas, image generation.
+4. **Research & reach** — deep research, connectors, notifications/PWA, teams/SSO.
+
+## Chat & models — execution plan (approved 2026-11-16)
+
+Decisions: full message tree (not assistant-only versions); BYOK + admin catalog in
+Phase 2; `auto` model alias with ordered fallback (`model.NewFallback`), no ML router;
+FTS before semantic search; compare mode in Phase 3. One feature per branch/PR,
+adversarial plan review before build, adversarial PR review before merge.
+
+### Phase 1A — non-destructive history (feature: `feat/chat-branches`)
+
+- [ ] Migration: `messages.parent_id` (self-FK, CASCADE), `conversations.active_leaf_id`
+      (FK, SET NULL); backfill existing rows as one linear chain per conversation
+      (`lag(id) OVER (PARTITION BY conversation_id ORDER BY created_at, id)`),
+      active leaf = last row. Update `schema.hcl` + `atlas.sum`.
+- [ ] Storage: parent-aware insert; recursive-CTE path-to-leaf; subtree delete;
+      deepest-leaf-of-subtree lookup; `SetActiveLeaf`; fork copies the active path
+      (new IDs, same chain, usage/sources copied for display only — no ledger events).
+- [ ] Runs: prompt row parent = active leaf; persisted run rows chain parent-wise;
+      active leaf updated on finish, approval pause, and partial failure. Bot runs
+      append to the active leaf; branching UI stays hidden for bot conversations.
+- [ ] API: edit creates a sibling user row (images copied) instead of truncating;
+      regenerate creates a sibling assistant chain under the same user row;
+      `POST /api/conversations/{id}/messages/{messageId}/activate` switches to the
+      deepest leaf of that variant's subtree; `POST /api/conversations/{id}/fork`
+      (optional `messageId`); delete removes the subtree and falls the active leaf
+      back to the deleted root's parent. Transcript gains `activeLeafId` and
+      per-visible-message branch metadata `{count, index}`; shares/export follow the
+      active path. Block activate/fork/edit/regenerate while an approval is pending.
+- [ ] Variant semantics: user-row variants = sibling user rows; assistant-answer
+      variants = direct assistant children of the nearest ancestor user row (each
+      direct child starts one answer chain). Switching activates that variant's
+      deepest leaf, so each variant carries its own continuation.
+- [ ] Frontend: branch switcher (prev/next + `i/n`) on messages with variants, fork
+      action, delete wording "delete this branch", refetch after edit/regenerate to
+      sync branch metadata; types/hooks/tests (vitest + msw).
+- [ ] Gates: `make check`, `make fe-check`, live-verify on `:8090` (two edit variants,
+      two regenerations, switch both ways, fork, delete subtree, approval pause/resume).
+
+### Phase 1B — organization & discovery (feature: `feat/chat-organization`)
+
+- [ ] `pinned_at` / `archived_at` + sidebar sections and list filters.
+- [ ] Prompt library: `saved_prompts` CRUD, composer insert, command palette.
+- [ ] Quote/reply to a message (`reply_to_id` + rendered quote).
+- [ ] Message feedback thumbs (`message_feedback`, unique per user/message).
+- [ ] Auto-titles: cheap-model async title after first exchange, heuristic fallback,
+      `title_source`, inline rename + regenerate title.
+- [ ] Postgres FTS over messages + titles (`simple` config, GIN, `ts_headline`),
+      `GET /api/search`, command-palette results with jump-to-message; in-conversation
+      find with highlight.
+
+### Phase 2 — models 2.0 (feature: `feat/models-2`)
+
+- [ ] `top_p`, `max_output_tokens`, reasoning level on conversations/bots/user/project
+      defaults; provider mapping (OpenAI `ReasoningEffort`, Anthropic thinking,
+      Gemini thinking level/budget); capability-gated UI.
+- [ ] `auto` alias → ordered fallback chain via `model.NewFallback` (pre-first-fragment
+      only); used-model stamping in usage/transcript; fallback indicator in the run trace.
+- [ ] Inline model switcher; regenerate-with-model (branch, not a settings change).
+- [ ] BYOK: per-user provider keys in the vault (set/test/delete, audited, never
+      returned); server keys as fallback; `ALLOW_USER_PROVIDER_KEYS` flag.
+- [ ] Admin model catalog in Postgres (seeded from the hardcoded list): CRUD, rates,
+      capabilities, enabled flag; `/api/models` = enabled ∧ key-available.
+
+### Phase 3 — context, resilience, compare (features: `feat/context-2`, `feat/compare`)
+
+- [ ] Exact input-token counting via `tokens.Counter` (Gemini/Anthropic/Bedrock),
+      estimate fallback; context breakdown (system/memory/history/attachments).
+- [ ] Persisted editable conversation summary; manual "compact now"; summary view.
+- [ ] Idempotent sends (`clientMessageId` unique per conversation); reconnect after a
+      dropped SSE (refetch + run status); continue-after-stop.
+- [ ] Compare mode: one prompt → 2–4 models as sibling branches, per-answer usage,
+      pick-a-winner activates that branch.
+- [ ] Semantic conversation search over the embedding stack (opt-in, RAG-independent
+      storage decision at build time).
