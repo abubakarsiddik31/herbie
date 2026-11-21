@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/abubakarsiddik31/golem-chatbot/internal/chat"
 	"github.com/abubakarsiddik31/golem-chatbot/internal/storage"
 )
 
@@ -70,5 +71,25 @@ func TestGetConversationIncludesContextMetadata(t *testing.T) {
 	}
 	if got.Context.KeepRecent <= 0 {
 		t.Fatalf("expected keepRecent > 0, got %d", got.Context.KeepRecent)
+	}
+}
+
+func TestSettingsPatchGenerationValidation(t *testing.T) {
+	s := &Server{deps: ServerDeps{ModelKeys: chat.ProviderKeys{Gemini: "test"}}}
+	badTop := 1.5
+	if _, err := s.settingsPatch(conversationSettingsInput{TopP: &badTop}); err == nil {
+		t.Fatal("topP > 1 accepted")
+	}
+	badMax := -1
+	if _, err := s.settingsPatch(conversationSettingsInput{MaxOutputTokens: &badMax}); err == nil {
+		t.Fatal("negative maxOutputTokens accepted")
+	}
+	badReasoning := "extreme"
+	if _, err := s.settingsPatch(conversationSettingsInput{Reasoning: &badReasoning}); err == nil {
+		t.Fatal("unknown reasoning accepted")
+	}
+	top, max, reasoning := 0.8, 4096, "medium"
+	if _, err := s.settingsPatch(conversationSettingsInput{TopP: &top, MaxOutputTokens: &max, Reasoning: &reasoning}); err != nil {
+		t.Fatalf("valid generation controls rejected: %v", err)
 	}
 }

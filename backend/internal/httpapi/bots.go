@@ -131,24 +131,28 @@ var botColors = map[string]bool{
 }
 
 type botDTO struct {
-	ID             string   `json:"id"`
-	Name           string   `json:"name"`
-	Emoji          string   `json:"emoji"`
-	Color          string   `json:"color"`
-	Instructions   string   `json:"instructions"`
-	Model          string   `json:"model"`
-	Temperature    *float64 `json:"temperature"`
-	RagEnabled     bool     `json:"ragEnabled"`
-	IsArchived     bool     `json:"isArchived"`
-	CreatedAt      string   `json:"createdAt"`
-	UpdatedAt      string   `json:"updatedAt"`
-	ConversationID string   `json:"conversationId"` // latest bot-scoped conversation, "" when none
+	ID              string   `json:"id"`
+	Name            string   `json:"name"`
+	Emoji           string   `json:"emoji"`
+	Color           string   `json:"color"`
+	Instructions    string   `json:"instructions"`
+	Model           string   `json:"model"`
+	Temperature     *float64 `json:"temperature"`
+	TopP            *float64 `json:"topP"`
+	MaxOutputTokens int      `json:"maxOutputTokens"`
+	Reasoning       string   `json:"reasoning"`
+	RagEnabled      bool     `json:"ragEnabled"`
+	IsArchived      bool     `json:"isArchived"`
+	CreatedAt       string   `json:"createdAt"`
+	UpdatedAt       string   `json:"updatedAt"`
+	ConversationID  string   `json:"conversationId"` // latest bot-scoped conversation, "" when none
 }
 
 func toBotDTO(b storage.Bot, conversationID string) botDTO {
 	return botDTO{
 		ID: b.ID, Name: b.Name, Emoji: b.Emoji, Color: b.Color,
 		Instructions: b.Instructions, Model: b.Model, Temperature: b.Temperature,
+		TopP: b.TopP, MaxOutputTokens: b.MaxOutputTokens, Reasoning: b.Reasoning,
 		RagEnabled: b.RagEnabled, IsArchived: b.IsArchived,
 		CreatedAt: b.CreatedAt.UTC().Format(timeRFC3339), UpdatedAt: b.UpdatedAt.UTC().Format(timeRFC3339),
 		ConversationID: conversationID,
@@ -201,6 +205,7 @@ func (s *Server) handleCreateBot(w http.ResponseWriter, r *http.Request) {
 		Model        string   `json:"model"`
 		Temperature  *float64 `json:"temperature"`
 		RagEnabled   *bool    `json:"ragEnabled"`
+		generationInput
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", "invalid body")
@@ -239,6 +244,10 @@ func (s *Server) handleCreateBot(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_temperature", "temperature must be between 0 and 2")
 		return
 	}
+	if err := validateGeneration(req.generationInput); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_generation", err.Error())
+		return
+	}
 	limit := s.deps.Cfg.MaxBotsPerUser
 	if limit <= 0 {
 		limit = 20 // config default; guards zero-valued test configs
@@ -253,7 +262,9 @@ func (s *Server) handleCreateBot(w http.ResponseWriter, r *http.Request) {
 	}
 	bot, err := s.deps.Bots.Create(r.Context(), storage.Bot{
 		UserID: userID, Name: name, Emoji: emoji, Color: color,
-		Instructions: req.Instructions, Model: req.Model, Temperature: req.Temperature, RagEnabled: rag,
+		Instructions: req.Instructions, Model: req.Model, Temperature: req.Temperature,
+		TopP: req.TopP, MaxOutputTokens: derefIntPtr(req.MaxOutputTokens), Reasoning: derefStringPtr(req.Reasoning),
+		RagEnabled: rag,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal", "failed to create bot")
@@ -342,14 +353,23 @@ func (s *Server) handleUpdateBot(w http.ResponseWriter, r *http.Request) {
 		ClearTemperature bool     `json:"clearTemperature"`
 		RagEnabled       *bool    `json:"ragEnabled"`
 		IsArchived       *bool    `json:"isArchived"`
+		generationInput
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", "invalid body")
 		return
 	}
+	if err := validateGeneration(req.generationInput); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_generation", err.Error())
+		return
+	}
 	patch := storage.BotPatch{
 		Temperature:      req.Temperature,
 		ClearTemperature: req.ClearTemperature,
+		TopP:             req.TopP,
+		ClearTopP:        req.ClearTopP,
+		MaxOutputTokens:  req.MaxOutputTokens,
+		Reasoning:        req.Reasoning,
 		RagEnabled:       req.RagEnabled,
 		IsArchived:       req.IsArchived,
 	}

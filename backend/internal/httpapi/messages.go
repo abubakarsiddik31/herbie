@@ -152,7 +152,7 @@ func (s *Server) handleRegenerate(w http.ResponseWriter, r *http.Request) {
 	// Regenerate-with-model applies to this branch only; the conversation's
 	// stored settings stay untouched.
 	if req.Model != "" {
-		patch, perr := s.settingsPatch(&req.Model, nil, false, nil, nil)
+		patch, perr := s.settingsPatch(conversationSettingsInput{Model: &req.Model})
 		if perr != nil {
 			writeError(w, http.StatusBadRequest, "validation_error", perr.Error())
 			return

@@ -25,9 +25,14 @@ type Conversation struct {
 	Title        string
 	Model        string // "" = server default
 	// Temperature nil = provider default.
-	Temperature  *float64
-	SystemPrompt string // "" = built-in prompt
-	RagEnabled   bool   // per-conversation document search (default true)
+	Temperature *float64
+	// TopP nil = provider default; MaxOutputTokens 0 = provider default;
+	// Reasoning "" = provider default, else low/medium/high.
+	TopP            *float64
+	MaxOutputTokens int
+	Reasoning       string
+	SystemPrompt    string // "" = built-in prompt
+	RagEnabled      bool   // per-conversation document search (default true)
 	// PinnedAt/ArchivedAt are the organization timestamps; nil means the
 	// conversation is neither pinned nor archived. TitleSource records who
 	// named the conversation: "heuristic" (first message), "auto" (title
@@ -47,6 +52,10 @@ type Conversation struct {
 type ConversationPatch struct {
 	Model            *string
 	Temperature      *float64
+	TopP             *float64
+	ClearTopP        bool
+	MaxOutputTokens  *int
+	Reasoning        *string
 	SystemPrompt     *string
 	RagEnabled       *bool
 	ClearTemperature bool
@@ -61,11 +70,12 @@ type Conversations struct{ pool *pgxpool.Pool }
 
 func NewConversations(pool *pgxpool.Pool) *Conversations { return &Conversations{pool: pool} }
 
-const conversationColumns = `id, user_id::text, title, model, temperature, system_prompt, rag_enabled, created_at, updated_at, project_id::text, bot_id::text, active_leaf_id::text, pinned_at, archived_at, title_source`
+const conversationColumns = `id, user_id::text, title, model, temperature, top_p, max_output_tokens, reasoning, system_prompt, rag_enabled, created_at, updated_at, project_id::text, bot_id::text, active_leaf_id::text, pinned_at, archived_at, title_source`
 
 func scanConversation(row pgx.Row) (Conversation, error) {
 	var conv Conversation
 	err := row.Scan(&conv.ID, &conv.UserID, &conv.Title, &conv.Model, &conv.Temperature,
+		&conv.TopP, &conv.MaxOutputTokens, &conv.Reasoning,
 		&conv.SystemPrompt, &conv.RagEnabled, &conv.CreatedAt, &conv.UpdatedAt, &conv.ProjectID, &conv.BotID, &conv.ActiveLeafID,
 		&conv.PinnedAt, &conv.ArchivedAt, &conv.TitleSource)
 	return conv, err
@@ -73,9 +83,9 @@ func scanConversation(row pgx.Row) (Conversation, error) {
 
 func (c *Conversations) Create(ctx context.Context, userID, title string, patch ConversationPatch) (Conversation, error) {
 	row := c.pool.QueryRow(ctx,
-		`INSERT INTO conversations (user_id, title, model, temperature, system_prompt, rag_enabled, project_id, bot_id, active_leaf_id, title_source) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULL, COALESCE(NULLIF($9, ''), 'heuristic'))
+		`INSERT INTO conversations (user_id, title, model, temperature, top_p, max_output_tokens, reasoning, system_prompt, rag_enabled, project_id, bot_id, active_leaf_id, title_source) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NULL, COALESCE(NULLIF($12, ''), 'heuristic'))
 		 RETURNING `+conversationColumns,
-		userID, SanitizeText(title), derefString(patch.Model), patch.Temperature, SanitizeText(derefString(patch.SystemPrompt)), derefBool(patch.RagEnabled, true), patch.ProjectID, patch.BotID, derefString(patch.TitleSource))
+		userID, SanitizeText(title), derefString(patch.Model), patch.Temperature, patch.TopP, derefInt(patch.MaxOutputTokens), SanitizeText(derefString(patch.Reasoning)), SanitizeText(derefString(patch.SystemPrompt)), derefBool(patch.RagEnabled, true), patch.ProjectID, patch.BotID, derefString(patch.TitleSource))
 	conv, err := scanConversation(row)
 	if err != nil {
 		return Conversation{}, fmt.Errorf("create conversation: %w", err)
@@ -298,6 +308,20 @@ func (c *Conversations) SetSettings(ctx context.Context, id, userID string, patc
 		args = append(args, *patch.Temperature)
 		sets = append(sets, fmt.Sprintf("temperature = $%d", len(args)))
 	}
+	if patch.ClearTopP {
+		sets = append(sets, "top_p = NULL")
+	} else if patch.TopP != nil {
+		args = append(args, *patch.TopP)
+		sets = append(sets, fmt.Sprintf("top_p = $%d", len(args)))
+	}
+	if patch.MaxOutputTokens != nil {
+		args = append(args, *patch.MaxOutputTokens)
+		sets = append(sets, fmt.Sprintf("max_output_tokens = $%d", len(args)))
+	}
+	if patch.Reasoning != nil {
+		args = append(args, SanitizeText(*patch.Reasoning))
+		sets = append(sets, fmt.Sprintf("reasoning = $%d", len(args)))
+	}
 	if patch.SystemPrompt != nil {
 		args = append(args, *patch.SystemPrompt)
 		sets = append(sets, fmt.Sprintf("system_prompt = $%d", len(args)))
@@ -351,6 +375,13 @@ func derefString(s *string) string {
 		return ""
 	}
 	return *s
+}
+
+func derefInt(p *int) int {
+	if p == nil {
+		return 0
+	}
+	return *p
 }
 
 func derefBool(b *bool, def bool) bool {

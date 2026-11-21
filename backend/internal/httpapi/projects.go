@@ -23,25 +23,45 @@ type ProjectStore interface {
 }
 
 type projectDTO struct {
-	ID           string `json:"id"`
-	Name         string `json:"name"`
-	Description  string `json:"description"`
-	Instructions string `json:"instructions"`
-	FilesCount   int    `json:"filesCount"`
-	CreatedAt    string `json:"createdAt"`
-	UpdatedAt    string `json:"updatedAt"`
+	ID                     string   `json:"id"`
+	Name                   string   `json:"name"`
+	Description            string   `json:"description"`
+	Instructions           string   `json:"instructions"`
+	DefaultTopP            *float64 `json:"defaultTopP"`
+	DefaultMaxOutputTokens int      `json:"defaultMaxOutputTokens"`
+	DefaultReasoning       string   `json:"defaultReasoning"`
+	FilesCount             int      `json:"filesCount"`
+	CreatedAt              string   `json:"createdAt"`
+	UpdatedAt              string   `json:"updatedAt"`
 }
 
 func toProjectDTO(p storage.Project) projectDTO {
 	return projectDTO{
-		ID:           p.ID,
-		Name:         p.Name,
-		Description:  p.Description,
-		Instructions: p.Instructions,
-		FilesCount:   p.FilesCount,
-		CreatedAt:    p.CreatedAt.UTC().Format(timeRFC3339),
-		UpdatedAt:    p.UpdatedAt.UTC().Format(timeRFC3339),
+		ID:                     p.ID,
+		Name:                   p.Name,
+		Description:            p.Description,
+		Instructions:           p.Instructions,
+		DefaultTopP:            p.DefaultTopP,
+		DefaultMaxOutputTokens: p.DefaultMaxOutputTokens,
+		DefaultReasoning:       p.DefaultReasoning,
+		FilesCount:             p.FilesCount,
+		CreatedAt:              p.CreatedAt.UTC().Format(timeRFC3339),
+		UpdatedAt:              p.UpdatedAt.UTC().Format(timeRFC3339),
 	}
+}
+
+func derefIntPtr(p *int) int {
+	if p == nil {
+		return 0
+	}
+	return *p
+}
+
+func derefStringPtr(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return *p
 }
 
 func (s *Server) handleListProjects(w http.ResponseWriter, r *http.Request) {
@@ -72,16 +92,24 @@ func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request) {
 		Name         string `json:"name"`
 		Description  string `json:"description"`
 		Instructions string `json:"instructions"`
+		generationInput
 	}
 	if err := decodeJSON(r, &req); err != nil || strings.TrimSpace(req.Name) == "" {
 		writeError(w, http.StatusBadRequest, "bad_request", "name is required")
 		return
 	}
+	if err := validateGeneration(req.generationInput); err != nil {
+		writeError(w, http.StatusBadRequest, "validation_error", err.Error())
+		return
+	}
 	p, err := s.deps.Projects.Create(r.Context(), storage.Project{
-		UserID:       userID,
-		Name:         strings.TrimSpace(req.Name),
-		Description:  strings.TrimSpace(req.Description),
-		Instructions: strings.TrimSpace(req.Instructions),
+		UserID:                 userID,
+		Name:                   strings.TrimSpace(req.Name),
+		Description:            strings.TrimSpace(req.Description),
+		Instructions:           strings.TrimSpace(req.Instructions),
+		DefaultTopP:            req.TopP,
+		DefaultMaxOutputTokens: derefIntPtr(req.MaxOutputTokens),
+		DefaultReasoning:       derefStringPtr(req.Reasoning),
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal", "could not create project")
@@ -147,15 +175,22 @@ func (s *Server) handlePatchProject(w http.ResponseWriter, r *http.Request) {
 		Name         *string `json:"name"`
 		Description  *string `json:"description"`
 		Instructions *string `json:"instructions"`
+		generationInput
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", "invalid body")
+		return
+	}
+	if err := validateGeneration(req.generationInput); err != nil {
+		writeError(w, http.StatusBadRequest, "validation_error", err.Error())
 		return
 	}
 	p, err := s.deps.Projects.Update(r.Context(), id, userID, storage.ProjectPatch{
 		Name:         req.Name,
 		Description:  req.Description,
 		Instructions: req.Instructions,
+		TopP:         req.TopP, ClearTopP: req.ClearTopP,
+		MaxOutputTokens: req.MaxOutputTokens, Reasoning: req.Reasoning,
 	})
 	if errors.Is(err, storage.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "not_found", "project not found")

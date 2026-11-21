@@ -556,9 +556,14 @@ type fakeUsage struct {
 	searches []storage.SearchQuery
 }
 
-type fakeProfiles struct{ texts map[string]string }
+type fakeProfiles struct {
+	texts    map[string]string
+	defaults map[string]storage.GenerationDefaults
+}
 
-func newFakeProfiles() *fakeProfiles { return &fakeProfiles{texts: map[string]string{}} }
+func newFakeProfiles() *fakeProfiles {
+	return &fakeProfiles{texts: map[string]string{}, defaults: map[string]storage.GenerationDefaults{}}
+}
 
 var _ ProfileStore = (*fakeProfiles)(nil)
 
@@ -568,6 +573,15 @@ func (f *fakeProfiles) Instructions(_ context.Context, userID string) (string, e
 
 func (f *fakeProfiles) SetInstructions(_ context.Context, userID, text string) error {
 	f.texts[userID] = text
+	return nil
+}
+
+func (f *fakeProfiles) GenerationDefaults(_ context.Context, userID string) (storage.GenerationDefaults, error) {
+	return f.defaults[userID], nil
+}
+
+func (f *fakeProfiles) SetGenerationDefaults(_ context.Context, userID string, d storage.GenerationDefaults) error {
+	f.defaults[userID] = d
 	return nil
 }
 

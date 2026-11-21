@@ -13,20 +13,28 @@ import (
 )
 
 type Project struct {
-	ID           string    `json:"id"`
-	UserID       string    `json:"userId"`
-	Name         string    `json:"name"`
-	Description  string    `json:"description"`
-	Instructions string    `json:"instructions"`
-	FilesCount   int       `json:"filesCount"`
-	CreatedAt    time.Time `json:"createdAt"`
-	UpdatedAt    time.Time `json:"updatedAt"`
+	ID           string `json:"id"`
+	UserID       string `json:"userId"`
+	Name         string `json:"name"`
+	Description  string `json:"description"`
+	Instructions string `json:"instructions"`
+	// Project-level fallback generation controls.
+	DefaultTopP            *float64  `json:"defaultTopP"`
+	DefaultMaxOutputTokens int       `json:"defaultMaxOutputTokens"`
+	DefaultReasoning       string    `json:"defaultReasoning"`
+	FilesCount             int       `json:"filesCount"`
+	CreatedAt              time.Time `json:"createdAt"`
+	UpdatedAt              time.Time `json:"updatedAt"`
 }
 
 type ProjectPatch struct {
-	Name         *string
-	Description  *string
-	Instructions *string
+	Name            *string
+	Description     *string
+	Instructions    *string
+	TopP            *float64
+	ClearTopP       bool
+	MaxOutputTokens *int
+	Reasoning       *string
 }
 
 type Projects struct {
@@ -38,12 +46,14 @@ func NewProjects(pool *pgxpool.Pool) *Projects {
 }
 
 const projectColumns = `p.id, p.user_id::text, p.name, p.description, p.instructions,
+	p.default_top_p, p.default_max_output_tokens, p.default_reasoning,
 	(SELECT COUNT(*) FROM documents d WHERE d.project_id = p.id) AS files_count,
 	p.created_at, p.updated_at`
 
 func scanProject(row pgx.Row) (Project, error) {
 	var p Project
 	err := row.Scan(&p.ID, &p.UserID, &p.Name, &p.Description, &p.Instructions,
+		&p.DefaultTopP, &p.DefaultMaxOutputTokens, &p.DefaultReasoning,
 		&p.FilesCount, &p.CreatedAt, &p.UpdatedAt)
 	return p, err
 }
@@ -53,10 +63,12 @@ func (pr *Projects) Create(ctx context.Context, p Project) (Project, error) {
 		p.ID = uuid.NewString()
 	}
 	row := pr.pool.QueryRow(ctx,
-		`INSERT INTO projects (id, user_id, name, description, instructions)
-		 VALUES ($1, $2, $3, $4, $5)
-		 RETURNING id, user_id::text, name, description, instructions, 0, created_at, updated_at`,
-		p.ID, p.UserID, p.Name, p.Description, p.Instructions)
+		`INSERT INTO projects (id, user_id, name, description, instructions, default_top_p, default_max_output_tokens, default_reasoning)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		 RETURNING id, user_id::text, name, description, instructions,
+		   default_top_p, default_max_output_tokens, default_reasoning, 0, created_at, updated_at`,
+		p.ID, p.UserID, p.Name, p.Description, p.Instructions,
+		p.DefaultTopP, p.DefaultMaxOutputTokens, SanitizeText(p.DefaultReasoning))
 	out, err := scanProject(row)
 	if err != nil {
 		return Project{}, fmt.Errorf("create project: %w", err)
@@ -112,6 +124,20 @@ func (pr *Projects) Update(ctx context.Context, id, userID string, patch Project
 	if patch.Instructions != nil {
 		args = append(args, *patch.Instructions)
 		sets = append(sets, fmt.Sprintf("instructions = $%d", len(args)))
+	}
+	if patch.ClearTopP {
+		sets = append(sets, "default_top_p = NULL")
+	} else if patch.TopP != nil {
+		args = append(args, *patch.TopP)
+		sets = append(sets, fmt.Sprintf("default_top_p = $%d", len(args)))
+	}
+	if patch.MaxOutputTokens != nil {
+		args = append(args, *patch.MaxOutputTokens)
+		sets = append(sets, fmt.Sprintf("default_max_output_tokens = $%d", len(args)))
+	}
+	if patch.Reasoning != nil {
+		args = append(args, SanitizeText(*patch.Reasoning))
+		sets = append(sets, fmt.Sprintf("default_reasoning = $%d", len(args)))
 	}
 	query := fmt.Sprintf(
 		`UPDATE projects SET %s WHERE id = $1 AND user_id = $2

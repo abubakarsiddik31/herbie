@@ -101,6 +101,8 @@ var _ ShareStore = (*storage.Shares)(nil)
 type ProfileStore interface {
 	Instructions(ctx context.Context, userID string) (string, error)
 	SetInstructions(ctx context.Context, userID, instructions string) error
+	GenerationDefaults(ctx context.Context, userID string) (storage.GenerationDefaults, error)
+	SetGenerationDefaults(ctx context.Context, userID string, d storage.GenerationDefaults) error
 }
 
 var _ ProfileStore = (*storage.Users)(nil)
@@ -571,9 +573,24 @@ func sourceRows(sources []rag.Scored) []map[string]any {
 // settings; the user's global prefix still leads. Fail-open: instruction
 // and bot lookup errors behave as unset.
 func (s *Server) runSpecFor(ctx context.Context, conv storage.Conversation) chat.RunSpec {
-	spec := chat.RunSpec{Model: conv.Model, Temperature: conv.Temperature, SystemPrompt: conv.SystemPrompt, RagEnabled: conv.RagEnabled}
+	spec := chat.RunSpec{
+		Model: conv.Model, Temperature: conv.Temperature,
+		TopP: conv.TopP, MaxOutputTokens: conv.MaxOutputTokens, Reasoning: conv.Reasoning,
+		SystemPrompt: conv.SystemPrompt, RagEnabled: conv.RagEnabled,
+	}
 	if spec.Model == "" {
 		spec.Model = chat.DefaultModel(s.deps.ModelKeys).ID
+	}
+	// Precedence: conversation (or bot) > project > user > provider default.
+	if conv.ProjectID != nil && s.deps.Projects != nil {
+		if project, err := s.deps.Projects.Get(ctx, *conv.ProjectID, conv.UserID); err == nil {
+			applySpecDefaults(&spec, project.DefaultTopP, project.DefaultMaxOutputTokens, project.DefaultReasoning)
+		}
+	}
+	if s.deps.Profiles != nil {
+		if defaults, err := s.deps.Profiles.GenerationDefaults(ctx, conv.UserID); err == nil {
+			applySpecDefaults(&spec, defaults.TopP, defaults.MaxOutputTokens, defaults.Reasoning)
+		}
 	}
 	var prefix strings.Builder
 	if s.deps.Memories != nil {
@@ -612,6 +629,15 @@ func (s *Server) runSpecFor(ctx context.Context, conv storage.Conversation) chat
 			if bot.Temperature != nil {
 				spec.Temperature = bot.Temperature
 			}
+			if bot.TopP != nil {
+				spec.TopP = bot.TopP
+			}
+			if bot.MaxOutputTokens > 0 {
+				spec.MaxOutputTokens = bot.MaxOutputTokens
+			}
+			if bot.Reasoning != "" {
+				spec.Reasoning = bot.Reasoning
+			}
 			spec.RagEnabled = bot.RagEnabled
 		}
 	}
@@ -619,6 +645,20 @@ func (s *Server) runSpecFor(ctx context.Context, conv storage.Conversation) chat
 		spec.SystemPrompt = prefix.String() + spec.SystemPrompt
 	}
 	return spec
+}
+
+// applySpecDefaults fills still-unset generation controls from a broader
+// scope (project or user).
+func applySpecDefaults(spec *chat.RunSpec, topP *float64, maxOutputTokens int, reasoning string) {
+	if spec.TopP == nil && topP != nil {
+		spec.TopP = topP
+	}
+	if spec.MaxOutputTokens == 0 && maxOutputTokens > 0 {
+		spec.MaxOutputTokens = maxOutputTokens
+	}
+	if spec.Reasoning == "" && reasoning != "" {
+		spec.Reasoning = reasoning
+	}
 }
 
 func (s *Server) saveMemoryFunc(userID string) func(ctx context.Context, fact string) error {

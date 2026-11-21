@@ -94,3 +94,23 @@ func TestResolveRejectsUnknownAndEmptyModel(t *testing.T) {
 }
 
 func ptrFloat(f float64) *float64 { return &f }
+
+func TestResolvePassesGenerationOptions(t *testing.T) {
+	var got clientOptions
+	reg := NewModelRegistryWithOptionsFactory(ProviderKeys{Gemini: "g"}, func(provider, modelName string, opts clientOptions) (model.StreamingModel, error) {
+		got = opts
+		return fakeClient{}, nil
+	})
+	temp := 0.4
+	top := 0.7
+	if _, err := reg.Resolve(RunSpec{
+		Model: "gemini-2.5-flash", Temperature: &temp,
+		TopP: &top, MaxOutputTokens: 1234, Reasoning: "high",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got.Temperature == nil || *got.Temperature != 0.4 || got.TopP == nil || *got.TopP != 0.7 ||
+		got.MaxOutputTokens != 1234 || got.Reasoning != "high" {
+		t.Fatalf("factory options = %+v", got)
+	}
+}

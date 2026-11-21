@@ -39,6 +39,20 @@ table "users" {
     null    = false
     default = ""
   }
+  column "default_top_p" {
+    type = double
+    null = true
+  }
+  column "default_max_output_tokens" {
+    type    = integer
+    null    = false
+    default = 0
+  }
+  column "default_reasoning" {
+    type    = text
+    null    = false
+    default = ""
+  }
   column "created_at" {
     type    = timestamptz
     null    = false
@@ -234,6 +248,20 @@ table "conversations" {
     type    = text
     null    = false
     default = "heuristic"
+  }
+  column "top_p" {
+    type = double
+    null = true
+  }
+  column "max_output_tokens" {
+    type    = integer
+    null    = false
+    default = 0
+  }
+  column "reasoning" {
+    type    = text
+    null    = false
+    default = ""
   }
   primary_key {
     columns = [column.id]
@@ -858,6 +886,20 @@ table "projects" {
     null    = false
     default = ""
   }
+  column "default_top_p" {
+    type = double
+    null = true
+  }
+  column "default_max_output_tokens" {
+    type    = integer
+    null    = false
+    default = 0
+  }
+  column "default_reasoning" {
+    type    = text
+    null    = false
+    default = ""
+  }
   column "created_at" {
     type    = timestamptz
     null    = false
@@ -1304,6 +1346,20 @@ table "bots" {
   column "temperature" {
     type = real
     null = true
+  }
+  column "top_p" {
+    type = double
+    null = true
+  }
+  column "max_output_tokens" {
+    type    = integer
+    null    = false
+    default = 0
+  }
+  column "reasoning" {
+    type    = text
+    null    = false
+    default = ""
   }
   column "rag_enabled" {
     type    = boolean
