@@ -572,6 +572,11 @@ table "model_catalog" {
     null    = false
     default = sql("'{}'::jsonb")
   }
+  column "sort_order" {
+    type    = integer
+    null    = false
+    default = 0
+  }
   column "created_at" {
     type    = timestamptz
     null    = false

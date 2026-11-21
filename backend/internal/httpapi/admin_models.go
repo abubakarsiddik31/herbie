@@ -28,6 +28,7 @@ type modelCatalogDTO struct {
 	OutputPerM   float64         `json:"outputPerM"`
 	Enabled      bool            `json:"enabled"`
 	Capabilities json.RawMessage `json:"capabilities"`
+	SortOrder    int             `json:"sortOrder"`
 	UpdatedAt    string          `json:"updatedAt"`
 }
 
@@ -39,7 +40,7 @@ func toModelCatalogDTO(m storage.ModelCatalogRow) modelCatalogDTO {
 	return modelCatalogDTO{
 		ID: m.ID, Provider: m.Provider, Label: m.Label,
 		InputPerM: m.InputPerM, OutputPerM: m.OutputPerM, Enabled: m.Enabled,
-		Capabilities: caps, UpdatedAt: m.UpdatedAt.UTC().Format(timeRFC3339),
+		Capabilities: caps, SortOrder: m.SortOrder, UpdatedAt: m.UpdatedAt.UTC().Format(timeRFC3339),
 	}
 }
 
@@ -73,6 +74,7 @@ func (s *Server) handleAdminUpsertModel(w http.ResponseWriter, r *http.Request) 
 		OutputPerM   *float64        `json:"outputPerM"`
 		Enabled      *bool           `json:"enabled"`
 		Capabilities json.RawMessage `json:"capabilities"`
+		SortOrder    *int            `json:"sortOrder"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", "invalid body")
@@ -111,6 +113,9 @@ func (s *Server) handleAdminUpsertModel(w http.ResponseWriter, r *http.Request) 
 	}
 	if len(req.Capabilities) > 0 {
 		row.Capabilities = req.Capabilities
+	}
+	if req.SortOrder != nil {
+		row.SortOrder = *req.SortOrder
 	}
 	saved, err := s.deps.ModelCatalog.Upsert(r.Context(), row)
 	if err != nil {

@@ -1,4 +1,4 @@
-h1:zWUpzXuYyqknfjnrj57+jjGvWDr2Vd0tXrMHR9a0/uY=
+h1:be6/sNz8/h1w2WWcstQ89YhlLPormb3zIkQAEVnOkW0=
 00001_init.sql h1:JzcSZ+hS8j4FBAEasJFC0KyqFe8QRjnFIzvK0l53Y8c=
 20260831070441_add_user_tools.sql h1:n33/K0eZGdHtRI+bx6ZatvlLEfNacVO1BPCCAkewmAE=
 20260831144933_pending_call_surrogate_id.sql h1:5IOIo7ZQte1f++QNHqs1eJrsPbsQdLaoi1kE0JyxefQ=
@@ -29,3 +29,4 @@ h1:zWUpzXuYyqknfjnrj57+jjGvWDr2Vd0tXrMHR9a0/uY=
 20261121190000_user_provider_keys.sql h1:lH+bQ9pBR2BE/46gYGfp+DOALnTBZJLHWBlbuqI5d98=
 20261121200000_model_catalog.sql h1:QKgHZHFfQKY8IchftEMQPux/YmM8NgX8PDyKnBcSFAc=
 20261121210000_model_capabilities.sql h1:1I/JFtbVhG6i12Vcn9gOGySa62fT/eamIuzYtOfIh+s=
+20261121220000_model_catalog_order.sql h1:VApsNB+jqOvaj79ZnTY6tX8MNjuzaNkFN0OL+DPrF/E=
