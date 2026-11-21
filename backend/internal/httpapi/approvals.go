@@ -252,6 +252,12 @@ func (s *Server) parkPending(ctx context.Context, userID, convID string, spec ch
 
 // finishResumed records usage and emits done without re-persisting messages.
 func (s *Server) finishResumed(ctx context.Context, userID, convID string, spec chat.RunSpec, outcome chat.Outcome, sink *sseSink) {
+	if outcome.UsedModel != "" && outcome.UsedModel != spec.Model {
+		_ = sink.event("meta", map[string]any{
+			"type": "fallback", "requested": spec.Model, "used": outcome.UsedModel,
+		})
+		spec.Model = outcome.UsedModel
+	}
 	if err := s.deps.Usage.Add(ctx, usageEventFor(userID, convID, spec.Model, outcome.Usage, outcome.Requests, s.deps.Rates)); err != nil {
 		s.deps.Log.Error("record usage", "err", err)
 	}

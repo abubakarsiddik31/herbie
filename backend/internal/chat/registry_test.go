@@ -114,3 +114,40 @@ func TestResolvePassesGenerationOptions(t *testing.T) {
 		t.Fatalf("factory options = %+v", got)
 	}
 }
+
+func TestAutoFallbackReportsUsedModel(t *testing.T) {
+	reg := NewModelRegistryWithOptionsFactory(ProviderKeys{Gemini: "g"}, func(provider, modelName string, opts clientOptions) (model.StreamingModel, error) {
+		if modelName == "gemini-3.5-flash" {
+			return failingClient{}, nil
+		}
+		return fakeClient{}, nil
+	})
+	client, err := reg.Resolve(RunSpec{Model: AutoModelID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.GenerateStream(context.Background(), model.Request{}, func(model.Delta) error { return nil }); err != nil {
+		t.Fatalf("fallback should succeed: %v", err)
+	}
+	used, ok := client.(interface{ UsedModel() string })
+	if !ok || used.UsedModel() != "gemini-3.5-pro" {
+		t.Fatalf("used model = %v, want gemini-3.5-pro", client)
+	}
+}
+
+type failingClient struct{}
+
+type retryableFailure struct{}
+
+func (retryableFailure) Error() string   { return "nope" }
+func (retryableFailure) Retryable() bool { return true }
+
+var errRetryable = retryableFailure{}
+
+func (failingClient) Generate(context.Context, model.Request) (model.Response, error) {
+	return model.Response{}, errRetryable
+}
+
+func (failingClient) GenerateStream(context.Context, model.Request, func(model.Delta) error) (model.Response, error) {
+	return model.Response{}, errRetryable
+}

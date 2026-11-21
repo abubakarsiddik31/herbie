@@ -88,14 +88,8 @@ func (s *Server) settingsPatch(in conversationSettingsInput) (storage.Conversati
 		SystemPrompt: in.SystemPrompt, RagEnabled: in.RagEnabled,
 	}
 	if in.Model != nil {
-		if *in.Model != "" {
-			spec, ok := chat.FindModel(*in.Model)
-			if !ok {
-				return patch, errors.New("unknown model " + *in.Model)
-			}
-			if !chat.HasProvider(s.deps.ModelKeys, spec.Provider) {
-				return patch, errors.New("model " + *in.Model + " is not configured on this server")
-			}
+		if err := s.validateModelID(*in.Model); err != nil {
+			return patch, err
 		}
 		patch.Model = in.Model
 	}
@@ -121,6 +115,28 @@ func (s *Server) settingsPatch(in conversationSettingsInput) (storage.Conversati
 		return patch, errors.New("system prompt too long")
 	}
 	return patch, nil
+}
+
+// validateModelID accepts the auto alias (needs at least one configured
+// provider) and catalog models whose provider key is configured.
+func (s *Server) validateModelID(id string) error {
+	if id == "" {
+		return nil
+	}
+	if id == chat.AutoModelID {
+		if len(chat.Available(s.deps.ModelKeys)) == 0 {
+			return errors.New("auto model requires a configured provider")
+		}
+		return nil
+	}
+	spec, ok := chat.FindModel(id)
+	if !ok {
+		return errors.New("unknown model " + id)
+	}
+	if !chat.HasProvider(s.deps.ModelKeys, spec.Provider) {
+		return errors.New("model " + id + " is not configured on this server")
+	}
+	return nil
 }
 
 // queryBool parses an optional strict boolean query parameter: "true"/"1"

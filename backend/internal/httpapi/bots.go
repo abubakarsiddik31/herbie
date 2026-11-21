@@ -3,7 +3,6 @@ package httpapi
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"strings"
 	"unicode/utf8"
@@ -172,17 +171,7 @@ func toBotMemoryDTO(m storage.BotMemory) botMemoryDTO {
 // validateBotModel reuses the conversation-settings model rule: a non-empty
 // model must exist in the catalog and its provider must be configured.
 func (s *Server) validateBotModel(id string) error {
-	if id == "" {
-		return nil
-	}
-	spec, ok := chat.FindModel(id)
-	if !ok {
-		return fmt.Errorf("unknown model %s", id)
-	}
-	if !chat.HasProvider(s.deps.ModelKeys, spec.Provider) {
-		return fmt.Errorf("model %s is not configured on this server", id)
-	}
-	return nil
+	return s.validateModelID(id)
 }
 
 // validateBotName trims and checks the shared name rule (used by create,

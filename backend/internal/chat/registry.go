@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strconv"
@@ -76,7 +77,14 @@ func NewModelRegistryWithOptionsFactory(keys ProviderKeys, f clientOptionsFactor
 // Resolve returns the client for spec's (provider, model, temperature),
 // building and caching it on first use. Temperatures are normalized to the
 // provider's accepted range up front so clamped values share cache entries.
+// AutoModelID selects the ordered fallback chain over the configured
+// catalog models. It is a UI/alias value, not a catalog row.
+const AutoModelID = "auto"
+
 func (r *ModelRegistry) Resolve(spec RunSpec) (model.StreamingModel, error) {
+	if spec.Model == AutoModelID {
+		return r.resolveAuto(spec)
+	}
 	target, ok := FindModel(spec.Model)
 	if !ok {
 		return nil, fmt.Errorf("unknown model %q", spec.Model)
@@ -126,6 +134,98 @@ func (r *ModelRegistry) Resolve(spec RunSpec) (model.StreamingModel, error) {
 
 // productionFactory constructs the golem provider client for the spec.
 // Temperature is already provider-clamped by Resolve.
+// resolveAuto builds a fresh fallback over the available catalog models so
+// each run gets its own used-model recorder (the provider clients themselves
+// stay cached by their concrete Resolve calls).
+func (r *ModelRegistry) resolveAuto(spec RunSpec) (model.StreamingModel, error) {
+	available := Available(r.keys)
+	if len(available) == 0 {
+		return nil, fmt.Errorf("auto model requires a configured provider")
+	}
+	tracker := &usedModelTracker{}
+	members := make([]model.StreamingModel, 0, len(available))
+	named := make([]model.Model, 0, len(available))
+	for _, candidate := range available {
+		concrete := spec
+		concrete.Model = candidate.ID
+		client, err := r.Resolve(concrete)
+		if err != nil {
+			return nil, fmt.Errorf("auto fallback build %s: %w", candidate.ID, err)
+		}
+		client = &namedModel{name: candidate.ID, inner: client, tracker: tracker}
+		members = append(members, client)
+		named = append(named, client)
+	}
+	if len(members) == 1 {
+		return &autoModel{inner: members[0], tracker: tracker}, nil
+	}
+	fb, err := model.NewFallback(named[0], named[1:]...)
+	if err != nil {
+		return nil, err
+	}
+	return &autoModel{inner: fb, tracker: tracker}, nil
+}
+
+// usedModelRecords is implemented by auto-fallback clients so the agent can
+// report which member answered.
+type usedModelRecords interface {
+	UsedModel() string
+}
+
+type usedModelTracker struct {
+	mu   sync.Mutex
+	name string
+}
+
+func (t *usedModelTracker) set(name string) {
+	t.mu.Lock()
+	t.name = name
+	t.mu.Unlock()
+}
+
+func (t *usedModelTracker) get() string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.name
+}
+
+type namedModel struct {
+	name    string
+	inner   model.StreamingModel
+	tracker *usedModelTracker
+}
+
+func (n *namedModel) Generate(ctx context.Context, req model.Request) (model.Response, error) {
+	resp, err := n.inner.Generate(ctx, req)
+	if err == nil {
+		n.tracker.set(n.name)
+	}
+	return resp, err
+}
+
+func (n *namedModel) GenerateStream(ctx context.Context, req model.Request, onDelta func(model.Delta) error) (model.Response, error) {
+	resp, err := n.inner.GenerateStream(ctx, req, onDelta)
+	if err == nil {
+		n.tracker.set(n.name)
+	}
+	return resp, err
+}
+
+type autoModel struct {
+	inner   model.StreamingModel
+	tracker *usedModelTracker
+}
+
+func (a *autoModel) Generate(ctx context.Context, req model.Request) (model.Response, error) {
+	return a.inner.Generate(ctx, req)
+}
+
+func (a *autoModel) GenerateStream(ctx context.Context, req model.Request, onDelta func(model.Delta) error) (model.Response, error) {
+	return a.inner.GenerateStream(ctx, req, onDelta)
+}
+
+func (a *autoModel) UsedModel() string { return a.tracker.get() }
+
 func (r *ModelRegistry) productionFactory(provider, modelName string, opts clientOptions) (model.StreamingModel, error) {
 	maxOutputTokens := 16384
 	if opts.MaxOutputTokens > 0 {

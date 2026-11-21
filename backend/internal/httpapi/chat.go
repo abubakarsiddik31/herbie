@@ -1244,6 +1244,14 @@ func (s *Server) toolEnv() chat.ToolEnv {
 // everything else finishes normally. sources carries the run's retrieved
 // chunks for the concluding answer row (nil when it never searched).
 func (s *Server) settleRun(ctx context.Context, userID, convID string, spec chat.RunSpec, outcome chat.Outcome, sink *sseSink, known map[string]bool, startParentID string, sources json.RawMessage) {
+	// An auto-fallback run reports the member that actually answered; meter,
+	// persist, and label from that concrete model.
+	if outcome.UsedModel != "" && outcome.UsedModel != spec.Model {
+		_ = sink.event("meta", map[string]any{
+			"type": "fallback", "requested": spec.Model, "used": outcome.UsedModel,
+		})
+		spec.Model = outcome.UsedModel
+	}
 	newFrom := replayedPrefixLen(outcome.Messages)
 	if len(outcome.Pending) > 0 {
 		s.pauseRun(ctx, userID, convID, spec, outcome, sink, known, newFrom, startParentID)
