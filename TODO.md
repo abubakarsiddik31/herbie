@@ -203,9 +203,9 @@ backfill, bot/fork titles, SetTitle overloading, quote composition) and 9 majors
 - [x] `auto` alias → ordered fallback chain via `model.NewFallback` (pre-first-fragment
       only); used-model stamping in usage/transcript; fallback indicator in the run trace.
 - [x] Inline model switcher; regenerate-with-model (branch, not a settings change).
-- [ ] BYOK: per-user provider keys in the vault (set/test/delete, audited, never
+- [x] BYOK: per-user provider keys in the vault (set/test/delete, audited, never
       returned); server keys as fallback; `ALLOW_USER_PROVIDER_KEYS` flag.
-- [ ] Admin model catalog in Postgres (seeded from the hardcoded list): CRUD, rates,
+- [x] Admin model catalog in Postgres (seeded from the hardcoded list): CRUD, rates,
       capabilities, enabled flag; `/api/models` = enabled ∧ key-available.
 
 ### Phase 3 — context, resilience, compare (features: `feat/context-2`, `feat/compare`)
