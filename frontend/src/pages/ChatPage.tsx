@@ -382,13 +382,17 @@ export function ChatPage() {
     }
   }, [detailError, selectedId, navigate]);
 
+  // Reset only when the selection itself becomes empty. Depending on status
+  // here would abort an in-flight send that starts before the router commits
+  // the new conversation id (the /chat -> /chat/:id transition).
   useEffect(() => {
-    if (selectedId === null) {
-      seededRef.current = null;
-      reset();
-      return;
-    }
-    if (!detail || status === "running") return;
+    if (selectedId !== null) return;
+    seededRef.current = null;
+    reset();
+  }, [selectedId, reset]);
+
+  useEffect(() => {
+    if (selectedId === null || !detail || status === "running") return;
     const tailId = detail.messages.at(-1)?.id ?? "";
     const seedKey = `${selectedId}:${detail.conversation.activeLeafId ?? ""}:${tailId}`;
     if (seededRef.current === seedKey) return;
@@ -398,7 +402,7 @@ export function ChatPage() {
       setContextStatus(detail.context);
     }
     setSendError(null);
-  }, [selectedId, detail, status, reset, setMessages, setContextStatus]);
+  }, [selectedId, detail, status, setMessages, setContextStatus]);
 
   function scrollToMessage(messageId: string) {
     const el = document.getElementById(`message-${messageId}`);
