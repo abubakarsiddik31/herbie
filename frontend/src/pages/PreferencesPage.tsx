@@ -8,6 +8,12 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useSidebar } from "@/components/layout/SidebarContext";
 import { useProfile, useUpdateProfile } from "@/features/profile/useProfile";
 import {
+  useDeleteProviderKey,
+  useProviderKeys,
+  useSetProviderKey,
+  useTestProviderKey,
+} from "@/features/profile/useProviderKeys";
+import {
   useMemories,
   useCreateMemory,
   useDeleteMemory,
@@ -27,6 +33,11 @@ export function PreferencesPage() {
     maxOutputTokens: number;
     reasoning: "low" | "medium" | "high" | "";
   } | null>(null);
+  const providerKeys = useProviderKeys();
+  const setProviderKey = useSetProviderKey();
+  const deleteProviderKey = useDeleteProviderKey();
+  const testProviderKey = useTestProviderKey();
+  const [keyDrafts, setKeyDrafts] = useState<Record<string, string>>({});
 
   const {
     data: memories,
@@ -258,6 +269,97 @@ export function PreferencesPage() {
                 Save defaults
               </Button>
             </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {providerKeys.data?.allowUserKeys && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Model provider keys</CardTitle>
+            <CardDescription>
+              Your own keys override the server keys for your runs. Keys are encrypted and never shown again.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {providerKeys.data.providers.map((row) => {
+              const label =
+                row.provider === "gemini" ? "Google Gemini" : row.provider === "openai" ? "OpenAI" : "Anthropic";
+              return (
+                <div key={row.provider} className="space-y-2 rounded-lg border border-border/60 p-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-medium">{label}</span>
+                    <span className={row.configured ? "text-[11px] text-emerald-600" : "text-[11px] text-muted-foreground"}>
+                      {row.configured ? "Configured" : "Not configured"}
+                    </span>
+                  </div>
+                  <div className="flex gap-2">
+                    <input
+                      type="password"
+                      value={keyDrafts[row.provider] ?? ""}
+                      onChange={(e) => setKeyDrafts((prev) => ({ ...prev, [row.provider]: e.target.value }))}
+                      placeholder={row.configured ? "Replace key…" : "Paste API key"}
+                      aria-label={`${label} API key`}
+                      className="h-8 flex-1 rounded-md border border-input bg-transparent px-2.5 text-xs outline-none"
+                    />
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      aria-label={`Save ${label} key`}
+                      disabled={!keyDrafts[row.provider]?.trim() || setProviderKey.isPending}
+                      onClick={() =>
+                        setProviderKey.mutate(
+                          { provider: row.provider, apiKey: keyDrafts[row.provider].trim() },
+                          {
+                            onSuccess: () => {
+                              setKeyDrafts((prev) => ({ ...prev, [row.provider]: "" }));
+                              toast.success(`${label} key saved`);
+                            },
+                            onError: (err) =>
+                              toast.error(err instanceof ApiError ? err.message : "Failed to save key"),
+                          },
+                        )
+                      }
+                    >
+                      Save
+                    </Button>
+                    {row.configured && (
+                      <>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          aria-label={`Test ${label} key`}
+                          disabled={testProviderKey.isPending}
+                          onClick={() =>
+                            testProviderKey.mutate(row.provider, {
+                              onSuccess: () => toast.success(`${label} key works`),
+                              onError: (err) =>
+                                toast.error(err instanceof ApiError ? err.message : "Key test failed"),
+                            })
+                          }
+                        >
+                          Test
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          aria-label={`Remove ${label} key`}
+                          className="text-destructive"
+                          disabled={deleteProviderKey.isPending}
+                          onClick={() =>
+                            deleteProviderKey.mutate(row.provider, {
+                              onSuccess: () => toast.success(`${label} key removed`),
+                            })
+                          }
+                        >
+                          Remove
+                        </Button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
           </CardContent>
         </Card>
       )}

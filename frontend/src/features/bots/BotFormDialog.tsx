@@ -72,6 +72,7 @@ export function BotFormDialog({ open, onOpenChange, bot }: Props) {
     byProvider.set(m.provider, list);
   }
   const effectiveModel = model || models?.default || "";
+  const supportsReasoning = models?.models.find((m) => m.id === effectiveModel)?.capabilities?.reasoning !== false;
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -230,6 +231,7 @@ export function BotFormDialog({ open, onOpenChange, bot }: Props) {
               />
             </div>
 
+            {supportsReasoning && (
             <div className="grid gap-1.5">
               <Label htmlFor="bot-reasoning">Reasoning effort</Label>
               <select
@@ -244,6 +246,7 @@ export function BotFormDialog({ open, onOpenChange, bot }: Props) {
                 <option value="high">High</option>
               </select>
             </div>
+            )}
 
             <div className="flex items-center justify-between gap-3">
               <div className="grid gap-0.5">

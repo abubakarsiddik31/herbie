@@ -12,7 +12,12 @@ export interface Conversation {
 }
 export interface SavedPrompt { id: string; title: string; body: string; createdAt: string; updatedAt: string }
 export interface SavedPromptsResponse { prompts: SavedPrompt[] }
-export interface ModelInfo { id: string; label: string; provider: string }
+export interface ModelInfo {
+  id: string;
+  label: string;
+  provider: string;
+  capabilities?: Record<string, boolean>;
+}
 export interface ModelsResponse { default: string; models: ModelInfo[] }
 export interface ConversationSettings {
   model: string;

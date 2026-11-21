@@ -60,6 +60,7 @@ export function ConversationSettingsDialog({ open, onOpenChange, models, setting
     byProvider.set(m.provider, list);
   }
   const effectiveModel = model || models?.default || "";
+  const supportsReasoning = models?.models.find((m) => m.id === effectiveModel)?.capabilities?.reasoning !== false;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -167,20 +168,22 @@ export function ConversationSettingsDialog({ open, onOpenChange, models, setting
             />
           </div>
 
-          <div className="grid gap-1.5">
-            <Label htmlFor="reasoning-select">Reasoning effort</Label>
-            <select
-              id="reasoning-select"
-              value={reasoning}
-              onChange={(e) => setReasoning(e.target.value as typeof reasoning)}
-              className="h-9 w-full rounded-md border border-input bg-transparent px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
-            >
-              <option value="">Provider default</option>
-              <option value="low">Low</option>
-              <option value="medium">Medium</option>
-              <option value="high">High</option>
-            </select>
-          </div>
+          {supportsReasoning && (
+            <div className="grid gap-1.5">
+              <Label htmlFor="reasoning-select">Reasoning effort</Label>
+              <select
+                id="reasoning-select"
+                value={reasoning}
+                onChange={(e) => setReasoning(e.target.value as typeof reasoning)}
+                className="h-9 w-full rounded-md border border-input bg-transparent px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+              >
+                <option value="">Provider default</option>
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+              </select>
+            </div>
+          )}
 
           <div className="grid gap-1.5">
             <Label htmlFor="system-prompt">System prompt</Label>

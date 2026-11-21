@@ -17,6 +17,7 @@ const server = setupServer(
     saved.push(body.defaultInstructions);
     return new HttpResponse(null, { status: 204 });
   }),
+  http.get("*/api/provider-keys", () => HttpResponse.json({ allowUserKeys: false, providers: [] })),
   http.get("*/api/memories", () => HttpResponse.json(mockMemories)),
   http.post("*/api/memories", async ({ request }) => {
     const body = (await request.json()) as { content: string };
