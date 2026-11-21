@@ -90,6 +90,7 @@ func newShareTestServer(t *testing.T) (http.Handler, string, *fakeConvos, *fakeM
 		Profiles: newFakeProfiles(),
 		Convos:   convs,
 		Msgs:     msgs,
+		Feedback: newFakeFeedback(msgs),
 		Shares:   newFakeShares(convs),
 	})
 	token, _, err := tm.Issue("u-1", time.Now())

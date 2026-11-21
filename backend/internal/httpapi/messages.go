@@ -99,19 +99,20 @@ func (s *Server) handleEditMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Copy the stored payload (images included) but replace the text.
+	// Copy the stored payload (images and quote included) but replace the
+	// text. The edited sibling keeps the target's quote link and snapshot.
 	var payload model.Message
 	if err := json.Unmarshal(target.Data, &payload); err != nil {
 		writeError(w, http.StatusInternalServerError, "internal", "could not decode message")
 		return
 	}
-	payload.Content = req.Content
+	payload.Content = composeUserContent(req.Content, target.QuoteText)
 	s.unarchiveForTurn(ctx, conv)
 	siblingID, err := s.deps.Msgs.Add(ctx, storage.Message{
 		ConversationID: convID, UserID: userID, Role: string(model.RoleUser),
-		ParentID: target.ParentID,
-		Content:  req.Content,
-		Data:     mustJSON(payload),
+		ParentID: target.ParentID, ReplyToID: target.ReplyToID, QuoteText: target.QuoteText,
+		Content: req.Content,
+		Data:    mustJSON(payload),
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal", "could not store message")
@@ -121,7 +122,7 @@ func (s *Server) handleEditMessage(w http.ResponseWriter, r *http.Request) {
 		s.deps.Log.Error("could not set active leaf", "err", err, "conv_id", convID)
 	}
 	_ = s.deps.Convos.Touch(ctx, convID)
-	s.runTurn(ctx, userID, convID, spec, conv.BotID, historyFrom(path, idx), req.Content, payload.Parts, knownRows(path), siblingID, w)
+	s.runTurn(ctx, userID, convID, spec, conv.BotID, historyFrom(path, idx), payload.Content, payload.Parts, knownRows(path), siblingID, w)
 }
 
 // handleRegenerate creates a sibling assistant chain for the last user row on
@@ -187,7 +188,8 @@ func (s *Server) handleRegenerate(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = s.deps.Convos.Touch(ctx, convID)
 	s.unarchiveForTurn(ctx, conv)
-	s.runTurn(ctx, userID, convID, spec, conv.BotID, historyFrom(path, lastUser), path[lastUser].Content, payload.Parts, knownRows(path), path[lastUser].ID, w)
+	modelContent := composeUserContent(path[lastUser].Content, path[lastUser].QuoteText)
+	s.runTurn(ctx, userID, convID, spec, conv.BotID, historyFrom(path, lastUser), modelContent, payload.Parts, knownRows(path), path[lastUser].ID, w)
 }
 
 // handleDeleteMessage deletes one message's whole branch (subtree). Deleting

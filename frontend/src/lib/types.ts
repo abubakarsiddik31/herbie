@@ -22,6 +22,9 @@ export interface ChatMessage {
   usage?: MessageUsage;
   sources?: Source[];
   branch?: { count: number; index: number; ids: string[] };
+  replyToId?: string;
+  quoteText?: string;
+  feedback?: "up" | "down";
 }
 
 export interface Source {

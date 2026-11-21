@@ -95,6 +95,6 @@ func (s *Server) handleGetShared(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"title":    conv.Title,
-		"messages": transcriptMessages(msgs, leaf, false),
+		"messages": transcriptMessages(msgs, leaf, false, nil),
 	})
 }

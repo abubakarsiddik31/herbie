@@ -175,9 +175,9 @@ backfill, bot/fork titles, SetTitle overloading, quote composition) and 9 majors
       404s (no more silent 204s).
 
 **PR2 `feat/chat-feedback-quote`**
-- [ ] `message_feedback` (unique per user/message, assistant rows only, IDOR
+- [x] `message_feedback` (unique per user/message, assistant rows only, IDOR
       checks, omitted from shared transcripts), thumbs UI.
-- [ ] `reply_to_id` + server-snapshotted `quote_text` (capped), compose the
+- [x] `reply_to_id` + server-snapshotted `quote_text` (capped), compose the
       model-facing text in ONE place for send/edit/regenerate, keep raw `content`
       for transcript/search, carry quotes through edit/regenerate and fork.
 

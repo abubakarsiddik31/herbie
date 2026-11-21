@@ -161,3 +161,14 @@ export function useDeleteSavedPrompt() {
     },
   });
 }
+
+export function useMessageFeedback(conversationId: string | null) {
+  return useMutation({
+    mutationFn: ({ messageId, rating }: { messageId: string; rating: "up" | "down" | null }) => {
+      const path = `/api/conversations/${conversationId}/messages/${messageId}/feedback`;
+      return rating
+        ? apiFetch<void>(path, { method: "PUT", json: { rating } })
+        : apiFetch<void>(path, { method: "DELETE" });
+    },
+  });
+}

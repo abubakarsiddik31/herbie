@@ -24,6 +24,7 @@ import {
   Pencil,
   PenLine,
   RefreshCw,
+  Reply,
   Share2,
   ShieldCheck,
   Sidebar,
@@ -66,6 +67,7 @@ import { StreamingText } from "@/components/ai/StreamingText";
 import { ThinkingTrace } from "@/components/ai/ThinkingTrace";
 import { useSidebar } from "@/components/layout/SidebarContext";
 import { BranchSwitcher } from "@/features/chat/BranchSwitcher";
+import { FeedbackButtons } from "@/features/chat/FeedbackButtons";
 import { CommandPalette } from "@/features/chat/CommandPalette";
 import { PromptLibraryDialog } from "@/features/chat/PromptLibraryDialog";
 import { extractCitationsFromContent } from "@/features/chat/citations";
@@ -111,6 +113,9 @@ function toChatMessage(m: ChatMessage): ChatMessage {
     images: m.images,
     sources: m.sources,
     branch: m.branch,
+    replyToId: m.replyToId,
+    quoteText: m.quoteText,
+    feedback: m.feedback,
   };
 }
 
@@ -170,6 +175,11 @@ export function ChatPage() {
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [editing, setEditing] = useState<{ id: string; draft: string } | null>(null);
+  const [replyTarget, setReplyTarget] = useState<{
+    conversationId: string;
+    id: string;
+    content: string;
+  } | null>(null);
   const [attachments, setAttachments] = useState<PendingImage[]>([]);
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
   const [extractingFiles, setExtractingFiles] = useState(false);
@@ -392,6 +402,7 @@ export function ChatPage() {
     setAttachments([]);
     setAttachedFiles([]);
     setEditing(null);
+    setReplyTarget(null);
     setSendError(null);
   }
 
@@ -459,11 +470,13 @@ export function ChatPage() {
     setSendError(null);
     const images = attachments.map(({ mediaType, data }) => ({ mediaType, data }));
     const outgoingText = formatPromptWithFiles(text, attachedFiles);
+    const reply = replyTarget && replyTarget.conversationId === selectedId ? replyTarget : null;
     if (!overrideText) {
       setInput("");
       setAttachments([]);
       setAttachedFiles([]);
     }
+    setReplyTarget(null);
 
     try {
       let conversationId = selectedId;
@@ -472,7 +485,7 @@ export function ChatPage() {
         conversationId = conv.id;
         navigate(`/chat/${conversationId}`, { replace: true });
       }
-      await send(outgoingText, conversationId, images);
+      await send(outgoingText, conversationId, images, reply?.id, reply?.content);
     } catch (err) {
       setSendError(err instanceof ApiError ? err.message : "Failed to send message");
     }
@@ -570,6 +583,8 @@ export function ChatPage() {
     voice.toggle();
   }
 
+  const replyingTo =
+    replyTarget && replyTarget.conversationId === selectedId ? replyTarget : null;
   const activeConversation =
     conversations?.find((c) => c.id === selectedId) ??
     (detail?.conversation.id === selectedId ? detail.conversation : undefined);
@@ -881,6 +896,14 @@ export function ChatPage() {
                               ))}
                             </div>
                           )}
+                          {m.quoteText && (
+                            <div className="max-w-full rounded-xl border-l-2 border-primary/50 bg-muted/50 px-3 py-1.5 text-left text-xs text-muted-foreground">
+                              <span className="block text-[10px] font-medium uppercase tracking-wide text-muted-foreground/70">
+                                Replying to
+                              </span>
+                              <span className="line-clamp-3 whitespace-pre-wrap">{m.quoteText}</span>
+                            </div>
+                          )}
                           {/* Attached files badge and clean prompt in user message */}
                           {(() => {
                             const { filenames, files, userPrompt } = extractFilesAndPrompt(m.content);
@@ -933,6 +956,18 @@ export function ChatPage() {
                                 onActivate={activateBranchMessage}
                               />
                             )}
+                            <button
+                              type="button"
+                              aria-label="Reply to message"
+                              title="Reply"
+                              disabled={blockInteraction}
+                              onClick={() => {
+                                if (selectedId) setReplyTarget({ conversationId: selectedId, id: m.id, content: m.content });
+                              }}
+                              className="rounded-md p-1 text-muted-foreground/60 hover:text-foreground disabled:cursor-not-allowed"
+                            >
+                              <Reply className="size-3.5" />
+                            </button>
                             {!isBotConversation && (
                               <button
                                 type="button"
@@ -1028,6 +1063,26 @@ export function ChatPage() {
                                 />
                               )}
                               <CopyMessageButton text={m.content} />
+                              <button
+                                type="button"
+                                aria-label="Reply to message"
+                                title="Reply"
+                                disabled={blockInteraction}
+                                onClick={() => {
+                                  if (selectedId) setReplyTarget({ conversationId: selectedId, id: m.id, content: m.content });
+                                }}
+                                className="rounded-md p-1 text-muted-foreground/60 transition-colors hover:text-foreground disabled:cursor-not-allowed"
+                              >
+                                <Reply className="size-3.5" />
+                              </button>
+                              <FeedbackButtons
+                                conversationId={selectedId}
+                                messageId={m.id}
+                                value={m.feedback}
+                                onChange={(rating) =>
+                                  setMessages((prev) => prev.map((msg) => (msg.id === m.id ? { ...msg, feedback: rating } : msg)))
+                                }
+                              />
                               <button
                                 type="button"
                                 aria-label="Delete message"
@@ -1179,6 +1234,23 @@ export function ChatPage() {
               pending.length > 0 && "opacity-60",
             )}
           >
+            {replyingTo && (
+              <div className="flex items-start gap-2 border-b border-border/40 px-3 py-2">
+                <div className="min-w-0 flex-1">
+                  <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground/70">Replying to</p>
+                  <p className="line-clamp-2 whitespace-pre-wrap text-xs text-muted-foreground">{replyingTo.content}</p>
+                </div>
+                <button
+                  type="button"
+                  aria-label="Cancel reply"
+                  title="Cancel reply"
+                  onClick={() => setReplyTarget(null)}
+                  className="rounded-md p-1 text-muted-foreground/60 hover:text-foreground"
+                >
+                  <X className="size-3.5" />
+                </button>
+              </div>
+            )}
             {mentionQuery !== null && (
               <MentionMenu
                 apps={filteredApps}

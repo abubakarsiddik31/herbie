@@ -16,7 +16,12 @@ type Message struct {
 	UserID         string
 	// ParentID chains every stored row into the conversation's message tree;
 	// empty means the row is a root (the first prompt of a conversation).
-	ParentID     string
+	ParentID string
+	// ReplyToID links a user row to the message it quotes; empty = no quote.
+	// The FK clears it when the quoted row is deleted, while QuoteText keeps
+	// the server-side snapshot the model saw.
+	ReplyToID    string
+	QuoteText    string
 	Role         string
 	Content      string
 	Data         []byte // golem model.Message JSON (durable additive-only)
@@ -44,18 +49,25 @@ func (m *Messages) Add(ctx context.Context, msg Message) (string, error) {
 	msg.Model = SanitizeText(msg.Model)
 	msg.Data = SanitizeJSONBytes(msg.Data)
 	msg.Sources = SanitizeJSONBytes(msg.Sources)
-	var parent any
+	msg.QuoteText = SanitizeText(msg.QuoteText)
+	var parent, replyTo, quote any
 	if msg.ParentID != "" {
 		parent = msg.ParentID
+	}
+	if msg.ReplyToID != "" {
+		replyTo = msg.ReplyToID
+	}
+	if msg.QuoteText != "" {
+		quote = msg.QuoteText
 	}
 	var id string
 	err := m.pool.QueryRow(ctx,
 		`INSERT INTO messages
-		 (conversation_id, user_id, role, content, data, sources, input_tokens, output_tokens, requests, cost_micro_usd, truncated, model, parent_id)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+		 (conversation_id, user_id, role, content, data, sources, input_tokens, output_tokens, requests, cost_micro_usd, truncated, model, parent_id, reply_to_id, quote_text)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
 		 RETURNING id`,
 		msg.ConversationID, msg.UserID, msg.Role, msg.Content, msg.Data, msg.Sources,
-		msg.InputTokens, msg.OutputTokens, msg.Requests, msg.CostMicros, msg.Truncated, msg.Model, parent).Scan(&id)
+		msg.InputTokens, msg.OutputTokens, msg.Requests, msg.CostMicros, msg.Truncated, msg.Model, parent, replyTo, quote).Scan(&id)
 	if err != nil {
 		return "", fmt.Errorf("add message: %w", err)
 	}
@@ -63,13 +75,14 @@ func (m *Messages) Add(ctx context.Context, msg Message) (string, error) {
 }
 
 const messageColumns = `id, conversation_id::text, user_id::text, COALESCE(parent_id::text, '') AS parent_id,
+		       COALESCE(reply_to_id::text, '') AS reply_to_id, COALESCE(quote_text, '') AS quote_text,
 		       role, content, data, sources,
 		       input_tokens, output_tokens, requests, cost_micro_usd, truncated, model, created_at`
 
 func scanMessage(row pgx.Row) (Message, error) {
 	var msg Message
-	err := row.Scan(&msg.ID, &msg.ConversationID, &msg.UserID, &msg.ParentID, &msg.Role, &msg.Content,
-		&msg.Data, &msg.Sources, &msg.InputTokens, &msg.OutputTokens, &msg.Requests, &msg.CostMicros,
+	err := row.Scan(&msg.ID, &msg.ConversationID, &msg.UserID, &msg.ParentID, &msg.ReplyToID, &msg.QuoteText,
+		&msg.Role, &msg.Content, &msg.Data, &msg.Sources, &msg.InputTokens, &msg.OutputTokens, &msg.Requests, &msg.CostMicros,
 		&msg.Truncated, &msg.Model, &msg.CreatedAt)
 	return msg, err
 }
@@ -225,24 +238,36 @@ func (m *Messages) CopyPath(ctx context.Context, srcConvID, userID, newConvID st
 		if msg.ConversationID != srcConvID || msg.UserID != userID {
 			return "", ErrNotFound
 		}
-		var parent any
+		var parent, replyTo any
 		if msg.ParentID != "" {
 			if mapped, ok := remap[msg.ParentID]; ok {
 				parent = mapped
+			}
+		}
+		// A quote target outside the copied path has no counterpart in the
+		// fork; keep the snapshot but drop the dangling pointer.
+		if msg.ReplyToID != "" {
+			if mapped, ok := remap[msg.ReplyToID]; ok {
+				replyTo = mapped
 			}
 		}
 		sources := msg.Sources
 		if len(sources) == 0 {
 			sources = []byte("[]")
 		}
+		quoteText := SanitizeText(msg.QuoteText)
+		var quote any
+		if quoteText != "" {
+			quote = quoteText
+		}
 		var id string
 		err := tx.QueryRow(ctx,
 			`INSERT INTO messages
-			 (conversation_id, user_id, parent_id, role, content, data, sources,
+			 (conversation_id, user_id, parent_id, reply_to_id, quote_text, role, content, data, sources,
 			  input_tokens, output_tokens, requests, cost_micro_usd, truncated, model, created_at)
-			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
 			 RETURNING id`,
-			newConvID, userID, parent, msg.Role, SanitizeText(msg.Content), SanitizeJSONBytes(msg.Data),
+			newConvID, userID, parent, replyTo, quote, msg.Role, SanitizeText(msg.Content), SanitizeJSONBytes(msg.Data),
 			SanitizeJSONBytes(sources), msg.InputTokens, msg.OutputTokens, msg.Requests, msg.CostMicros,
 			msg.Truncated, SanitizeText(msg.Model), msg.CreatedAt).Scan(&id)
 		if err != nil {

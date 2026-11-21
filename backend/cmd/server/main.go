@@ -172,6 +172,7 @@ func main() {
 		Convos:      storage.NewConversations(pool),
 		Prompts:     storage.NewSavedPrompts(pool),
 		Msgs:        storage.NewMessages(pool),
+		Feedback:    storage.NewFeedback(pool),
 		Shares:      storage.NewShares(pool),
 		Profiles:    users,
 		Users:       users,
