@@ -11,6 +11,7 @@ import {
   Calendar,
   Check,
   ChevronDown,
+  ChevronUp,
   Copy,
   Download,
   Eye,
@@ -25,6 +26,7 @@ import {
   PenLine,
   RefreshCw,
   Reply,
+  Search,
   Share2,
   ShieldCheck,
   Sidebar,
@@ -68,6 +70,7 @@ import { ThinkingTrace } from "@/components/ai/ThinkingTrace";
 import { useSidebar } from "@/components/layout/SidebarContext";
 import { BranchSwitcher } from "@/features/chat/BranchSwitcher";
 import { FeedbackButtons } from "@/features/chat/FeedbackButtons";
+import { findMessageMatches } from "@/features/chat/findInConversation";
 import { CommandPalette } from "@/features/chat/CommandPalette";
 import { PromptLibraryDialog } from "@/features/chat/PromptLibraryDialog";
 import { extractCitationsFromContent } from "@/features/chat/citations";
@@ -180,6 +183,12 @@ export function ChatPage() {
     id: string;
     content: string;
   } | null>(null);
+  const [findOpen, setFindOpen] = useState(false);
+  const [findQuery, setFindQuery] = useState("");
+  const [findIndex, setFindIndex] = useState(0);
+  const [flashMessageId, setFlashMessageId] = useState<string | null>(null);
+  const flashTimerRef = useRef<number | null>(null);
+  const attemptedJumpRef = useRef<string | null>(null);
   const [attachments, setAttachments] = useState<PendingImage[]>([]);
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
   const [extractingFiles, setExtractingFiles] = useState(false);
@@ -391,9 +400,55 @@ export function ChatPage() {
     setSendError(null);
   }, [selectedId, detail, status, reset, setMessages, setContextStatus]);
 
+  function scrollToMessage(messageId: string) {
+    const el = document.getElementById(`message-${messageId}`);
+    if (!el) return;
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    setFlashMessageId(messageId);
+    if (flashTimerRef.current) window.clearTimeout(flashTimerRef.current);
+    flashTimerRef.current = window.setTimeout(() => setFlashMessageId(null), 2000);
+  }
+
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, trace, pending]);
+
+  // `?m=<messageId>` is the search-result jump. If the row is off the active
+  // path, activate its branch once and let the refetch bring it in.
+  const jumpId = searchParams.get("m");
+  useEffect(() => {
+    if (!jumpId || selectedId === null || !detail || status === "running") return;
+    if (messages.some((m) => m.id === jumpId)) {
+      scrollToMessage(jumpId);
+      const next = new URLSearchParams(searchParams);
+      next.delete("m");
+      setSearchParams(next, { replace: true });
+      return;
+    }
+    if (attemptedJumpRef.current === jumpId) return;
+    attemptedJumpRef.current = jumpId;
+    void apiFetch<void>(`/api/conversations/${selectedId}/messages/${jumpId}/activate`, { method: "POST" })
+      .then(() => queryClient.invalidateQueries({ queryKey: ["conversation", selectedId] }))
+      .catch(() => {
+        const next = new URLSearchParams(searchParams);
+        next.delete("m");
+        setSearchParams(next, { replace: true });
+      });
+  }, [jumpId, messages, detail, status, selectedId, searchParams, setSearchParams, queryClient]);
+
+  const findMatches = useMemo(() => findMessageMatches(messages, findQuery), [messages, findQuery]);
+  const findMatchId = findOpen ? findMatches[Math.min(findIndex, Math.max(findMatches.length - 1, 0))] : undefined;
+
+  useEffect(() => {
+    if (!findOpen || status === "running" || findMatches.length === 0) return;
+    scrollToMessage(findMatches[Math.min(findIndex, findMatches.length - 1)]);
+  }, [findOpen, findQuery, findMatches, findIndex, status]);
+
+  function stepFind(delta: number) {
+    if (findMatches.length === 0) return;
+    const next = (findIndex + delta + findMatches.length) % findMatches.length;
+    setFindIndex(next);
+  }
 
   function startNewChat() {
     navigate("/chat");
@@ -403,6 +458,8 @@ export function ChatPage() {
     setAttachedFiles([]);
     setEditing(null);
     setReplyTarget(null);
+    setFindOpen(false);
+    setFindQuery("");
     setSendError(null);
   }
 
@@ -642,6 +699,11 @@ export function ChatPage() {
 
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "f") {
+        e.preventDefault();
+        setFindOpen(true);
+        return;
+      }
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
         setPaletteOpen((o) => !o);
@@ -810,6 +872,72 @@ export function ChatPage() {
         </div>
       </header>
 
+      {findOpen && (
+        <div className="flex shrink-0 items-center gap-2 border-b border-border/60 bg-muted/30 px-3 py-1.5">
+          <Search className="size-3.5 shrink-0 text-muted-foreground" />
+          <input
+            autoFocus
+            value={findQuery}
+            onChange={(e) => {
+              setFindQuery(e.target.value);
+              setFindIndex(0);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                stepFind(e.shiftKey ? -1 : 1);
+              } else if (e.key === "Escape") {
+                e.preventDefault();
+                setFindOpen(false);
+                setFindQuery("");
+              }
+            }}
+            placeholder="Find in conversation"
+            aria-label="Find in conversation"
+            className="h-7 flex-1 bg-transparent text-xs outline-none placeholder:text-muted-foreground/60"
+          />
+          <span className="text-[11px] text-muted-foreground">
+            {findQuery.trim().length >= 2
+              ? findMatches.length === 0
+                ? "0/0"
+                : `${Math.min(findIndex + 1, findMatches.length)}/${findMatches.length}`
+              : ""}
+          </span>
+          <button
+            type="button"
+            aria-label="Previous match"
+            title="Previous match (Shift+Enter)"
+            disabled={findMatches.length === 0}
+            onClick={() => stepFind(-1)}
+            className="rounded-md p-1 text-muted-foreground/60 hover:text-foreground disabled:opacity-40"
+          >
+            <ChevronUp className="size-3.5" />
+          </button>
+          <button
+            type="button"
+            aria-label="Next match"
+            title="Next match (Enter)"
+            disabled={findMatches.length === 0}
+            onClick={() => stepFind(1)}
+            className="rounded-md p-1 text-muted-foreground/60 hover:text-foreground disabled:opacity-40"
+          >
+            <ChevronDown className="size-3.5" />
+          </button>
+          <button
+            type="button"
+            aria-label="Close find"
+            title="Close find (Esc)"
+            onClick={() => {
+              setFindOpen(false);
+              setFindQuery("");
+            }}
+            className="rounded-md p-1 text-muted-foreground/60 hover:text-foreground"
+          >
+            <X className="size-3.5" />
+          </button>
+        </div>
+      )}
+
       {/* Main message area */}
       <ScrollArea className="min-h-0 flex-1">
         <div className="mx-auto w-full max-w-3xl px-4 py-6">
@@ -854,7 +982,16 @@ export function ChatPage() {
                 const isLast = i === messages.length - 1;
                 const blockInteraction = running || pending.length > 0;
                 return (
-                  <div key={m.id} className={cn("flex", m.role === "user" ? "justify-end" : "group gap-3")}>
+                  <div
+                    key={m.id}
+                    id={`message-${m.id}`}
+                    className={cn(
+                      "flex scroll-mt-4",
+                      m.role === "user" ? "justify-end" : "group gap-3",
+                      findMatchId === m.id && "rounded-2xl bg-primary/5",
+                      flashMessageId === m.id && "rounded-2xl ring-2 ring-primary/50",
+                    )}
+                  >
                     {m.role === "user" ? (
                       editing?.id === m.id ? (
                         <div className="w-full max-w-[85%] rounded-2xl border border-ring/60 bg-card p-2 shadow-sm">

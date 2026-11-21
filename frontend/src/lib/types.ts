@@ -318,3 +318,18 @@ export interface ToolAuditLog {
   durationMs: number;
   createdAt: string;
 }
+
+/** One full-text message hit. Snippet terms are bracketed with private-use
+ *  runes (U+E000/U+E001) and must be rendered as text nodes, never HTML. */
+export interface MessageSearchHit {
+  messageId: string;
+  conversationId: string;
+  title: string;
+  role: "user" | "assistant";
+  snippet: string;
+  createdAt: string;
+}
+export interface MessageSearchResponse {
+  hits: MessageSearchHit[];
+  nextOffset: number | null;
+}
