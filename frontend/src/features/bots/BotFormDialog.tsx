@@ -23,6 +23,7 @@ const PROVIDER_LABEL: Record<string, string> = {
   gemini: "Google Gemini",
   openai: "OpenAI",
   anthropic: "Anthropic",
+  auto: "Auto",
 };
 
 interface Props {

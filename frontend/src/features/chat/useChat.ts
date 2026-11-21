@@ -34,6 +34,8 @@ interface MetaPayload {
   estimatedTokens?: number;
   thresholdTokens?: number;
   keepRecent?: number;
+  requested?: string;
+  used?: string;
 }
 interface SourcesPayload { sources: Source[] }
 
@@ -103,6 +105,8 @@ export function useChat(onDone?: () => void) {
           setTrace((t) => [...t, `${toolLabel(meta.name)}…`]);
         } else if (meta.type === "tool_end") {
           setTrace((t) => [...t, `${meta.name} ${meta.ok === false ? "failed" : "finished"}`]);
+        } else if (meta.type === "fallback") {
+          setTrace((t) => [...t, `fell back to ${meta.used ?? "another model"}`]);
         }
       } else if (frame.event === "sources") {
         const { sources } = payload as SourcesPayload;

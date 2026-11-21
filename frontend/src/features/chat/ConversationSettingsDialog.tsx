@@ -25,6 +25,7 @@ const PROVIDER_LABEL: Record<string, string> = {
   gemini: "Google Gemini",
   openai: "OpenAI",
   anthropic: "Anthropic",
+  auto: "Auto",
 };
 
 // ConversationSettingsDialog edits the per-conversation model, temperature,

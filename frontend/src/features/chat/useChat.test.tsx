@@ -79,6 +79,26 @@ describe("useChat send", () => {
     expect(useAuth.getState().accessToken).toBe("fresh");
   });
 
+  it("records an auto-fallback in the run trace", async () => {
+    server.use(
+      http.post("*/api/conversations/c1/messages", () =>
+        new HttpResponse(
+          sseBody([
+            'event: meta\ndata: {"type":"fallback","requested":"auto","used":"gemini-3.5-flash"}\n\n',
+            'event: delta\ndata: {"text":"hi"}\n\n',
+            'event: done\ndata: {"messageId":"m1","inputTokens":1,"outputTokens":2,"requests":1,"costUsd":0.00001,"model":"gemini-3.5-flash"}\n\n',
+          ]),
+          { headers: { "Content-Type": "text/event-stream" } },
+        ),
+      ),
+    );
+    const { result } = renderHook(() => useChat());
+    await act(async () => {
+      await result.current.send("hi", "c1");
+    });
+    expect(result.current.trace).toContain("fell back to gemini-3.5-flash");
+  });
+
   it("surfaces history compaction in the run trace", async () => {
     server.use(
       http.post("*/api/conversations/c1/messages", () =>
