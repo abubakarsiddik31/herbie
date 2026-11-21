@@ -30,8 +30,9 @@ type Conversation struct {
 	RagEnabled   bool   // per-conversation document search (default true)
 	// PinnedAt/ArchivedAt are the organization timestamps; nil means the
 	// conversation is neither pinned nor archived. TitleSource records who
-	// named the conversation: "heuristic" (first message) or "manual" (user,
-	// bot, or fork). Only heuristic titles may be rewritten automatically.
+	// named the conversation: "heuristic" (first message), "auto" (title
+	// model), or "manual" (user, bot, or fork). Only heuristic titles may be
+	// rewritten automatically.
 	PinnedAt    *time.Time
 	ArchivedAt  *time.Time
 	TitleSource string
@@ -221,6 +222,16 @@ func (c *Conversations) RenameTitle(ctx context.Context, id, userID, title strin
 func (c *Conversations) SetHeuristicTitle(ctx context.Context, id, userID, title string) error {
 	_, err := c.pool.Exec(ctx,
 		`UPDATE conversations SET title = $3, title_source = 'heuristic'
+		 WHERE id = $1 AND user_id = $2 AND title_source = 'heuristic'`, id, userID, SanitizeText(title))
+	return err
+}
+
+// SetAutoTitle applies a model-generated title once: it only updates while
+// the title is still heuristic, then marks it auto so later turns and retries
+// never overwrite it. A manual rename wins by making the UPDATE a no-op.
+func (c *Conversations) SetAutoTitle(ctx context.Context, id, userID, title string) error {
+	_, err := c.pool.Exec(ctx,
+		`UPDATE conversations SET title = $3, title_source = 'auto'
 		 WHERE id = $1 AND user_id = $2 AND title_source = 'heuristic'`, id, userID, SanitizeText(title))
 	return err
 }

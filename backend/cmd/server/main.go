@@ -162,6 +162,10 @@ func main() {
 		Default: cost.Rates{ChatInputPerM: cfg.ChatInputRate, ChatOutputPerM: cfg.ChatOutputRate},
 		ByModel: byModel,
 	}
+	var titles httpapi.TitleGenerator
+	if cfg.TitleModel != "" {
+		titles = chat.NewTitleGenerator(registry, cfg.TitleModel)
+	}
 
 	botSrv, handler := httpapi.NewServerWithRunner(httpapi.ServerDeps{
 		Cfg:           cfg,
@@ -174,6 +178,7 @@ func main() {
 		Msgs:          storage.NewMessages(pool),
 		Feedback:      storage.NewFeedback(pool),
 		MessageSearch: storage.NewMessageSearch(pool),
+		Titles:        titles,
 		Shares:        storage.NewShares(pool),
 		Profiles:      users,
 		Users:         users,

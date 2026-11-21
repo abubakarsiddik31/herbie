@@ -269,4 +269,5 @@ func (s *Server) finishResumed(ctx context.Context, userID, convID string, spec 
 		"costUsd":      math.Round(float64(cost)/10) / 1e5,
 		"model":        spec.Model,
 	})
+	s.maybeAutotitle(userID, convID)
 }

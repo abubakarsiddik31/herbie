@@ -42,6 +42,7 @@ type ConvoStore interface {
 	LatestIDsByUser(ctx context.Context, userID string) (map[string]string, error)
 	ByID(ctx context.Context, id, userID string) (storage.Conversation, error)
 	SetHeuristicTitle(ctx context.Context, id, userID, title string) error
+	SetAutoTitle(ctx context.Context, id, userID, title string) error
 	RenameTitle(ctx context.Context, id, userID, title string) error
 	SetPinned(ctx context.Context, id, userID string, pinned bool) error
 	SetArchived(ctx context.Context, id, userID string, archived bool) error
@@ -1475,6 +1476,7 @@ func (s *Server) finishRun(ctx context.Context, userID, convID string, spec chat
 		"thresholdTokens": compThreshold,
 		"keepRecent":      compKeepRecent,
 	})
+	s.maybeAutotitle(userID, convID)
 }
 
 // fullHistory decodes every stored row.

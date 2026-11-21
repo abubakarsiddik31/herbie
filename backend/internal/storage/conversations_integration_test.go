@@ -245,3 +245,52 @@ func TestArchivedConversationsHiddenFromProjectAndBotSurfaces(t *testing.T) {
 		t.Fatalf("latest bot conversation = %+v %v", latest, err)
 	}
 }
+
+func TestSetAutoTitleOnlyFromHeuristic(t *testing.T) {
+	pool := newTestPool(t)
+	ctx := context.Background()
+	users := NewUsers(pool)
+	user, err := users.Create(ctx, "autotitle@test.dev", "hash")
+	if err != nil {
+		user, err = users.ByEmail(ctx, "autotitle@test.dev")
+	}
+	if err != nil {
+		t.Fatalf("user setup: %v", err)
+	}
+	convs := NewConversations(pool)
+	conv, err := convs.Create(ctx, user.ID, "first message", ConversationPatch{})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	t.Cleanup(func() { _ = convs.Delete(context.Background(), conv.ID, user.ID) })
+
+	if err := convs.SetAutoTitle(ctx, conv.ID, user.ID, "Model Title"); err != nil {
+		t.Fatalf("set auto: %v", err)
+	}
+	got, err := convs.ByID(ctx, conv.ID, user.ID)
+	if err != nil || got.Title != "Model Title" || got.TitleSource != "auto" {
+		t.Fatalf("auto title = %q / %q (%v)", got.Title, got.TitleSource, err)
+	}
+
+	// The heuristic and a later auto attempt cannot rewrite an auto title.
+	if err := convs.SetHeuristicTitle(ctx, conv.ID, user.ID, "heuristic again"); err != nil {
+		t.Fatal(err)
+	}
+	if err := convs.SetAutoTitle(ctx, conv.ID, user.ID, "Second Auto"); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := convs.ByID(ctx, conv.ID, user.ID); got.Title != "Model Title" {
+		t.Fatalf("auto title overwritten: %q", got.Title)
+	}
+
+	// A manual rename wins and blocks further auto titles.
+	if err := convs.RenameTitle(ctx, conv.ID, user.ID, "My Title"); err != nil {
+		t.Fatal(err)
+	}
+	if err := convs.SetAutoTitle(ctx, conv.ID, user.ID, "Late Auto"); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := convs.ByID(ctx, conv.ID, user.ID); got.Title != "My Title" || got.TitleSource != "manual" {
+		t.Fatalf("manual title = %q / %q", got.Title, got.TitleSource)
+	}
+}
