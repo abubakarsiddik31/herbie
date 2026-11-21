@@ -201,8 +201,9 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 	userID, _ := userIDFrom(r.Context())
 	convID := r.PathValue("id")
 	var req struct {
-		Content string       `json:"content"`
-		Images  []imageInput `json:"images"`
+		Content   string       `json:"content"`
+		Images    []imageInput `json:"images"`
+		ReplyToID string       `json:"replyToId"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", "invalid request body")
@@ -233,6 +234,24 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	spec := s.runSpecFor(ctx, conv)
+
+	// The quote snapshot comes from the stored target, never the client.
+	quoteText := ""
+	if req.ReplyToID != "" {
+		target, terr := s.deps.Msgs.ByID(ctx, req.ReplyToID, userID)
+		if terr != nil || target.ConversationID != convID {
+			writeError(w, http.StatusNotFound, "not_found", "quoted message not found")
+			return
+		}
+		quoteText = snapshotQuote(target.Content)
+		if quoteText == "" {
+			writeError(w, http.StatusBadRequest, "bad_request", "cannot quote an empty message")
+			return
+		}
+	}
+	// Raw content stays in messages.content; only the model-facing copy
+	// carries the quote block.
+	modelContent := composeUserContent(req.Content, quoteText)
 
 	// A paused conversation must be resolved before new turns.
 	if s.blockedByPendingApproval(w, ctx, convID, userID) {
@@ -276,9 +295,9 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 	s.unarchiveForTurn(ctx, conv)
 	promptID, err := s.deps.Msgs.Add(ctx, storage.Message{
 		ConversationID: convID, UserID: userID, Role: string(model.RoleUser),
-		ParentID: leaf,
-		Content:  req.Content,
-		Data:     mustJSON(model.Message{Role: model.RoleUser, Content: req.Content, Parts: parts}),
+		ParentID: leaf, ReplyToID: req.ReplyToID, QuoteText: quoteText,
+		Content: req.Content,
+		Data:    mustJSON(model.Message{Role: model.RoleUser, Content: modelContent, Parts: parts}),
 	})
 	if err != nil {
 		s.deps.Log.Error("could not store message", "err", err, "conv_id", convID)
@@ -288,7 +307,7 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 	if err := s.deps.Convos.SetActiveLeaf(ctx, convID, userID, promptID); err != nil {
 		s.deps.Log.Error("could not set active leaf", "err", err, "conv_id", convID)
 	}
-	s.runTurn(ctx, userID, convID, spec, conv.BotID, historyFrom(path, len(path)), req.Content, parts, knownRows(path), promptID, w)
+	s.runTurn(ctx, userID, convID, spec, conv.BotID, historyFrom(path, len(path)), modelContent, parts, knownRows(path), promptID, w)
 }
 
 // unarchiveForTurn clears the archived flag before a new turn is persisted.

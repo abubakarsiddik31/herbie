@@ -201,9 +201,13 @@ func (s *Server) handleGetConversation(w http.ResponseWriter, r *http.Request) {
 	if leaf != "" {
 		conv.ActiveLeafID = &leaf
 	}
+	var feedback map[string]string
+	if s.deps.Feedback != nil {
+		feedback, _ = s.deps.Feedback.ForConversation(r.Context(), conv.ID, userID)
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"conversation": toConversationDTO(conv),
-		"messages":     transcriptMessages(msgs, leaf, true),
+		"messages":     transcriptMessages(msgs, leaf, true, feedback),
 		"context": map[string]any{
 			"estimatedTokens": estimatedTokens,
 			"thresholdTokens": compThreshold,
@@ -230,6 +234,12 @@ type msgDTO struct {
 	Images    []imageDTO       `json:"images,omitempty"`
 	Sources   *json.RawMessage `json:"sources,omitempty"`
 	Branch    *branchDTO       `json:"branch,omitempty"`
+	// ReplyToID/QuoteText carry the user's reply context; the snapshot is
+	// server-stored. Feedback is private (the owner's thumbs rating) and is
+	// never rendered in shared transcripts.
+	ReplyToID string `json:"replyToId,omitempty"`
+	QuoteText string `json:"quoteText,omitempty"`
+	Feedback  string `json:"feedback,omitempty"`
 }
 
 // branchDTO describes a variant switcher for a user row or a whole assistant
@@ -281,9 +291,11 @@ func extractWebSourcesFromToolMsgs(toolMsgs []string) []map[string]any {
 // variants (sibling user rows) and assistant variants per chain: the roots
 // are the direct assistant children of the nearest ancestor user row (often
 // hidden tool-call rows), and the switcher attaches to the LAST visible
-// assistant row of each chain segment on the path. Usage/cost ride along
-// unless public is set — shared threads never leak spend.
-func transcriptMessages(msgs []storage.Message, leafID string, includeUsage bool) []msgDTO {
+// assistant row of each chain segment on the path. privateView enables the
+// owner-only fields — usage/cost and thumbs feedback — so shared threads
+// never leak spend or ratings. Quotes stay visible: they are part of the
+// conversation.
+func transcriptMessages(msgs []storage.Message, leafID string, privateView bool, feedback map[string]string) []msgDTO {
 	if leafID == "" {
 		return []msgDTO{}
 	}
@@ -386,7 +398,7 @@ func transcriptMessages(msgs []storage.Message, leafID string, includeUsage bool
 			continue
 		}
 		var usage *usageDTO
-		if includeUsage && (m.InputTokens > 0 || m.OutputTokens > 0) {
+		if privateView && (m.InputTokens > 0 || m.OutputTokens > 0) {
 			usage = &usageDTO{
 				InputTokens:  m.InputTokens,
 				OutputTokens: m.OutputTokens,
@@ -406,11 +418,16 @@ func transcriptMessages(msgs []storage.Message, leafID string, includeUsage bool
 		if m.Role == string(model.RoleAssistant) || m.Role == string(model.RoleUser) {
 			pendingToolContents = nil
 		}
-		out = append(out, msgDTO{
+		row := msgDTO{
 			ID: m.ID, Role: m.Role, Content: m.Content, Truncated: m.Truncated,
 			CreatedAt: m.CreatedAt.UTC().Format(timeRFC3339), Usage: usage,
 			Images: imagesOf(m.Data), Sources: sources, Branch: branches[i],
-		})
+			ReplyToID: m.ReplyToID, QuoteText: m.QuoteText,
+		}
+		if privateView {
+			row.Feedback = feedback[m.ID]
+		}
+		out = append(out, row)
 	}
 	return out
 }

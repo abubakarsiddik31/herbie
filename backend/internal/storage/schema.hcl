@@ -361,6 +361,14 @@ table "messages" {
     null    = false
     default = sql("'[]'::jsonb")
   }
+  column "reply_to_id" {
+    type = uuid
+    null = true
+  }
+  column "quote_text" {
+    type = text
+    null = true
+  }
   column "created_at" {
     type    = timestamptz
     null    = false
@@ -384,11 +392,74 @@ table "messages" {
     ref_columns = [table.messages.column.id]
     on_delete   = CASCADE
   }
+  foreign_key "messages_reply_to_id_fkey" {
+    columns     = [column.reply_to_id]
+    ref_columns = [table.messages.column.id]
+    on_delete   = SET_NULL
+  }
   index "idx_messages_conversation" {
     columns = [column.conversation_id, column.created_at, column.id]
   }
   index "idx_messages_parent" {
     columns = [column.parent_id]
+  }
+  index "idx_messages_reply_to" {
+    columns = [column.reply_to_id]
+    where   = sql("reply_to_id IS NOT NULL")
+  }
+}
+
+table "message_feedback" {
+  schema = schema.public
+  column "id" {
+    type    = uuid
+    null    = false
+    default = sql("gen_random_uuid()")
+  }
+  column "user_id" {
+    type = uuid
+    null = false
+  }
+  column "message_id" {
+    type = uuid
+    null = false
+  }
+  column "rating" {
+    type = text
+    null = false
+  }
+  column "created_at" {
+    type    = timestamptz
+    null    = false
+    default = sql("now()")
+  }
+  column "updated_at" {
+    type    = timestamptz
+    null    = false
+    default = sql("now()")
+  }
+  primary_key {
+    columns = [column.id]
+  }
+  foreign_key "message_feedback_user_id_fkey" {
+    columns     = [column.user_id]
+    ref_columns = [table.users.column.id]
+    on_delete   = CASCADE
+  }
+  foreign_key "message_feedback_message_id_fkey" {
+    columns     = [column.message_id]
+    ref_columns = [table.messages.column.id]
+    on_delete   = CASCADE
+  }
+  check "message_feedback_rating_check" {
+    expr = "rating IN ('up', 'down')"
+  }
+  index "message_feedback_user_message_key" {
+    unique  = true
+    columns = [column.user_id, column.message_id]
+  }
+  index "idx_message_feedback_message" {
+    columns = [column.message_id]
   }
 }
 

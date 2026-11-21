@@ -64,6 +64,7 @@ func newHandlerServerWithTools(t *testing.T, agent *chat.Agent, convs ConvoStore
 		Memories:  newFakeMemories(),
 		Convos:    convs,
 		Msgs:      msgs,
+		Feedback:  newFakeFeedback(msgs),
 		Usage:     usage,
 		Tools:     tools,
 		Agent:     agent,
@@ -480,6 +481,10 @@ func (f *fakeMsgs) CopyPath(_ context.Context, srcConvID, userID, newConvID stri
 		if msg.ParentID != "" {
 			copy.ParentID = remap[msg.ParentID]
 		}
+		copy.ReplyToID = ""
+		if msg.ReplyToID != "" {
+			copy.ReplyToID = remap[msg.ReplyToID]
+		}
 		f.rows = append(f.rows, copy)
 		remap[msg.ID] = id
 		tail = id
@@ -488,6 +493,49 @@ func (f *fakeMsgs) CopyPath(_ context.Context, srcConvID, userID, newConvID stri
 }
 
 func (f *fakeMsgs) count() int { return len(f.rows) }
+
+// fakeFeedback mirrors the (user, message) upsert and conversation-scoped
+// read over the fake message rows.
+type feedbackMsgReader interface {
+	ForConversation(ctx context.Context, convID, userID string) ([]storage.Message, error)
+}
+
+type fakeFeedback struct {
+	msgs    feedbackMsgReader
+	ratings map[string]string
+}
+
+func newFakeFeedback(msgs feedbackMsgReader) *fakeFeedback {
+	return &fakeFeedback{msgs: msgs, ratings: map[string]string{}}
+}
+
+var _ FeedbackStore = (*fakeFeedback)(nil)
+
+func feedbackKey(userID, messageID string) string { return userID + "\x00" + messageID }
+
+func (f *fakeFeedback) Set(_ context.Context, userID, messageID, rating string) error {
+	f.ratings[feedbackKey(userID, messageID)] = rating
+	return nil
+}
+
+func (f *fakeFeedback) Clear(_ context.Context, userID, messageID string) error {
+	delete(f.ratings, feedbackKey(userID, messageID))
+	return nil
+}
+
+func (f *fakeFeedback) ForConversation(ctx context.Context, convID, userID string) (map[string]string, error) {
+	rows, err := f.msgs.ForConversation(ctx, convID, userID)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]string{}
+	for _, m := range rows {
+		if rating, ok := f.ratings[feedbackKey(userID, m.ID)]; ok {
+			out[m.ID] = rating
+		}
+	}
+	return out, nil
+}
 
 type fakeUsage struct {
 	events   []storage.UsageEvent

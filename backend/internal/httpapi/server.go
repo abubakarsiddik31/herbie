@@ -39,6 +39,7 @@ type ServerDeps struct {
 	Convos      ConvoStore
 	Prompts     PromptStore
 	Msgs        MsgStore
+	Feedback    FeedbackStore
 	Usage       UsageStore
 	Tools       ToolStore
 	Pending     PendingStore
@@ -177,6 +178,8 @@ func newServer(deps ServerDeps) (*Server, http.Handler) {
 	authed.HandleFunc("POST /api/conversations/{id}/messages/{messageId}/edit", s.handleEditMessage)
 	authed.HandleFunc("POST /api/conversations/{id}/messages/{messageId}/activate", s.handleActivateMessage)
 	authed.HandleFunc("DELETE /api/conversations/{id}/messages/{messageId}", s.handleDeleteMessage)
+	authed.HandleFunc("PUT /api/conversations/{id}/messages/{messageId}/feedback", s.handleSetFeedback)
+	authed.HandleFunc("DELETE /api/conversations/{id}/messages/{messageId}/feedback", s.handleClearFeedback)
 	authed.HandleFunc("POST /api/conversations/{id}/fork", s.handleForkConversation)
 	authed.HandleFunc("POST /api/conversations/{id}/regenerate", s.handleRegenerate)
 	authed.HandleFunc("POST /api/conversations/{id}/approvals", s.handleApprovals)
