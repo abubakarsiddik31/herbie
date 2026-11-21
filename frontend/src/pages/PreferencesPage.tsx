@@ -22,6 +22,11 @@ export function PreferencesPage() {
   const { data, isLoading, isError, refetch, isFetching } = useProfile();
   const update = useUpdateProfile();
   const [draft, setDraft] = useState<string | null>(null);
+  const [genDraft, setGenDraft] = useState<{
+    topP: number | null;
+    maxOutputTokens: number;
+    reasoning: "low" | "medium" | "high" | "";
+  } | null>(null);
 
   const {
     data: memories,
@@ -38,6 +43,16 @@ export function PreferencesPage() {
   const currentDraft = draft !== null ? draft : (data?.defaultInstructions ?? "");
   const dirty = draft !== null && data !== undefined && draft !== data.defaultInstructions;
   const tooLong = currentDraft.length > MAX_INSTRUCTIONS_CHARS;
+  const gen = genDraft ?? {
+    topP: data?.defaultTopP ?? null,
+    maxOutputTokens: data?.defaultMaxOutputTokens ?? 0,
+    reasoning: data?.defaultReasoning ?? "",
+  };
+  const genDirty =
+    data !== undefined &&
+    (gen.topP !== (data.defaultTopP ?? null) ||
+      gen.maxOutputTokens !== (data.defaultMaxOutputTokens ?? 0) ||
+      gen.reasoning !== (data.defaultReasoning ?? ""));
 
   function saveInstructions() {
     if (draft === null) return;
@@ -148,6 +163,99 @@ export function PreferencesPage() {
               </p>
               <Button size="sm" variant="brand" disabled={!dirty || tooLong || update.isPending} onClick={saveInstructions}>
                 {update.isPending ? "Saving…" : "Save"}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {data && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Generation defaults</CardTitle>
+            <CardDescription>
+              Fallbacks for conversations and projects that do not set their own sampling controls.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid gap-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium">Top P</span>
+                <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <input
+                    type="checkbox"
+                    checked={gen.topP === null}
+                    onChange={(e) => setGenDraft({ ...gen, topP: e.target.checked ? null : 0.9 })}
+                    className="size-3.5 accent-[var(--primary)]"
+                  />
+                  Provider default
+                </label>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.05}
+                value={gen.topP ?? 0.9}
+                disabled={gen.topP === null}
+                onChange={(e) => setGenDraft({ ...gen, topP: Number(e.target.value) })}
+                aria-label="Default top P"
+                className="h-1.5 w-full accent-[var(--primary)] disabled:opacity-40"
+              />
+            </div>
+            <div className="grid gap-1.5">
+              <span className="text-xs font-medium">Max output tokens</span>
+              <input
+                type="number"
+                min={0}
+                max={200000}
+                step={256}
+                value={gen.maxOutputTokens}
+                onChange={(e) => setGenDraft({ ...gen, maxOutputTokens: Math.max(0, Number(e.target.value) || 0) })}
+                placeholder="Provider default"
+                aria-label="Default max output tokens"
+                className="h-9 rounded-md border border-input bg-transparent px-2.5 text-sm outline-none"
+              />
+            </div>
+            <div className="grid gap-1.5">
+              <span className="text-xs font-medium">Reasoning effort</span>
+              <select
+                value={gen.reasoning}
+                onChange={(e) => setGenDraft({ ...gen, reasoning: e.target.value as typeof gen.reasoning })}
+                aria-label="Default reasoning effort"
+                className="h-9 w-full rounded-md border border-input bg-transparent px-2.5 text-sm outline-none"
+              >
+                <option value="">Provider default</option>
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+              </select>
+            </div>
+            <div className="flex justify-end">
+              <Button
+                size="sm"
+                variant="brand"
+                disabled={!genDirty || update.isPending}
+                onClick={() =>
+                  update.mutate(
+                    {
+                      topP: gen.topP,
+                      clearTopP: gen.topP === null,
+                      maxOutputTokens: gen.maxOutputTokens,
+                      reasoning: gen.reasoning,
+                    },
+                    {
+                      onSuccess: () => {
+                        setGenDraft(null);
+                        toast.success("Generation defaults saved");
+                      },
+                      onError: (err) =>
+                        toast.error(err instanceof ApiError ? err.message : "Failed to save defaults"),
+                    },
+                  )
+                }
+              >
+                Save defaults
               </Button>
             </div>
           </CardContent>

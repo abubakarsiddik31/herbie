@@ -7,6 +7,9 @@ export interface Project {
   name: string;
   description: string;
   instructions: string;
+  defaultTopP?: number | null;
+  defaultMaxOutputTokens?: number;
+  defaultReasoning?: "low" | "medium" | "high" | "";
   filesCount: number;
   createdAt: string;
   updatedAt: string;
@@ -63,6 +66,10 @@ export function useUpdateProject() {
       name?: string;
       description?: string;
       instructions?: string;
+      topP?: number | null;
+      clearTopP?: boolean;
+      maxOutputTokens?: number;
+      reasoning?: "low" | "medium" | "high" | "";
     }) => apiFetch<Project>(`/api/projects/${id}`, { method: "PATCH", json: body }),
     onSuccess: (_, variables) => {
       void queryClient.invalidateQueries({ queryKey: ["projects"] });

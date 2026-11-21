@@ -3,7 +3,9 @@ export interface OAuthProvider { id: string; name: string }
 export interface SharedThread { title: string; messages: ChatMessage[] }
 export interface Conversation {
   id: string; title: string; createdAt: string; updatedAt: string;
-  model: string; temperature: number | null; systemPrompt: string; ragEnabled: boolean;
+  model: string; temperature: number | null; topP?: number | null;
+  maxOutputTokens?: number; reasoning?: "low" | "medium" | "high" | "";
+  systemPrompt: string; ragEnabled: boolean;
   botId?: string | null; activeLeafId?: string | null;
   pinnedAt?: string | null; archivedAt?: string | null;
   titleSource?: "heuristic" | "manual" | string;
@@ -12,7 +14,15 @@ export interface SavedPrompt { id: string; title: string; body: string; createdA
 export interface SavedPromptsResponse { prompts: SavedPrompt[] }
 export interface ModelInfo { id: string; label: string; provider: string }
 export interface ModelsResponse { default: string; models: ModelInfo[] }
-export interface ConversationSettings { model: string; temperature: number | null; systemPrompt: string; ragEnabled: boolean }
+export interface ConversationSettings {
+  model: string;
+  temperature: number | null;
+  topP: number | null;
+  maxOutputTokens: number;
+  reasoning: "low" | "medium" | "high" | "";
+  systemPrompt: string;
+  ragEnabled: boolean;
+}
 export interface MessageUsage { inputTokens: number; outputTokens: number; costUsd: number; model: string }
 export interface ChatMessage {
   id: string; role: "user" | "assistant"; content: string;
@@ -210,6 +220,9 @@ export interface Bot {
   instructions: string;
   model: string;
   temperature: number | null;
+  topP?: number | null;
+  maxOutputTokens?: number;
+  reasoning?: "low" | "medium" | "high" | "";
   ragEnabled: boolean;
   isArchived: boolean;
   conversationId: string | null;

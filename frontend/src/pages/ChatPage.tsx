@@ -342,6 +342,9 @@ export function ChatPage() {
   const [draftSettings, setDraftSettings] = useState<ConversationSettings>({
     model: "",
     temperature: null,
+    topP: null,
+    maxOutputTokens: 0,
+    reasoning: "",
     systemPrompt: "",
     ragEnabled: false,
   });
@@ -669,6 +672,9 @@ export function ChatPage() {
     ? {
         model: activeConversation.model || models?.default || "",
         temperature: activeConversation.temperature,
+        topP: activeConversation.topP ?? null,
+        maxOutputTokens: activeConversation.maxOutputTokens ?? 0,
+        reasoning: activeConversation.reasoning ?? "",
         systemPrompt: activeConversation.systemPrompt,
         ragEnabled: activeConversation.ragEnabled,
       }
