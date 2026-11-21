@@ -197,7 +197,7 @@ backfill, bot/fork titles, SetTitle overloading, quote composition) and 9 majors
 
 ### Phase 2 — models 2.0 (feature: `feat/models-2`)
 
-- [ ] `top_p`, `max_output_tokens`, reasoning level on conversations/bots/user/project
+- [x] `top_p`, `max_output_tokens`, reasoning level on conversations/bots/user/project
       defaults; provider mapping (OpenAI `ReasoningEffort`, Anthropic thinking,
       Gemini thinking level/budget); capability-gated UI.
 - [ ] `auto` alias → ordered fallback chain via `model.NewFallback` (pre-first-fragment
