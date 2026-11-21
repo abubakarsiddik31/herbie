@@ -207,13 +207,21 @@ export function useChat(onDone?: () => void) {
     }
   }, [consumeStream, streamPOST]);
 
-  const send = useCallback(async (content: string, conversationId: string, images?: { mediaType: string; data: string }[]) => {
+  const send = useCallback(async (
+    content: string,
+    conversationId: string,
+    images?: { mediaType: string; data: string }[],
+    replyToId?: string,
+    quoteText?: string,
+  ) => {
     const cleanContent = content.replace(/\0/g, "");
     const controller = new AbortController();
     abortRef.current = controller;
     const userMsg: ChatMessage = {
       id: crypto.randomUUID(), role: "user", content: cleanContent, truncated: false, createdAt: new Date().toISOString(),
       images: images?.map((img) => ({ mediaType: img.mediaType, dataUrl: `data:${img.mediaType};base64,${img.data}` })),
+      replyToId,
+      quoteText,
     };
     const assistantId = crypto.randomUUID();
     setMessages((m) => [
@@ -223,7 +231,10 @@ export function useChat(onDone?: () => void) {
     setTrace([]);
     setPending([]);
     setStatus("running");
-    await start(`/api/conversations/${conversationId}/messages`, images?.length ? { content: cleanContent, images } : { content: cleanContent }, controller, assistantId);
+    const body: Record<string, unknown> = { content: cleanContent };
+    if (images?.length) body.images = images;
+    if (replyToId) body.replyToId = replyToId;
+    await start(`/api/conversations/${conversationId}/messages`, body, controller, assistantId);
   }, [start]);
 
   // edit rewrites one user message and re-runs the conversation from it:
