@@ -29,28 +29,29 @@ type ServerDeps struct {
 	// OAuth lists the configured social-login providers in display
 	// order. Empty = password auth only; the login UI hides the
 	// provider buttons.
-	OAuth       []*oauth.Provider
-	Vault       *vault.Vault
-	Audits      storage.AuditStore
-	Shares      ShareStore
-	Profiles    ProfileStore
-	Users       UserAdminStore
-	Memories    MemoryStore
-	Convos      ConvoStore
-	Prompts     PromptStore
-	Msgs        MsgStore
-	Feedback    FeedbackStore
-	Usage       UsageStore
-	Tools       ToolStore
-	Pending     PendingStore
-	Bots        BotStore
-	BotMemories BotMemoryStore
-	BotFiles    BotFileStore
-	BotRuns     BotRunStore
-	BotRoutines BotRoutineStore
-	Agent       *chat.Agent
-	Rates       cost.Table
-	ModelKeys   chat.ProviderKeys
+	OAuth         []*oauth.Provider
+	Vault         *vault.Vault
+	Audits        storage.AuditStore
+	Shares        ShareStore
+	Profiles      ProfileStore
+	Users         UserAdminStore
+	Memories      MemoryStore
+	Convos        ConvoStore
+	Prompts       PromptStore
+	Msgs          MsgStore
+	Feedback      FeedbackStore
+	MessageSearch MessageSearchStore
+	Usage         UsageStore
+	Tools         ToolStore
+	Pending       PendingStore
+	Bots          BotStore
+	BotMemories   BotMemoryStore
+	BotFiles      BotFileStore
+	BotRuns       BotRunStore
+	BotRoutines   BotRoutineStore
+	Agent         *chat.Agent
+	Rates         cost.Table
+	ModelKeys     chat.ProviderKeys
 	// RagSearch retrieves document chunks and returns the query
 	// embedding's exact usage for metering. Nil = RAG disabled: no
 	// search tool is registered and the documents API answers 503.
@@ -164,6 +165,7 @@ func newServer(deps ServerDeps) (*Server, http.Handler) {
 	authed.HandleFunc("DELETE /api/memories/{id}", s.handleDeleteMemory)
 	authed.HandleFunc("DELETE /api/memories", s.handleClearMemories)
 	authed.HandleFunc("GET /api/models", s.handleListModels)
+	authed.HandleFunc("GET /api/search/messages", s.handleSearchMessages)
 	authed.HandleFunc("GET /api/conversations", s.handleListConversations)
 	authed.HandleFunc("POST /api/conversations", s.handleCreateConversation)
 	authed.HandleFunc("GET /api/conversations/{id}", s.handleGetConversation)

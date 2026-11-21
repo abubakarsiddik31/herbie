@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -74,6 +75,20 @@ func (m *Messages) Add(ctx context.Context, msg Message) (string, error) {
 	return id, nil
 }
 
+// messageTreeColumns is the recursive walk's explicit column list. The final
+// SELECT still casts the ids for scanning; the CTE keeps parent/reply ids as
+// uuid so the join and UNION type-check.
+const messageTreeColumns = `id, conversation_id, user_id, parent_id, reply_to_id, quote_text, role, content, data, sources, input_tokens, output_tokens, requests, cost_micro_usd, truncated, model, created_at`
+
+// prefixed qualifies every comma-separated column in cols with prefix.
+func prefixed(prefix, cols string) string {
+	parts := strings.Split(cols, ",")
+	for i, p := range parts {
+		parts[i] = prefix + strings.TrimSpace(p)
+	}
+	return strings.Join(parts, ", ")
+}
+
 const messageColumns = `id, conversation_id::text, user_id::text, COALESCE(parent_id::text, '') AS parent_id,
 		       COALESCE(reply_to_id::text, '') AS reply_to_id, COALESCE(quote_text, '') AS quote_text,
 		       role, content, data, sources,
@@ -130,10 +145,10 @@ func (m *Messages) PathToLeaf(ctx context.Context, convID, userID, leafID string
 	}
 	rows, err := m.pool.Query(ctx,
 		`WITH RECURSIVE path AS (
-		   SELECT * FROM messages
+		   SELECT `+messageTreeColumns+` FROM messages
 		   WHERE id = $3 AND conversation_id = $1 AND user_id = $2
 		   UNION
-		   SELECT m.* FROM messages m
+		   SELECT `+prefixed("m.", messageTreeColumns)+` FROM messages m
 		   JOIN path p ON m.id = p.parent_id
 		   WHERE m.conversation_id = $1 AND m.user_id = $2
 		 )

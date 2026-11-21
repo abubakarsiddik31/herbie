@@ -18,10 +18,14 @@ import {
   Wrench,
   type LucideIcon,
 } from "lucide-react";
+import { toast } from "sonner";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { ApiError, apiFetch } from "@/lib/api";
 import { cleanConversationTitle, isFileTitle } from "@/lib/utils";
-import type { Conversation } from "@/lib/types";
+import type { Conversation, MessageSearchHit } from "@/lib/types";
+import { HighlightedSnippet } from "./SearchSnippet";
+import { useMessageSearch } from "./useMessageSearch";
 
 interface Props {
   open: boolean;
@@ -38,9 +42,10 @@ interface Props {
 
 interface PaletteItem {
   id: string;
-  category: "Actions" | "Navigation" | "Conversations";
+  category: "Actions" | "Navigation" | "Conversations" | "Messages";
   title: string;
   subtitle?: string;
+  snippet?: string;
   icon: LucideIcon;
   run: () => void;
 }
@@ -62,6 +67,36 @@ export function CommandPalette({
   const navigate = useNavigate();
   const { theme, setTheme } = useTheme();
   const inputRef = useRef<HTMLInputElement>(null);
+  const { data: searchData, isFetching: searching } = useMessageSearch(query, open);
+
+  // Jumping to an off-path hit activates its branch first; the conversation
+  // page then scrolls to `?m=`. Activation failures (run active, bot scope,
+  // already on the active path) fall through to navigation, where the jump
+  // effect retries or simply scrolls if the row is present.
+  async function openMessageHit(hit: MessageSearchHit) {
+    try {
+      await apiFetch<void>(
+        `/api/conversations/${hit.conversationId}/messages/${hit.messageId}/activate`,
+        { method: "POST" },
+      );
+    } catch (err) {
+      if (!(err instanceof ApiError)) {
+        toast.error("Could not open the search result");
+      }
+    }
+    onOpenChange(false);
+    navigate(`/chat/${hit.conversationId}?m=${hit.messageId}`);
+  }
+
+  const messageItems: PaletteItem[] = (searchData?.hits ?? []).map((hit) => ({
+    id: `hit-${hit.conversationId}-${hit.messageId}`,
+    category: "Messages",
+    title: hit.title || "Untitled conversation",
+    subtitle: hit.role === "user" ? "You" : "Assistant",
+    snippet: hit.snippet,
+    icon: MessageSquare,
+    run: () => void openMessageHit(hit),
+  }));
 
   const items = useMemo<PaletteItem[]>(() => {
     const list: PaletteItem[] = [
@@ -168,14 +203,16 @@ export function CommandPalette({
 
     const q = query.trim().toLowerCase();
     if (!q) return list;
-    return list.filter(
+    const local = list.filter(
       (item) =>
         item.title.toLowerCase().includes(q) ||
         item.category.toLowerCase().includes(q) ||
         (item.subtitle && item.subtitle.toLowerCase().includes(q)),
     );
+    return [...messageItems, ...local];
   }, [
     activeConversation,
+    messageItems,
     conversations,
     navigate,
     onExport,
@@ -228,12 +265,15 @@ export function CommandPalette({
               setSelectedIndex(0);
             }}
             onKeyDown={handleKeyDown}
-            placeholder="Type a command or search conversations…"
+            placeholder="Type a command, or search chats and messages…"
             aria-label="Command palette input"
             className="h-12 w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground"
             autoFocus
           />
         </div>
+        {searching && query.trim().length >= 2 && (
+          <p className="border-b px-4 py-1.5 text-[11px] text-muted-foreground">Searching messages…</p>
+        )}
         <ScrollArea className="max-h-80">
           <div className="p-2">
             {items.length === 0 ? (
@@ -259,7 +299,14 @@ export function CommandPalette({
                       }`}
                     >
                       <Icon className="size-4 shrink-0 text-muted-foreground" />
-                      <span className="min-w-0 flex-1 truncate">{item.title}</span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate">{item.title}</span>
+                        {item.snippet && (
+                          <span className="block truncate text-xs text-muted-foreground">
+                            <HighlightedSnippet snippet={item.snippet} />
+                          </span>
+                        )}
+                      </span>
                       {item.subtitle && (
                         <span className="shrink-0 text-xs text-muted-foreground">
                           {item.subtitle}

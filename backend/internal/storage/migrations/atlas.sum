@@ -1,4 +1,4 @@
-h1:7UU3EgOh3LC0PmfkUfZcbb1LEi0Jz9pKDhHn3loDN7g=
+h1:F5WTlSh6cCrv/shc6JySpY60VYUK0G+xAgopJyJSjIg=
 00001_init.sql h1:JzcSZ+hS8j4FBAEasJFC0KyqFe8QRjnFIzvK0l53Y8c=
 20260831070441_add_user_tools.sql h1:n33/K0eZGdHtRI+bx6ZatvlLEfNacVO1BPCCAkewmAE=
 20260831144933_pending_call_surrogate_id.sql h1:5IOIo7ZQte1f++QNHqs1eJrsPbsQdLaoi1kE0JyxefQ=
@@ -24,3 +24,4 @@ h1:7UU3EgOh3LC0PmfkUfZcbb1LEi0Jz9pKDhHn3loDN7g=
 20261116180000_message_branches.sql h1:R97oCqv2pK0uzIqyhlg5QoZceSgX+X0kSi2jtMxxJCY=
 20261116210000_chat_organization.sql h1:6YoqW/eJsHCXGroE8dPipwiZFuvLkp6wU3VslHLHKnQ=
 20261121090000_message_feedback_quotes.sql h1:ob4FzDhC5oA0rFcwVijg2WjjmSoejmErwmNR4bTLEmI=
+20261121120000_chat_search.sql h1:w+o26fEqynaAYnIMAWcMxyvZHonREqaFgzBP/E9/vIY=

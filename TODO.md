@@ -182,7 +182,7 @@ backfill, bot/fork titles, SetTitle overloading, quote composition) and 9 majors
       for transcript/search, carry quotes through edit/regenerate and fork.
 
 **PR3 `feat/chat-search`**
-- [ ] FTS with a truncated vector (no unbounded generated tsvector; state the
+- [x] FTS with a truncated vector (no unbounded generated tsvector; state the
       index/lock cost), `simple` config, escaped prefix queries, `ts_headline`
       sentinel markers rendered as text (no HTML injection), limits + pagination,
       archived excluded; activate-the-branch-then-jump for off-path hits;
