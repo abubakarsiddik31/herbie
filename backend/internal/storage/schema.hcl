@@ -369,6 +369,12 @@ table "messages" {
     type = text
     null = true
   }
+  # Maintained by the messages_search_vector trigger; truncated to 100,000
+  # characters to keep the GIN entry bounded.
+  column "search_vector" {
+    type = tsvector
+    null = false
+  }
   column "created_at" {
     type    = timestamptz
     null    = false
@@ -406,6 +412,10 @@ table "messages" {
   index "idx_messages_reply_to" {
     columns = [column.reply_to_id]
     where   = sql("reply_to_id IS NOT NULL")
+  }
+  index "idx_messages_search" {
+    type    = GIN
+    columns = [column.search_vector]
   }
 }
 
