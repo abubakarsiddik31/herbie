@@ -45,7 +45,7 @@ func TestListModelsFiltersByConfiguredKeys(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.Default != "gemini-3.5-flash" || len(got.Models) != 6 || got.Models[0].ID != "gemini-3.5-flash" {
+	if got.Default != "gemini-3.5-flash" || len(got.Models) != 7 || got.Models[0].ID != "gemini-3.5-flash" {
 		t.Fatalf("gemini-only keys should list gemini models: %+v", got)
 	}
 }
