@@ -202,7 +202,7 @@ backfill, bot/fork titles, SetTitle overloading, quote composition) and 9 majors
       Gemini thinking level/budget); capability-gated UI.
 - [ ] `auto` alias → ordered fallback chain via `model.NewFallback` (pre-first-fragment
       only); used-model stamping in usage/transcript; fallback indicator in the run trace.
-- [ ] Inline model switcher; regenerate-with-model (branch, not a settings change).
+- [x] Inline model switcher; regenerate-with-model (branch, not a settings change).
 - [ ] BYOK: per-user provider keys in the vault (set/test/delete, audited, never
       returned); server keys as fallback; `ALLOW_USER_PROVIDER_KEYS` flag.
 - [ ] Admin model catalog in Postgres (seeded from the hardcoded list): CRUD, rates,

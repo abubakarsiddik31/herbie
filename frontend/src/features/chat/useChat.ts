@@ -262,7 +262,7 @@ export function useChat(onDone?: () => void) {
 
   // regenerate replaces the last assistant answer: trailing non-user
   // messages drop locally and the last turn streams again.
-  const regenerate = useCallback(async (conversationId: string) => {
+  const regenerate = useCallback(async (conversationId: string, model?: string) => {
     const controller = new AbortController();
     abortRef.current = controller;
     const assistantId = crypto.randomUUID();
@@ -277,7 +277,7 @@ export function useChat(onDone?: () => void) {
     setTrace([]);
     setPending([]);
     setStatus("running");
-    await start(`/api/conversations/${conversationId}/regenerate`, {}, controller, assistantId);
+    await start(`/api/conversations/${conversationId}/regenerate`, model ? { model } : {}, controller, assistantId);
   }, [start]);
 
   const resolve = useCallback(async (conversationId: string, decisions: ApprovalDecision[]) => {
