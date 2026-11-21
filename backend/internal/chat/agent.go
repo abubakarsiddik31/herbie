@@ -307,3 +307,13 @@ func outcomeFrom(res golem.Result[string], requests int) Outcome {
 	}
 	return outcome
 }
+
+// WithRegistry returns a copy of the agent bound to another model registry,
+// keeping the usage limit and tool bounds. BYOK runs use this so a user's
+// keys apply without rebuilding the agent definition.
+func (a *Agent) WithRegistry(registry *ModelRegistry) *Agent {
+	if a == nil || registry == nil {
+		return a
+	}
+	return &Agent{registry: registry, limit: a.limit, env: a.env}
+}

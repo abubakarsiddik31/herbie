@@ -1,4 +1,4 @@
-h1:Tc8T/PqjFQ3X8vZLqqP9li07HbvoCptc5exXerJUXSs=
+h1:zWUpzXuYyqknfjnrj57+jjGvWDr2Vd0tXrMHR9a0/uY=
 00001_init.sql h1:JzcSZ+hS8j4FBAEasJFC0KyqFe8QRjnFIzvK0l53Y8c=
 20260831070441_add_user_tools.sql h1:n33/K0eZGdHtRI+bx6ZatvlLEfNacVO1BPCCAkewmAE=
 20260831144933_pending_call_surrogate_id.sql h1:5IOIo7ZQte1f++QNHqs1eJrsPbsQdLaoi1kE0JyxefQ=
@@ -26,3 +26,6 @@ h1:Tc8T/PqjFQ3X8vZLqqP9li07HbvoCptc5exXerJUXSs=
 20261121090000_message_feedback_quotes.sql h1:ob4FzDhC5oA0rFcwVijg2WjjmSoejmErwmNR4bTLEmI=
 20261121120000_chat_search.sql h1:w+o26fEqynaAYnIMAWcMxyvZHonREqaFgzBP/E9/vIY=
 20261121170000_generation_controls.sql h1:XnC8W1VPmlLhTHgVvhaulxVRK87OB4EvIX7Rb8fk9AM=
+20261121190000_user_provider_keys.sql h1:lH+bQ9pBR2BE/46gYGfp+DOALnTBZJLHWBlbuqI5d98=
+20261121200000_model_catalog.sql h1:QKgHZHFfQKY8IchftEMQPux/YmM8NgX8PDyKnBcSFAc=
+20261121210000_model_capabilities.sql h1:1I/JFtbVhG6i12Vcn9gOGySa62fT/eamIuzYtOfIh+s=

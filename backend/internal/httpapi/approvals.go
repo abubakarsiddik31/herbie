@@ -151,7 +151,7 @@ func (s *Server) handleApprovals(w http.ResponseWriter, r *http.Request) {
 	// positional boundary can land mid-batch. Rows replayed verbatim are
 	// skipped; resolutions and new answers carry this run's identity and are
 	// persisted at the paused tail.
-	outcome, err := s.deps.Agent.RunDeferred(ctx,
+	outcome, err := s.agentFor(ctx, userID).RunDeferred(ctx,
 		s.buildDeps(userID, convID, &sources, &sourcesMu, s.botFor(ctx, userID, conv.BotID)),
 		history, golem.DeferredResults{Approvals: resolutions},
 		sink, tools, spec)

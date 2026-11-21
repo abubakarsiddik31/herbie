@@ -441,7 +441,7 @@ func (s *Server) runTurn(ctx context.Context, userID, convID string, spec chat.R
 	}
 	var sources []rag.Scored
 	var sourcesMu sync.Mutex
-	outcome, err := s.deps.Agent.Run(ctx, s.buildDeps(userID, convID, &sources, &sourcesMu, s.botFor(ctx, userID, botID)),
+	outcome, err := s.agentFor(ctx, userID).Run(ctx, s.buildDeps(userID, convID, &sources, &sourcesMu, s.botFor(ctx, userID, botID)),
 		history, prompt, parts, sink, tools, spec)
 	if err != nil {
 		s.persistFailure(ctx, userID, convID, spec, startParentID, nil, -1, err, sink)
