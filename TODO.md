@@ -200,7 +200,7 @@ backfill, bot/fork titles, SetTitle overloading, quote composition) and 9 majors
 - [x] `top_p`, `max_output_tokens`, reasoning level on conversations/bots/user/project
       defaults; provider mapping (OpenAI `ReasoningEffort`, Anthropic thinking,
       Gemini thinking level/budget); capability-gated UI.
-- [ ] `auto` alias → ordered fallback chain via `model.NewFallback` (pre-first-fragment
+- [x] `auto` alias → ordered fallback chain via `model.NewFallback` (pre-first-fragment
       only); used-model stamping in usage/transcript; fallback indicator in the run trace.
 - [x] Inline model switcher; regenerate-with-model (branch, not a settings change).
 - [ ] BYOK: per-user provider keys in the vault (set/test/delete, audited, never
