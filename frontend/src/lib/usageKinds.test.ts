@@ -9,6 +9,7 @@ describe("usage kinds", () => {
     expect(kindLabel("compaction")).toBe("Compaction");
     expect(kindLabel("web_search")).toBe("Web Search");
     expect(kindLabel("document_search")).toBe("Doc Search");
+    expect(kindLabel("title")).toBe("Title");
   });
 
   it("falls back to the raw kind", () => {
@@ -21,5 +22,6 @@ describe("usage kinds", () => {
     expect(kindDescription("compaction")).toMatch(/summar/i);
     expect(kindDescription("web_search")).toMatch(/web retrieval/i);
     expect(kindDescription("document_search")).toMatch(/knowledge base/i);
+    expect(kindDescription("title")).toMatch(/title/i);
   });
 });

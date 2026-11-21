@@ -41,6 +41,7 @@ type ServerDeps struct {
 	Msgs          MsgStore
 	Feedback      FeedbackStore
 	MessageSearch MessageSearchStore
+	Titles        TitleGenerator
 	Usage         UsageStore
 	Tools         ToolStore
 	Pending       PendingStore

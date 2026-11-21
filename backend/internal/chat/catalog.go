@@ -35,6 +35,7 @@ var catalog = []ModelSpec{
 	{ID: "claude-sonnet-4-5", Provider: "anthropic", Label: "Claude Sonnet 4.5", InputPerM: 3.00, OutputPerM: 15.00},
 	{ID: "claude-haiku-4-5", Provider: "anthropic", Label: "Claude Haiku 4.5", InputPerM: 1.00, OutputPerM: 5.00},
 	{ID: "gemini-2.5-flash", Provider: "gemini", Label: "Gemini 2.5 Flash", InputPerM: 0.30, OutputPerM: 2.50},
+	{ID: "gemini-2.5-flash-lite", Provider: "gemini", Label: "Gemini 2.5 Flash Lite", InputPerM: 0.10, OutputPerM: 0.40},
 	{ID: "gemini-2.5-pro", Provider: "gemini", Label: "Gemini 2.5 Pro", InputPerM: 1.25, OutputPerM: 10.00},
 }
 

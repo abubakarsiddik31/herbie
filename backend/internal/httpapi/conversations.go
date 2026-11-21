@@ -33,7 +33,8 @@ type conversationDTO struct {
 	// PinnedAt/ArchivedAt are nullable organization timestamps.
 	PinnedAt   *string `json:"pinnedAt"`
 	ArchivedAt *string `json:"archivedAt"`
-	// TitleSource records the title's provenance ("heuristic" or "manual").
+	// TitleSource records the title's provenance ("heuristic", "auto", or
+	// "manual").
 	TitleSource string `json:"titleSource"`
 	CreatedAt   string `json:"createdAt"`
 	UpdatedAt   string `json:"updatedAt"`

@@ -4,7 +4,7 @@ import "testing"
 
 func TestCatalogOrderedAndComplete(t *testing.T) {
 	got := Catalog()
-	want := []string{"gemini-3.5-flash", "gemini-3.5-pro", "gemma-3-27b-it", "gemma-3-12b-it", "gpt-5", "gpt-4.1", "claude-sonnet-4-5", "claude-haiku-4-5", "gemini-2.5-flash", "gemini-2.5-pro"}
+	want := []string{"gemini-3.5-flash", "gemini-3.5-pro", "gemma-3-27b-it", "gemma-3-12b-it", "gpt-5", "gpt-4.1", "claude-sonnet-4-5", "claude-haiku-4-5", "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.5-pro"}
 	if len(got) != len(want) {
 		t.Fatalf("Catalog() has %d entries, want %d", len(got), len(want))
 	}
@@ -33,7 +33,7 @@ func TestFindModel(t *testing.T) {
 func TestAvailableFiltersByProviderKey(t *testing.T) {
 	keys := ProviderKeys{Gemini: "g"}
 	got := Available(keys)
-	if len(got) != 6 || got[0].ID != "gemini-3.5-flash" || got[1].ID != "gemini-3.5-pro" {
+	if len(got) != 7 || got[0].ID != "gemini-3.5-flash" || got[1].ID != "gemini-3.5-pro" {
 		t.Errorf("Available(gemini-only) = %v, want the gemini entries", ids(got))
 	}
 
@@ -44,8 +44,8 @@ func TestAvailableFiltersByProviderKey(t *testing.T) {
 	}
 
 	keys = ProviderKeys{Gemini: "g", OpenAI: "o", Anthropic: "a"}
-	if got := Available(keys); len(got) != 10 {
-		t.Errorf("Available(all keys) = %v, want all 10", ids(got))
+	if got := Available(keys); len(got) != 11 {
+		t.Errorf("Available(all keys) = %v, want all 11", ids(got))
 	}
 
 	if got := Available(ProviderKeys{}); len(got) != 0 {

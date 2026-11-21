@@ -189,7 +189,7 @@ backfill, bot/fork titles, SetTitle overloading, quote composition) and 9 majors
       in-conversation find; PathToLeaf selects explicit columns.
 
 **PR4 `feat/chat-autotitle`**
-- [ ] Async title in `finishRun`/`finishResumed` only (approval-paused first turn
+- [x] Async title in `finishRun`/`finishResumed` only (approval-paused first turn
       included), `TITLE_MODEL` via registry at request time, sanitized input
       (strip file blocks, truncate, never memories/instructions), first user turn
       only, bot/fork excluded, manual rename wins, timeout/fallback to heuristic,

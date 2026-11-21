@@ -5,6 +5,7 @@ const KINDS: Record<string, { label: string; description: string }> = {
   embedding: { label: "Embedding", description: "Query and document embeddings" },
   rerank: { label: "Rerank", description: "LLM re-ordering of retrieved chunks" },
   compaction: { label: "Compaction", description: "History summarization" },
+  title: { label: "Title", description: "Conversation title generation" },
   web_search: { label: "Web Search", description: "Live web retrieval queries" },
   document_search: { label: "Doc Search", description: "Knowledge base retrieval queries" },
   tool: { label: "Tool", description: "Tool and sandbox executions" },

@@ -269,6 +269,20 @@ func (f *fakeConvos) SetHeuristicTitle(_ context.Context, id, userID, title stri
 	return nil
 }
 
+func (f *fakeConvos) SetAutoTitle(_ context.Context, id, userID, title string) error {
+	conv, ok := f.convs[id]
+	if !ok || conv.UserID != userID {
+		return storage.ErrNotFound
+	}
+	if conv.TitleSource != "" && conv.TitleSource != "heuristic" {
+		return nil
+	}
+	conv.Title = title
+	conv.TitleSource = "auto"
+	f.convs[id] = conv
+	return nil
+}
+
 func (f *fakeConvos) RenameTitle(_ context.Context, id, userID, title string) error {
 	conv, ok := f.convs[id]
 	if !ok || conv.UserID != userID {

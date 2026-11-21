@@ -30,6 +30,9 @@ type Config struct {
 	AdminEmails      []string
 	ChatInputRate    float64 // USD per 1M input tokens (fallback rate)
 	ChatOutputRate   float64 // USD per 1M output tokens (fallback rate)
+	// TitleModel enables asynchronous conversation auto-titling; empty keeps
+	// the first-message heuristic title.
+	TitleModel string
 
 	// User-tool runtime settings.
 	ToolHTTPTimeout       time.Duration
@@ -325,6 +328,7 @@ func Load() (Config, error) {
 		AdminEmails:      adminEmails,
 		ChatInputRate:    inputRate,
 		ChatOutputRate:   outputRate,
+		TitleModel:       os.Getenv("TITLE_MODEL"),
 
 		OAuth: OAuthConfig{
 			Google: OAuthProviderConfig{
