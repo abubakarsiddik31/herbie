@@ -40,6 +40,9 @@ func TestModelCatalogRoundTrip(t *testing.T) {
 	if err != nil || saved.Label != "Renamed" || !saved.Enabled {
 		t.Fatalf("update = %+v %v", saved, err)
 	}
+	if got, err := catalog.Get(ctx, id); err != nil || got.Label != "Renamed" {
+		t.Fatalf("get = %+v %v", got, err)
+	}
 	if err := catalog.Delete(ctx, id); err != nil {
 		t.Fatalf("delete: %v", err)
 	}

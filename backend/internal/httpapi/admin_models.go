@@ -14,6 +14,7 @@ import (
 // ModelCatalogStore is the admin-managed model catalog surface.
 type ModelCatalogStore interface {
 	List(ctx context.Context) ([]storage.ModelCatalogRow, error)
+	Get(ctx context.Context, id string) (storage.ModelCatalogRow, error)
 	Upsert(ctx context.Context, m storage.ModelCatalogRow) (storage.ModelCatalogRow, error)
 	Delete(ctx context.Context, id string) error
 }
@@ -68,8 +69,8 @@ func (s *Server) handleAdminUpsertModel(w http.ResponseWriter, r *http.Request) 
 	}
 	var req struct {
 		ID           string          `json:"id"`
-		Provider     string          `json:"provider"`
-		Label        string          `json:"label"`
+		Provider     *string         `json:"provider"`
+		Label        *string         `json:"label"`
 		InputPerM    *float64        `json:"inputPerM"`
 		OutputPerM   *float64        `json:"outputPerM"`
 		Enabled      *bool           `json:"enabled"`
@@ -80,20 +81,42 @@ func (s *Server) handleAdminUpsertModel(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusBadRequest, "bad_request", "invalid body")
 		return
 	}
-	id := strings.TrimSpace(req.ID)
+	pathID := strings.TrimSpace(r.PathValue("id"))
+	id := pathID
+	if id == "" {
+		id = strings.TrimSpace(req.ID)
+	}
 	if id == "" || id == chat.AutoModelID {
 		writeError(w, http.StatusBadRequest, "validation_error", "id is required and cannot be auto")
 		return
 	}
-	if !validProvider(req.Provider) {
+	row := storage.ModelCatalogRow{ID: id, Enabled: true}
+	if pathID != "" {
+		existing, err := s.deps.ModelCatalog.Get(r.Context(), id)
+		if errors.Is(err, storage.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "not_found", "model not found")
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "internal", "could not load model")
+			return
+		}
+		row = existing
+	}
+	if req.Provider != nil {
+		row.Provider = *req.Provider
+	}
+	if req.Label != nil {
+		row.Label = strings.TrimSpace(*req.Label)
+	}
+	if row.Provider == "" || !validProvider(row.Provider) {
 		writeError(w, http.StatusBadRequest, "validation_error", "unknown provider")
 		return
 	}
-	if strings.TrimSpace(req.Label) == "" {
+	if row.Label == "" {
 		writeError(w, http.StatusBadRequest, "validation_error", "label is required")
 		return
 	}
-	row := storage.ModelCatalogRow{ID: id, Provider: req.Provider, Label: strings.TrimSpace(req.Label), Enabled: true}
 	if req.InputPerM != nil {
 		if *req.InputPerM < 0 {
 			writeError(w, http.StatusBadRequest, "validation_error", "inputPerM must be non-negative")

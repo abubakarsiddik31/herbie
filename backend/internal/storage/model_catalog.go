@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -51,6 +52,18 @@ func (s *ModelCatalog) List(ctx context.Context) ([]ModelCatalogRow, error) {
 		out = append(out, m)
 	}
 	return out, rows.Err()
+}
+
+func (s *ModelCatalog) Get(ctx context.Context, id string) (ModelCatalogRow, error) {
+	m, err := scanModelCatalog(s.pool.QueryRow(ctx,
+		`SELECT `+modelCatalogColumns+` FROM model_catalog WHERE id = $1`, id))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ModelCatalogRow{}, ErrNotFound
+	}
+	if err != nil {
+		return ModelCatalogRow{}, fmt.Errorf("get model catalog: %w", err)
+	}
+	return m, nil
 }
 
 func (s *ModelCatalog) Upsert(ctx context.Context, m ModelCatalogRow) (ModelCatalogRow, error) {
