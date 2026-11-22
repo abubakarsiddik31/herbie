@@ -39,6 +39,35 @@ beforeEach(() => {
 afterEach(() => server.resetHandlers());
 afterAll(() => server.close());
 
+describe("useChat regenerate", () => {
+  it("sends the model override for one regenerated branch", async () => {
+    let body: unknown = null;
+    server.use(
+      http.post("*/api/conversations/c1/regenerate", async ({ request }) => {
+        body = await request.json();
+        return new HttpResponse(
+          sseBody([
+            'event: delta\ndata: {"text":"again"}\n\n',
+            'event: done\ndata: {"messageId":"m2","inputTokens":1,"outputTokens":1,"requests":1,"costUsd":0.00001,"model":"gemini-3.5-pro"}\n\n',
+          ]),
+          { headers: { "Content-Type": "text/event-stream" } },
+        );
+      }),
+    );
+    const { result } = renderHook(() => useChat());
+    act(() => {
+      result.current.setMessages([
+        { id: "u1", role: "user", content: "hi", truncated: false, createdAt: "2026-01-01T00:00:00Z" },
+      ]);
+    });
+    await act(async () => {
+      await result.current.regenerate("c1", "gemini-3.5-pro");
+    });
+    expect(body).toEqual({ model: "gemini-3.5-pro" });
+    expect(result.current.messages.find((m) => m.role === "assistant")?.content).toBe("again");
+  });
+});
+
 describe("useChat send", () => {
   it("refreshes once on 401 and retries the SSE stream with the new token", async () => {
     const { result } = renderHook(() => useChat());
@@ -48,6 +77,26 @@ describe("useChat send", () => {
     const assistant = result.current.messages.find((m) => m.role === "assistant");
     expect(assistant?.content).toBe("pong");
     expect(useAuth.getState().accessToken).toBe("fresh");
+  });
+
+  it("records an auto-fallback in the run trace", async () => {
+    server.use(
+      http.post("*/api/conversations/c1/messages", () =>
+        new HttpResponse(
+          sseBody([
+            'event: meta\ndata: {"type":"fallback","requested":"auto","used":"gemini-3.5-flash"}\n\n',
+            'event: delta\ndata: {"text":"hi"}\n\n',
+            'event: done\ndata: {"messageId":"m1","inputTokens":1,"outputTokens":2,"requests":1,"costUsd":0.00001,"model":"gemini-3.5-flash"}\n\n',
+          ]),
+          { headers: { "Content-Type": "text/event-stream" } },
+        ),
+      ),
+    );
+    const { result } = renderHook(() => useChat());
+    await act(async () => {
+      await result.current.send("hi", "c1");
+    });
+    expect(result.current.trace).toContain("fell back to gemini-3.5-flash");
   });
 
   it("surfaces history compaction in the run trace", async () => {

@@ -556,9 +556,14 @@ type fakeUsage struct {
 	searches []storage.SearchQuery
 }
 
-type fakeProfiles struct{ texts map[string]string }
+type fakeProfiles struct {
+	texts    map[string]string
+	defaults map[string]storage.GenerationDefaults
+}
 
-func newFakeProfiles() *fakeProfiles { return &fakeProfiles{texts: map[string]string{}} }
+func newFakeProfiles() *fakeProfiles {
+	return &fakeProfiles{texts: map[string]string{}, defaults: map[string]storage.GenerationDefaults{}}
+}
 
 var _ ProfileStore = (*fakeProfiles)(nil)
 
@@ -568,6 +573,15 @@ func (f *fakeProfiles) Instructions(_ context.Context, userID string) (string, e
 
 func (f *fakeProfiles) SetInstructions(_ context.Context, userID, text string) error {
 	f.texts[userID] = text
+	return nil
+}
+
+func (f *fakeProfiles) GenerationDefaults(_ context.Context, userID string) (storage.GenerationDefaults, error) {
+	return f.defaults[userID], nil
+}
+
+func (f *fakeProfiles) SetGenerationDefaults(_ context.Context, userID string, d storage.GenerationDefaults) error {
+	f.defaults[userID] = d
 	return nil
 }
 
@@ -797,5 +811,33 @@ func TestDeriveConversationTitle(t *testing.T) {
 				t.Errorf("deriveConversationTitle() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestAutoModelFallbackStampsUsedModel(t *testing.T) {
+	msgs := newFakeMsgs()
+	convs := newFakeConvos(msgs)
+	usage := newFakeUsage()
+	h, token := newHandlerServer(t, newTestAgent(t, scriptedPongModel()), convs, msgs, usage)
+
+	modelID := chat.AutoModelID
+	conv, err := convs.Create(context.Background(), "u-1", "Auto", storage.ConversationPatch{Model: &modelID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := postMessage(t, h, token, conv.ID, "hello")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("send: %d %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `"type":"fallback"`) || !strings.Contains(body, `"model":"gemini-3.5-flash"`) {
+		t.Fatalf("fallback trace/done missing:\n%s", body)
+	}
+	e := usage.events[len(usage.events)-1]
+	if e.Model != "gemini-3.5-flash" {
+		t.Fatalf("usage model = %q, want the fallback member", e.Model)
+	}
+	if convs.convs[conv.ID].Model != chat.AutoModelID {
+		t.Fatalf("conversation model changed to %q", convs.convs[conv.ID].Model)
 	}
 }

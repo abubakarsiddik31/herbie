@@ -34,6 +34,8 @@ interface MetaPayload {
   estimatedTokens?: number;
   thresholdTokens?: number;
   keepRecent?: number;
+  requested?: string;
+  used?: string;
 }
 interface SourcesPayload { sources: Source[] }
 
@@ -103,6 +105,8 @@ export function useChat(onDone?: () => void) {
           setTrace((t) => [...t, `${toolLabel(meta.name)}…`]);
         } else if (meta.type === "tool_end") {
           setTrace((t) => [...t, `${meta.name} ${meta.ok === false ? "failed" : "finished"}`]);
+        } else if (meta.type === "fallback") {
+          setTrace((t) => [...t, `fell back to ${meta.used ?? "another model"}`]);
         }
       } else if (frame.event === "sources") {
         const { sources } = payload as SourcesPayload;
@@ -262,7 +266,7 @@ export function useChat(onDone?: () => void) {
 
   // regenerate replaces the last assistant answer: trailing non-user
   // messages drop locally and the last turn streams again.
-  const regenerate = useCallback(async (conversationId: string) => {
+  const regenerate = useCallback(async (conversationId: string, model?: string) => {
     const controller = new AbortController();
     abortRef.current = controller;
     const assistantId = crypto.randomUUID();
@@ -277,7 +281,7 @@ export function useChat(onDone?: () => void) {
     setTrace([]);
     setPending([]);
     setStatus("running");
-    await start(`/api/conversations/${conversationId}/regenerate`, {}, controller, assistantId);
+    await start(`/api/conversations/${conversationId}/regenerate`, model ? { model } : {}, controller, assistantId);
   }, [start]);
 
   const resolve = useCallback(async (conversationId: string, decisions: ApprovalDecision[]) => {

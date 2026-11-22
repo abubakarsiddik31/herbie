@@ -30,6 +30,9 @@ export interface BotInput {
   instructions: string;
   model: string;
   temperature: number | null;
+  topP: number | null;
+  maxOutputTokens: number;
+  reasoning: "low" | "medium" | "high" | "";
   ragEnabled: boolean;
 }
 

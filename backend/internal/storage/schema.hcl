@@ -39,6 +39,20 @@ table "users" {
     null    = false
     default = ""
   }
+  column "default_top_p" {
+    type = double
+    null = true
+  }
+  column "default_max_output_tokens" {
+    type    = integer
+    null    = false
+    default = 0
+  }
+  column "default_reasoning" {
+    type    = text
+    null    = false
+    default = ""
+  }
   column "created_at" {
     type    = timestamptz
     null    = false
@@ -53,6 +67,43 @@ table "users" {
   }
   index "idx_users_role" {
     columns = [column.role]
+  }
+}
+
+table "user_provider_keys" {
+  schema = schema.public
+  column "user_id" {
+    type = uuid
+    null = false
+  }
+  column "provider" {
+    type = text
+    null = false
+  }
+  column "encrypted_key" {
+    type = jsonb
+    null = false
+  }
+  column "created_at" {
+    type    = timestamptz
+    null    = false
+    default = sql("now()")
+  }
+  column "updated_at" {
+    type    = timestamptz
+    null    = false
+    default = sql("now()")
+  }
+  primary_key {
+    columns = [column.user_id, column.provider]
+  }
+  foreign_key "user_provider_keys_user_id_fkey" {
+    columns     = [column.user_id]
+    ref_columns = [table.users.column.id]
+    on_delete   = CASCADE
+  }
+  check "user_provider_keys_provider_check" {
+    expr = "provider IN ('gemini', 'openai', 'anthropic')"
   }
 }
 
@@ -234,6 +285,20 @@ table "conversations" {
     type    = text
     null    = false
     default = "heuristic"
+  }
+  column "top_p" {
+    type = double
+    null = true
+  }
+  column "max_output_tokens" {
+    type    = integer
+    null    = false
+    default = 0
+  }
+  column "reasoning" {
+    type    = text
+    null    = false
+    default = ""
   }
   primary_key {
     columns = [column.id]
@@ -470,6 +535,63 @@ table "message_feedback" {
   }
   index "idx_message_feedback_message" {
     columns = [column.message_id]
+  }
+}
+
+table "model_catalog" {
+  schema = schema.public
+  column "id" {
+    type = text
+    null = false
+  }
+  column "provider" {
+    type = text
+    null = false
+  }
+  column "label" {
+    type = text
+    null = false
+  }
+  column "input_per_m" {
+    type    = double
+    null    = false
+    default = 0
+  }
+  column "output_per_m" {
+    type    = double
+    null    = false
+    default = 0
+  }
+  column "enabled" {
+    type    = boolean
+    null    = false
+    default = true
+  }
+  column "capabilities" {
+    type    = jsonb
+    null    = false
+    default = sql("'{}'::jsonb")
+  }
+  column "sort_order" {
+    type    = integer
+    null    = false
+    default = 0
+  }
+  column "created_at" {
+    type    = timestamptz
+    null    = false
+    default = sql("now()")
+  }
+  column "updated_at" {
+    type    = timestamptz
+    null    = false
+    default = sql("now()")
+  }
+  primary_key {
+    columns = [column.id]
+  }
+  check "model_catalog_provider_check" {
+    expr = "provider IN ('gemini', 'openai', 'anthropic')"
   }
 }
 
@@ -854,6 +976,20 @@ table "projects" {
     default = ""
   }
   column "instructions" {
+    type    = text
+    null    = false
+    default = ""
+  }
+  column "default_top_p" {
+    type = double
+    null = true
+  }
+  column "default_max_output_tokens" {
+    type    = integer
+    null    = false
+    default = 0
+  }
+  column "default_reasoning" {
     type    = text
     null    = false
     default = ""
@@ -1304,6 +1440,20 @@ table "bots" {
   column "temperature" {
     type = real
     null = true
+  }
+  column "top_p" {
+    type = double
+    null = true
+  }
+  column "max_output_tokens" {
+    type    = integer
+    null    = false
+    default = 0
+  }
+  column "reasoning" {
+    type    = text
+    null    = false
+    default = ""
   }
   column "rag_enabled" {
     type    = boolean

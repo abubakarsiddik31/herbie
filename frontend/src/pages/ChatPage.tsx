@@ -49,6 +49,14 @@ import {
 import { cn, fmtTokens, cleanConversationTitle } from "@/lib/utils";
 import type { ChatMessage, Conversation, ConversationSettings } from "@/lib/types";
 import { Badge } from "@/components/ui/badge";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
 import { ParsedFileViewerDialog } from "@/features/documents/ParsedFileViewerDialog";
 import { useChatApps, extractAppConnectProviders, type ChatApp } from "@/features/chat/useChatApps";
@@ -334,6 +342,9 @@ export function ChatPage() {
   const [draftSettings, setDraftSettings] = useState<ConversationSettings>({
     model: "",
     temperature: null,
+    topP: null,
+    maxOutputTokens: 0,
+    reasoning: "",
     systemPrompt: "",
     ragEnabled: false,
   });
@@ -552,10 +563,10 @@ export function ChatPage() {
     }
   }
 
-  function regenerateLast() {
+  function regenerateLast(model?: string) {
     if (selectedId === null || running || pending.length > 0) return;
     setSendError(null);
-    regenerate(selectedId).catch((err) =>
+    regenerate(selectedId, model).catch((err) =>
       setSendError(err instanceof ApiError ? err.message : "Failed to regenerate answer"),
     );
   }
@@ -661,10 +672,25 @@ export function ChatPage() {
     ? {
         model: activeConversation.model || models?.default || "",
         temperature: activeConversation.temperature,
+        topP: activeConversation.topP ?? null,
+        maxOutputTokens: activeConversation.maxOutputTokens ?? 0,
+        reasoning: activeConversation.reasoning ?? "",
         systemPrompt: activeConversation.systemPrompt,
         ragEnabled: activeConversation.ragEnabled,
       }
     : draftSettings;
+
+  function switchModel(modelID: string) {
+    if (modelID === activeSettings.model) return;
+    if (selectedId === null) {
+      setDraftSettings((prev) => ({ ...prev, model: modelID }));
+      return;
+    }
+    updateSettings.mutate(
+      { ...activeSettings, model: modelID },
+      { onError: (err) => toast.error(err instanceof ApiError ? err.message : "Failed to switch model") },
+    );
+  }
 
   function exportConversation() {
     if (!activeConversation || messages.length === 0) return;
@@ -775,17 +801,34 @@ export function ChatPage() {
             <Sidebar className="size-4" />
           </Button>
 
-          {/* Model Selector Pill */}
-          <button
-            type="button"
-            onClick={() => setSettingsOpen(true)}
-            className="flex items-center gap-1.5 rounded-lg border border-border/60 bg-muted/30 px-2.5 py-1 text-xs font-medium text-foreground transition-all hover:bg-accent hover:border-foreground/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            title="Model & chat configuration"
-          >
-            <Bot className="size-3.5 text-primary" />
-            <span className="font-semibold">{modelLabel(activeSettings.model)}</span>
-            <ChevronDown className="size-3 text-muted-foreground" />
-          </button>
+          {/* Inline model switcher */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                disabled={running || pending.length > 0}
+                className="flex items-center gap-1.5 rounded-lg border border-border/60 bg-muted/30 px-2.5 py-1 text-xs font-medium text-foreground transition-all hover:bg-accent hover:border-foreground/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
+                title="Switch model"
+              >
+                <Bot className="size-3.5 text-primary" />
+                <span className="font-semibold">{modelLabel(activeSettings.model)}</span>
+                <ChevronDown className="size-3 text-muted-foreground" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="max-h-80 w-56 overflow-y-auto">
+              <DropdownMenuLabel>Model</DropdownMenuLabel>
+              {(models?.models ?? []).map((m) => (
+                <DropdownMenuItem key={m.id} onClick={() => switchModel(m.id)} className="justify-between">
+                  <span>{m.label}</span>
+                  {m.id === activeSettings.model && <Check className="size-3.5 text-primary" />}
+                </DropdownMenuItem>
+              ))}
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => setSettingsOpen(true)}>
+                Model & prompt settings…
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
 
           <span className="hidden sm:inline text-muted-foreground/30">|</span>
 
@@ -1235,16 +1278,34 @@ export function ChatPage() {
                                 <Trash2 className="size-3.5" />
                               </button>
                               {isLast && !isBotConversation && (
-                                <button
-                                  type="button"
-                                  aria-label="Regenerate answer"
-                                  title="Regenerate"
-                                  disabled={blockInteraction}
-                                  onClick={regenerateLast}
-                                  className="rounded-md p-1 text-muted-foreground/60 transition-colors hover:text-foreground disabled:cursor-not-allowed"
-                                >
-                                  <RefreshCw className="size-3.5" />
-                                </button>
+                                <DropdownMenu>
+                                  <DropdownMenuTrigger asChild>
+                                    <button
+                                      type="button"
+                                      aria-label="Regenerate answer"
+                                      title="Regenerate"
+                                      disabled={blockInteraction}
+                                      className="rounded-md p-1 text-muted-foreground/60 transition-colors hover:text-foreground disabled:cursor-not-allowed"
+                                    >
+                                      <RefreshCw className="size-3.5" />
+                                    </button>
+                                  </DropdownMenuTrigger>
+                                  <DropdownMenuContent align="end" className="max-h-80 w-56 overflow-y-auto">
+                                    <DropdownMenuItem onClick={() => regenerateLast()}>Regenerate</DropdownMenuItem>
+                                    <DropdownMenuSeparator />
+                                    <DropdownMenuLabel>Regenerate with</DropdownMenuLabel>
+                                    {(models?.models ?? []).map((m) => (
+                                      <DropdownMenuItem
+                                        key={m.id}
+                                        onClick={() => regenerateLast(m.id)}
+                                        className="justify-between"
+                                      >
+                                        <span>{m.label}</span>
+                                        {m.id === activeSettings.model && <Check className="size-3.5 text-primary" />}
+                                      </DropdownMenuItem>
+                                    ))}
+                                  </DropdownMenuContent>
+                                </DropdownMenu>
                               )}
                               {m.usage && (
                                 <p className="text-[11px] text-muted-foreground/60">

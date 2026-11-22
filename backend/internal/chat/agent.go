@@ -74,10 +74,10 @@ func New(registry *ModelRegistry, usageLimit golem.UsageLimit, env ToolEnv) (*Ag
 
 // build assembles the golem agent for one run (or resume) against the
 // conversation's chosen model and system prompt.
-func (a *Agent) build(spec RunSpec, tools []tool.Tool[Deps]) (*golem.Agent[Deps, string], error) {
+func (a *Agent) build(spec RunSpec, tools []tool.Tool[Deps]) (*golem.Agent[Deps, string], model.StreamingModel, error) {
 	client, err := a.registry.Resolve(spec)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	passthrough := golem.DecodeFunc[string](func(_ context.Context, r model.Response) (string, error) {
 		return r.Message.Content, nil
@@ -105,9 +105,9 @@ func (a *Agent) build(spec RunSpec, tools []tool.Tool[Deps]) (*golem.Agent[Deps,
 	}
 	agent, err := golem.New(client, passthrough, opts...)
 	if err != nil {
-		return nil, fmt.Errorf("build chat agent: %w", err)
+		return nil, nil, fmt.Errorf("build chat agent: %w", err)
 	}
-	return agent, nil
+	return agent, client, nil
 }
 
 const retrievalGuidance = `
@@ -199,10 +199,13 @@ func promptFor(spec RunSpec, tools []tool.Tool[Deps]) string {
 }
 
 type Outcome struct {
-	Output   string
-	Messages []model.Message
-	Usage    model.Usage
-	Requests int
+	Output string
+	// UsedModel is the concrete member that answered an auto-fallback run;
+	// empty for direct model selections.
+	UsedModel string
+	Messages  []model.Message
+	Usage     model.Usage
+	Requests  int
 	// Pending is non-empty when the run paused on approval-gated tool calls.
 	// Output is empty then; resume through RunDeferred.
 	Pending []PendingApproval
@@ -213,7 +216,7 @@ type Outcome struct {
 // caller to classify and persist. Parts are the prompt's image attachments
 // (nil for a text-only turn).
 func (a *Agent) Run(ctx context.Context, deps Deps, history []model.Message, prompt string, parts []model.Part, sink Sink, tools []tool.Tool[Deps], spec RunSpec) (Outcome, error) {
-	agent, err := a.build(spec, tools)
+	agent, client, err := a.build(spec, tools)
 	if err != nil {
 		return Outcome{}, err
 	}
@@ -229,14 +232,16 @@ func (a *Agent) Run(ctx context.Context, deps Deps, history []model.Message, pro
 	if err != nil {
 		return Outcome{}, err
 	}
-	return outcomeFrom(res, requests), nil
+	outcome := outcomeFrom(res, requests)
+	outcome.UsedModel = usedModelOf(client)
+	return outcome, nil
 }
 
 // RunDeferred resumes a run paused on approvals (or external results).
 // golem's deferred resume is non-streaming, so the answer reaches the sink as
 // a single delta after the run completes.
 func (a *Agent) RunDeferred(ctx context.Context, deps Deps, history []model.Message, results golem.DeferredResults, sink Sink, tools []tool.Tool[Deps], spec RunSpec) (Outcome, error) {
-	agent, err := a.build(spec, tools)
+	agent, client, err := a.build(spec, tools)
 	if err != nil {
 		return Outcome{}, err
 	}
@@ -249,12 +254,20 @@ func (a *Agent) RunDeferred(ctx context.Context, deps Deps, history []model.Mess
 		return Outcome{}, err
 	}
 	outcome := outcomeFrom(res, requests)
+	outcome.UsedModel = usedModelOf(client)
 	if outcome.Output != "" {
 		if err := sink.Delta(outcome.Output); err != nil {
 			return Outcome{}, err
 		}
 	}
 	return outcome, nil
+}
+
+func usedModelOf(client model.StreamingModel) string {
+	if reporter, ok := client.(interface{ UsedModel() string }); ok {
+		return reporter.UsedModel()
+	}
+	return ""
 }
 
 func onDelta(sink Sink) func(model.Delta) error {
@@ -293,4 +306,14 @@ func outcomeFrom(res golem.Result[string], requests int) Outcome {
 		outcome.Output = ""
 	}
 	return outcome
+}
+
+// WithRegistry returns a copy of the agent bound to another model registry,
+// keeping the usage limit and tool bounds. BYOK runs use this so a user's
+// keys apply without rebuilding the agent definition.
+func (a *Agent) WithRegistry(registry *ModelRegistry) *Agent {
+	if a == nil || registry == nil {
+		return a
+	}
+	return &Agent{registry: registry, limit: a.limit, env: a.env}
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -47,6 +48,23 @@ func main() {
 	if err := storage.Migrate(ctx, pool); err != nil {
 		log.Error("migrate", "err", err)
 		os.Exit(1)
+	}
+
+	modelCatalog := storage.NewModelCatalog(pool)
+	if rows, err := modelCatalog.List(ctx); err == nil && len(rows) > 0 {
+		specs := make([]chat.ModelSpec, 0, len(rows))
+		for _, m := range rows {
+			if !m.Enabled {
+				continue
+			}
+			specs = append(specs, chat.ModelSpec{
+				ID: m.ID, Provider: m.Provider, Label: m.Label,
+				InputPerM: m.InputPerM, OutputPerM: m.OutputPerM,
+				Capabilities: decodeCapabilities(m.Capabilities),
+			})
+		}
+		chat.SetCatalog(specs)
+		log.Info("model catalog loaded", "models", len(specs))
 	}
 
 	users := storage.NewUsers(pool)
@@ -168,44 +186,45 @@ func main() {
 	}
 
 	botSrv, handler := httpapi.NewServerWithRunner(httpapi.ServerDeps{
-		Cfg:           cfg,
-		Log:           log,
-		Auth:          svc,
-		Tokens:        tokens,
-		OAuth:         oauthProviders(cfg),
-		Convos:        storage.NewConversations(pool),
-		Prompts:       storage.NewSavedPrompts(pool),
-		Msgs:          storage.NewMessages(pool),
-		Feedback:      storage.NewFeedback(pool),
-		MessageSearch: storage.NewMessageSearch(pool),
-		Titles:        titles,
-		Shares:        storage.NewShares(pool),
-		Profiles:      users,
-		Users:         users,
-		Memories:      storage.NewMemories(pool),
-		Usage:         storage.NewUsage(pool),
-		Tools:         storage.NewTools(pool),
-		Pending:       storage.NewPendingCalls(pool),
-		Bots:          storage.NewBots(pool),
-		BotMemories:   storage.NewBotMemories(pool),
-		BotFiles:      storage.NewBotFiles(pool),
-		BotRuns:       storage.NewBotRuns(pool),
-		BotRoutines:   storage.NewBotRoutines(pool),
-		Agent:         agent,
-		Rates:         rates,
-		ModelKeys:     modelKeys,
-		RagSearch:     ragSearch,
-		WebSearch:     webSearch,
-		Compactor:     compactor,
-		RAG:           ragRunner,
-		Docs:          storage.NewDocuments(pool),
-		Projects:      storage.NewProjects(pool),
-		Workflows:     storage.NewWorkflows(pool),
-		MCPServers:    storage.NewMCPServers(pool),
-		Audits:        storage.NewAudits(pool),
-		Vault:         vault.New(cfg.CredentialEncryptionKey),
-		Vectors:       vectors,
-		Objects:       objects,
+		Cfg:              cfg,
+		Log:              log,
+		Auth:             svc,
+		Tokens:           tokens,
+		OAuth:            oauthProviders(cfg),
+		Convos:           storage.NewConversations(pool),
+		Prompts:          storage.NewSavedPrompts(pool),
+		Msgs:             storage.NewMessages(pool),
+		Feedback:         storage.NewFeedback(pool),
+		MessageSearch:    storage.NewMessageSearch(pool),
+		UserProviderKeys: storage.NewUserProviderKeys(pool),
+		Titles:           titles,
+		Shares:           storage.NewShares(pool),
+		Profiles:         users,
+		Users:            users,
+		Memories:         storage.NewMemories(pool),
+		Usage:            storage.NewUsage(pool),
+		Tools:            storage.NewTools(pool),
+		Pending:          storage.NewPendingCalls(pool),
+		Bots:             storage.NewBots(pool),
+		BotMemories:      storage.NewBotMemories(pool),
+		BotFiles:         storage.NewBotFiles(pool),
+		BotRuns:          storage.NewBotRuns(pool),
+		BotRoutines:      storage.NewBotRoutines(pool),
+		Agent:            agent,
+		Rates:            rates,
+		ModelKeys:        modelKeys,
+		RagSearch:        ragSearch,
+		WebSearch:        webSearch,
+		Compactor:        compactor,
+		RAG:              ragRunner,
+		Docs:             storage.NewDocuments(pool),
+		Projects:         storage.NewProjects(pool),
+		Workflows:        storage.NewWorkflows(pool),
+		MCPServers:       storage.NewMCPServers(pool),
+		Audits:           storage.NewAudits(pool),
+		Vault:            vault.New(cfg.CredentialEncryptionKey),
+		Vectors:          vectors,
+		Objects:          objects,
 	})
 	srv := &http.Server{Addr: ":" + cfg.Port, Handler: handler, ReadHeaderTimeout: 10 * time.Second}
 	errCh := make(chan error, 1)
@@ -252,4 +271,15 @@ func oauthProviders(cfg config.Config) []*oauth.Provider {
 			cfg.OAuth.GitHub.ClientID, cfg.OAuth.GitHub.Secret, callback("github")))
 	}
 	return providers
+}
+
+func decodeCapabilities(raw []byte) map[string]bool {
+	if len(raw) == 0 {
+		return nil
+	}
+	var caps map[string]bool
+	if json.Unmarshal(raw, &caps) != nil {
+		return nil
+	}
+	return caps
 }

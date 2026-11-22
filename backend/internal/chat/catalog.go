@@ -1,5 +1,7 @@
 package chat
 
+import "sync"
+
 // ProviderKeys carries the server-side provider credentials the registry
 // needs to build clients. Empty key = provider not configured = its models
 // are absent from the user-facing catalog.
@@ -20,35 +22,53 @@ type ModelSpec struct {
 	Provider              string // "gemini" | "openai" | "anthropic"
 	Label                 string
 	InputPerM, OutputPerM float64
+	// Capabilities gates the UI controls (e.g. reasoning). A nil map means
+	// "unknown" and the UI keeps the controls visible.
+	Capabilities map[string]bool
 }
 
 // catalog is the server's curated model list, in dropdown order. The default
 // model is the first entry. Adding a row here is all it takes to expose a
 // new model, provided the provider key is configured.
-var catalog = []ModelSpec{
-	{ID: "gemini-3.5-flash", Provider: "gemini", Label: "Gemini 3.5 Flash", InputPerM: 0.30, OutputPerM: 2.50},
-	{ID: "gemini-3.5-pro", Provider: "gemini", Label: "Gemini 3.5 Pro", InputPerM: 1.25, OutputPerM: 10.00},
-	{ID: "gemma-3-27b-it", Provider: "gemini", Label: "Gemma 3 27B", InputPerM: 0.20, OutputPerM: 1.50},
-	{ID: "gemma-3-12b-it", Provider: "gemini", Label: "Gemma 3 12B", InputPerM: 0.10, OutputPerM: 0.80},
-	{ID: "gpt-5", Provider: "openai", Label: "GPT-5", InputPerM: 1.25, OutputPerM: 10.00},
-	{ID: "gpt-4.1", Provider: "openai", Label: "GPT-4.1", InputPerM: 2.00, OutputPerM: 8.00},
-	{ID: "claude-sonnet-4-5", Provider: "anthropic", Label: "Claude Sonnet 4.5", InputPerM: 3.00, OutputPerM: 15.00},
-	{ID: "claude-haiku-4-5", Provider: "anthropic", Label: "Claude Haiku 4.5", InputPerM: 1.00, OutputPerM: 5.00},
-	{ID: "gemini-2.5-flash", Provider: "gemini", Label: "Gemini 2.5 Flash", InputPerM: 0.30, OutputPerM: 2.50},
-	{ID: "gemini-2.5-flash-lite", Provider: "gemini", Label: "Gemini 2.5 Flash Lite", InputPerM: 0.10, OutputPerM: 0.40},
-	{ID: "gemini-2.5-pro", Provider: "gemini", Label: "Gemini 2.5 Pro", InputPerM: 1.25, OutputPerM: 10.00},
+var (
+	catalogMu sync.RWMutex
+	catalog   = []ModelSpec{
+		{ID: "gemini-3.5-flash", Provider: "gemini", Label: "Gemini 3.5 Flash", InputPerM: 0.30, OutputPerM: 2.50},
+		{ID: "gemini-3.5-pro", Provider: "gemini", Label: "Gemini 3.5 Pro", InputPerM: 1.25, OutputPerM: 10.00},
+		{ID: "gemma-3-27b-it", Provider: "gemini", Label: "Gemma 3 27B", InputPerM: 0.20, OutputPerM: 1.50},
+		{ID: "gemma-3-12b-it", Provider: "gemini", Label: "Gemma 3 12B", InputPerM: 0.10, OutputPerM: 0.80},
+		{ID: "gpt-5", Provider: "openai", Label: "GPT-5", InputPerM: 1.25, OutputPerM: 10.00},
+		{ID: "gpt-4.1", Provider: "openai", Label: "GPT-4.1", InputPerM: 2.00, OutputPerM: 8.00},
+		{ID: "claude-sonnet-4-5", Provider: "anthropic", Label: "Claude Sonnet 4.5", InputPerM: 3.00, OutputPerM: 15.00},
+		{ID: "claude-haiku-4-5", Provider: "anthropic", Label: "Claude Haiku 4.5", InputPerM: 1.00, OutputPerM: 5.00},
+		{ID: "gemini-2.5-flash", Provider: "gemini", Label: "Gemini 2.5 Flash", InputPerM: 0.30, OutputPerM: 2.50},
+		{ID: "gemini-2.5-flash-lite", Provider: "gemini", Label: "Gemini 2.5 Flash Lite", InputPerM: 0.10, OutputPerM: 0.40},
+		{ID: "gemini-2.5-pro", Provider: "gemini", Label: "Gemini 2.5 Pro", InputPerM: 1.25, OutputPerM: 10.00},
+	}
+)
+
+// SetCatalog replaces the process catalog (the admin-managed DB rows at boot
+// and after edits). It never mutates the returned copies, so readers are safe.
+func SetCatalog(specs []ModelSpec) {
+	catalogMu.Lock()
+	catalog = append([]ModelSpec(nil), specs...)
+	catalogMu.Unlock()
 }
 
-// Catalog returns the full curated model list in dropdown order.
-func Catalog() []ModelSpec {
+func catalogSnapshot() []ModelSpec {
+	catalogMu.RLock()
+	defer catalogMu.RUnlock()
 	out := make([]ModelSpec, len(catalog))
 	copy(out, catalog)
 	return out
 }
 
+// Catalog returns the full curated model list in dropdown order.
+func Catalog() []ModelSpec { return catalogSnapshot() }
+
 // FindModel looks up one model by wire ID.
 func FindModel(id string) (ModelSpec, bool) {
-	for _, m := range catalog {
+	for _, m := range catalogSnapshot() {
 		if m.ID == id {
 			return m, true
 		}
@@ -60,7 +80,7 @@ func FindModel(id string) (ModelSpec, bool) {
 // preserving dropdown order.
 func Available(keys ProviderKeys) []ModelSpec {
 	var out []ModelSpec
-	for _, m := range catalog {
+	for _, m := range catalogSnapshot() {
 		if providerKey(keys, m.Provider) != "" {
 			out = append(out, m)
 		}

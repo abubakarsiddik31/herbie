@@ -131,6 +131,12 @@ func (s *Server) handleEditMessage(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleRegenerate(w http.ResponseWriter, r *http.Request) {
 	userID, _ := userIDFrom(r.Context())
 	convID := r.PathValue("id")
+	var req struct {
+		Model string `json:"model"`
+	}
+	if r.Body != nil {
+		_ = json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req) // optional body
+	}
 
 	ctx := r.Context()
 	conv, err := s.deps.Convos.ByID(ctx, convID, userID)
@@ -143,6 +149,16 @@ func (s *Server) handleRegenerate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	spec := s.runSpecFor(ctx, conv)
+	// Regenerate-with-model applies to this branch only; the conversation's
+	// stored settings stay untouched.
+	if req.Model != "" {
+		patch, perr := s.settingsPatch(conversationSettingsInput{Model: &req.Model})
+		if perr != nil {
+			writeError(w, http.StatusBadRequest, "validation_error", perr.Error())
+			return
+		}
+		spec.Model = *patch.Model
+	}
 	if s.blockedByPendingApproval(w, ctx, convID, userID) {
 		return
 	}

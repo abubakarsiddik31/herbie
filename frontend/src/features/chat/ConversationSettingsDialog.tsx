@@ -25,6 +25,7 @@ const PROVIDER_LABEL: Record<string, string> = {
   gemini: "Google Gemini",
   openai: "OpenAI",
   anthropic: "Anthropic",
+  auto: "Auto",
 };
 
 // ConversationSettingsDialog edits the per-conversation model, temperature,
@@ -33,6 +34,9 @@ const PROVIDER_LABEL: Record<string, string> = {
 export function ConversationSettingsDialog({ open, onOpenChange, models, settings, onApply, saving }: Props) {
   const [model, setModel] = useState(settings.model);
   const [temperature, setTemperature] = useState<number | null>(settings.temperature);
+  const [topP, setTopP] = useState<number | null>(settings.topP);
+  const [maxOutputTokens, setMaxOutputTokens] = useState(settings.maxOutputTokens);
+  const [reasoning, setReasoning] = useState(settings.reasoning);
   const [systemPrompt, setSystemPrompt] = useState(settings.systemPrompt);
   const [ragEnabled, setRagEnabled] = useState(settings.ragEnabled);
 
@@ -41,6 +45,9 @@ export function ConversationSettingsDialog({ open, onOpenChange, models, setting
     if (open) {
       setModel(settings.model);
       setTemperature(settings.temperature);
+      setTopP(settings.topP);
+      setMaxOutputTokens(settings.maxOutputTokens);
+      setReasoning(settings.reasoning);
       setSystemPrompt(settings.systemPrompt);
       setRagEnabled(settings.ragEnabled);
     }
@@ -53,6 +60,7 @@ export function ConversationSettingsDialog({ open, onOpenChange, models, setting
     byProvider.set(m.provider, list);
   }
   const effectiveModel = model || models?.default || "";
+  const supportsReasoning = models?.models.find((m) => m.id === effectiveModel)?.capabilities?.reasoning !== false;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -115,6 +123,69 @@ export function ConversationSettingsDialog({ open, onOpenChange, models, setting
           </div>
 
           <div className="grid gap-1.5">
+            <div className="flex items-center justify-between">
+              <Label htmlFor="top-p-range">Top P</Label>
+              <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <input
+                  type="checkbox"
+                  checked={topP === null}
+                  onChange={(e) => setTopP(e.target.checked ? null : 0.9)}
+                  className="size-3.5 accent-[var(--primary)]"
+                />
+                Provider default
+              </label>
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                id="top-p-range"
+                type="range"
+                min={0}
+                max={1}
+                step={0.05}
+                value={topP ?? 0.9}
+                disabled={topP === null}
+                onChange={(e) => setTopP(Number(e.target.value))}
+                className="h-1.5 w-full accent-[var(--primary)] disabled:opacity-40"
+              />
+              <span className="w-8 text-right text-xs tabular-nums text-muted-foreground">
+                {topP === null ? "—" : topP.toFixed(2)}
+              </span>
+            </div>
+          </div>
+
+          <div className="grid gap-1.5">
+            <Label htmlFor="max-output-tokens">Max output tokens</Label>
+            <input
+              id="max-output-tokens"
+              type="number"
+              min={0}
+              max={200000}
+              step={256}
+              value={maxOutputTokens}
+              onChange={(e) => setMaxOutputTokens(Math.max(0, Number(e.target.value) || 0))}
+              placeholder="Provider default"
+              className="h-9 rounded-md border border-input bg-transparent px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+            />
+          </div>
+
+          {supportsReasoning && (
+            <div className="grid gap-1.5">
+              <Label htmlFor="reasoning-select">Reasoning effort</Label>
+              <select
+                id="reasoning-select"
+                value={reasoning}
+                onChange={(e) => setReasoning(e.target.value as typeof reasoning)}
+                className="h-9 w-full rounded-md border border-input bg-transparent px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+              >
+                <option value="">Provider default</option>
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+              </select>
+            </div>
+          )}
+
+          <div className="grid gap-1.5">
             <Label htmlFor="system-prompt">System prompt</Label>
             <textarea
               id="system-prompt"
@@ -146,6 +217,9 @@ export function ConversationSettingsDialog({ open, onOpenChange, models, setting
               onApply({
                 model: effectiveModel,
                 temperature,
+                topP,
+                maxOutputTokens,
+                reasoning,
                 systemPrompt: systemPrompt.trim(),
                 ragEnabled,
               })

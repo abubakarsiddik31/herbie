@@ -8,6 +8,12 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useSidebar } from "@/components/layout/SidebarContext";
 import { useProfile, useUpdateProfile } from "@/features/profile/useProfile";
 import {
+  useDeleteProviderKey,
+  useProviderKeys,
+  useSetProviderKey,
+  useTestProviderKey,
+} from "@/features/profile/useProviderKeys";
+import {
   useMemories,
   useCreateMemory,
   useDeleteMemory,
@@ -22,6 +28,16 @@ export function PreferencesPage() {
   const { data, isLoading, isError, refetch, isFetching } = useProfile();
   const update = useUpdateProfile();
   const [draft, setDraft] = useState<string | null>(null);
+  const [genDraft, setGenDraft] = useState<{
+    topP: number | null;
+    maxOutputTokens: number;
+    reasoning: "low" | "medium" | "high" | "";
+  } | null>(null);
+  const providerKeys = useProviderKeys();
+  const setProviderKey = useSetProviderKey();
+  const deleteProviderKey = useDeleteProviderKey();
+  const testProviderKey = useTestProviderKey();
+  const [keyDrafts, setKeyDrafts] = useState<Record<string, string>>({});
 
   const {
     data: memories,
@@ -38,6 +54,16 @@ export function PreferencesPage() {
   const currentDraft = draft !== null ? draft : (data?.defaultInstructions ?? "");
   const dirty = draft !== null && data !== undefined && draft !== data.defaultInstructions;
   const tooLong = currentDraft.length > MAX_INSTRUCTIONS_CHARS;
+  const gen = genDraft ?? {
+    topP: data?.defaultTopP ?? null,
+    maxOutputTokens: data?.defaultMaxOutputTokens ?? 0,
+    reasoning: data?.defaultReasoning ?? "",
+  };
+  const genDirty =
+    data !== undefined &&
+    (gen.topP !== (data.defaultTopP ?? null) ||
+      gen.maxOutputTokens !== (data.defaultMaxOutputTokens ?? 0) ||
+      gen.reasoning !== (data.defaultReasoning ?? ""));
 
   function saveInstructions() {
     if (draft === null) return;
@@ -150,6 +176,190 @@ export function PreferencesPage() {
                 {update.isPending ? "Saving…" : "Save"}
               </Button>
             </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {data && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Generation defaults</CardTitle>
+            <CardDescription>
+              Fallbacks for conversations and projects that do not set their own sampling controls.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid gap-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium">Top P</span>
+                <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <input
+                    type="checkbox"
+                    checked={gen.topP === null}
+                    onChange={(e) => setGenDraft({ ...gen, topP: e.target.checked ? null : 0.9 })}
+                    className="size-3.5 accent-[var(--primary)]"
+                  />
+                  Provider default
+                </label>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.05}
+                value={gen.topP ?? 0.9}
+                disabled={gen.topP === null}
+                onChange={(e) => setGenDraft({ ...gen, topP: Number(e.target.value) })}
+                aria-label="Default top P"
+                className="h-1.5 w-full accent-[var(--primary)] disabled:opacity-40"
+              />
+            </div>
+            <div className="grid gap-1.5">
+              <span className="text-xs font-medium">Max output tokens</span>
+              <input
+                type="number"
+                min={0}
+                max={200000}
+                step={256}
+                value={gen.maxOutputTokens}
+                onChange={(e) => setGenDraft({ ...gen, maxOutputTokens: Math.max(0, Number(e.target.value) || 0) })}
+                placeholder="Provider default"
+                aria-label="Default max output tokens"
+                className="h-9 rounded-md border border-input bg-transparent px-2.5 text-sm outline-none"
+              />
+            </div>
+            <div className="grid gap-1.5">
+              <span className="text-xs font-medium">Reasoning effort</span>
+              <select
+                value={gen.reasoning}
+                onChange={(e) => setGenDraft({ ...gen, reasoning: e.target.value as typeof gen.reasoning })}
+                aria-label="Default reasoning effort"
+                className="h-9 w-full rounded-md border border-input bg-transparent px-2.5 text-sm outline-none"
+              >
+                <option value="">Provider default</option>
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+              </select>
+            </div>
+            <div className="flex justify-end">
+              <Button
+                size="sm"
+                variant="brand"
+                disabled={!genDirty || update.isPending}
+                onClick={() =>
+                  update.mutate(
+                    {
+                      topP: gen.topP,
+                      clearTopP: gen.topP === null,
+                      maxOutputTokens: gen.maxOutputTokens,
+                      reasoning: gen.reasoning,
+                    },
+                    {
+                      onSuccess: () => {
+                        setGenDraft(null);
+                        toast.success("Generation defaults saved");
+                      },
+                      onError: (err) =>
+                        toast.error(err instanceof ApiError ? err.message : "Failed to save defaults"),
+                    },
+                  )
+                }
+              >
+                Save defaults
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {providerKeys.data?.allowUserKeys && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Model provider keys</CardTitle>
+            <CardDescription>
+              Your own keys override the server keys for your runs. Keys are encrypted and never shown again.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {providerKeys.data.providers.map((row) => {
+              const label =
+                row.provider === "gemini" ? "Google Gemini" : row.provider === "openai" ? "OpenAI" : "Anthropic";
+              return (
+                <div key={row.provider} className="space-y-2 rounded-lg border border-border/60 p-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-medium">{label}</span>
+                    <span className={row.configured ? "text-[11px] text-emerald-600" : "text-[11px] text-muted-foreground"}>
+                      {row.configured ? "Configured" : "Not configured"}
+                    </span>
+                  </div>
+                  <div className="flex gap-2">
+                    <input
+                      type="password"
+                      value={keyDrafts[row.provider] ?? ""}
+                      onChange={(e) => setKeyDrafts((prev) => ({ ...prev, [row.provider]: e.target.value }))}
+                      placeholder={row.configured ? "Replace key…" : "Paste API key"}
+                      aria-label={`${label} API key`}
+                      className="h-8 flex-1 rounded-md border border-input bg-transparent px-2.5 text-xs outline-none"
+                    />
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      aria-label={`Save ${label} key`}
+                      disabled={!keyDrafts[row.provider]?.trim() || setProviderKey.isPending}
+                      onClick={() =>
+                        setProviderKey.mutate(
+                          { provider: row.provider, apiKey: keyDrafts[row.provider].trim() },
+                          {
+                            onSuccess: () => {
+                              setKeyDrafts((prev) => ({ ...prev, [row.provider]: "" }));
+                              toast.success(`${label} key saved`);
+                            },
+                            onError: (err) =>
+                              toast.error(err instanceof ApiError ? err.message : "Failed to save key"),
+                          },
+                        )
+                      }
+                    >
+                      Save
+                    </Button>
+                    {row.configured && (
+                      <>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          aria-label={`Test ${label} key`}
+                          disabled={testProviderKey.isPending}
+                          onClick={() =>
+                            testProviderKey.mutate(row.provider, {
+                              onSuccess: () => toast.success(`${label} key works`),
+                              onError: (err) =>
+                                toast.error(err instanceof ApiError ? err.message : "Key test failed"),
+                            })
+                          }
+                        >
+                          Test
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          aria-label={`Remove ${label} key`}
+                          className="text-destructive"
+                          disabled={deleteProviderKey.isPending}
+                          onClick={() =>
+                            deleteProviderKey.mutate(row.provider, {
+                              onSuccess: () => toast.success(`${label} key removed`),
+                            })
+                          }
+                        >
+                          Remove
+                        </Button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
           </CardContent>
         </Card>
       )}

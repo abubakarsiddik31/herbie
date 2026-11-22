@@ -29,30 +29,32 @@ type ServerDeps struct {
 	// OAuth lists the configured social-login providers in display
 	// order. Empty = password auth only; the login UI hides the
 	// provider buttons.
-	OAuth         []*oauth.Provider
-	Vault         *vault.Vault
-	Audits        storage.AuditStore
-	Shares        ShareStore
-	Profiles      ProfileStore
-	Users         UserAdminStore
-	Memories      MemoryStore
-	Convos        ConvoStore
-	Prompts       PromptStore
-	Msgs          MsgStore
-	Feedback      FeedbackStore
-	MessageSearch MessageSearchStore
-	Titles        TitleGenerator
-	Usage         UsageStore
-	Tools         ToolStore
-	Pending       PendingStore
-	Bots          BotStore
-	BotMemories   BotMemoryStore
-	BotFiles      BotFileStore
-	BotRuns       BotRunStore
-	BotRoutines   BotRoutineStore
-	Agent         *chat.Agent
-	Rates         cost.Table
-	ModelKeys     chat.ProviderKeys
+	OAuth            []*oauth.Provider
+	Vault            *vault.Vault
+	Audits           storage.AuditStore
+	Shares           ShareStore
+	Profiles         ProfileStore
+	Users            UserAdminStore
+	Memories         MemoryStore
+	Convos           ConvoStore
+	Prompts          PromptStore
+	Msgs             MsgStore
+	Feedback         FeedbackStore
+	MessageSearch    MessageSearchStore
+	UserProviderKeys ProviderKeyStore
+	ModelCatalog     ModelCatalogStore
+	Titles           TitleGenerator
+	Usage            UsageStore
+	Tools            ToolStore
+	Pending          PendingStore
+	Bots             BotStore
+	BotMemories      BotMemoryStore
+	BotFiles         BotFileStore
+	BotRuns          BotRunStore
+	BotRoutines      BotRoutineStore
+	Agent            *chat.Agent
+	Rates            cost.Table
+	ModelKeys        chat.ProviderKeys
 	// RagSearch retrieves document chunks and returns the query
 	// embedding's exact usage for metering. Nil = RAG disabled: no
 	// search tool is registered and the documents API answers 503.
@@ -166,6 +168,10 @@ func newServer(deps ServerDeps) (*Server, http.Handler) {
 	authed.HandleFunc("DELETE /api/memories/{id}", s.handleDeleteMemory)
 	authed.HandleFunc("DELETE /api/memories", s.handleClearMemories)
 	authed.HandleFunc("GET /api/models", s.handleListModels)
+	authed.HandleFunc("GET /api/provider-keys", s.handleListProviderKeys)
+	authed.HandleFunc("PUT /api/provider-keys/{provider}", s.handleSetProviderKey)
+	authed.HandleFunc("DELETE /api/provider-keys/{provider}", s.handleDeleteProviderKey)
+	authed.HandleFunc("POST /api/provider-keys/{provider}/test", s.handleTestProviderKey)
 	authed.HandleFunc("GET /api/search/messages", s.handleSearchMessages)
 	authed.HandleFunc("GET /api/conversations", s.handleListConversations)
 	authed.HandleFunc("POST /api/conversations", s.handleCreateConversation)
@@ -261,6 +267,10 @@ func newServer(deps ServerDeps) (*Server, http.Handler) {
 	authed.Handle("PATCH /api/admin/users/{id}/role", requireRole("admin", http.HandlerFunc(s.handleAdminUpdateUserRole)))
 	authed.Handle("GET /api/admin/audits", requireRole("admin", http.HandlerFunc(s.handleAdminListAudits)))
 	authed.Handle("GET /api/admin/stats", requireRole("admin", http.HandlerFunc(s.handleAdminStats)))
+	authed.Handle("GET /api/admin/models", requireRole("admin", http.HandlerFunc(s.handleAdminListModels)))
+	authed.Handle("POST /api/admin/models", requireRole("admin", http.HandlerFunc(s.handleAdminUpsertModel)))
+	authed.Handle("PATCH /api/admin/models/{id}", requireRole("admin", http.HandlerFunc(s.handleAdminUpsertModel)))
+	authed.Handle("DELETE /api/admin/models/{id}", requireRole("admin", http.HandlerFunc(s.handleAdminDeleteModel)))
 
 	s.mux.Handle("/api/", requireAuth(deps.Tokens, authed))
 

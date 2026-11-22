@@ -20,12 +20,15 @@ import (
 )
 
 type conversationDTO struct {
-	ID           string   `json:"id"`
-	Title        string   `json:"title"`
-	Model        string   `json:"model"`
-	Temperature  *float64 `json:"temperature"`
-	SystemPrompt string   `json:"systemPrompt"`
-	RagEnabled   bool     `json:"ragEnabled"`
+	ID              string   `json:"id"`
+	Title           string   `json:"title"`
+	Model           string   `json:"model"`
+	Temperature     *float64 `json:"temperature"`
+	TopP            *float64 `json:"topP"`
+	MaxOutputTokens int      `json:"maxOutputTokens"`
+	Reasoning       string   `json:"reasoning"`
+	SystemPrompt    string   `json:"systemPrompt"`
+	RagEnabled      bool     `json:"ragEnabled"`
 	// BotID is set only for bot-scoped conversations (always-on teammates).
 	BotID *string `json:"botId,omitempty"`
 	// ActiveLeafID is the visible message-tree leaf; null for empty chats.
@@ -50,7 +53,8 @@ func rfc3339Ptr(t *time.Time) *string {
 
 func toConversationDTO(c storage.Conversation) conversationDTO {
 	return conversationDTO{
-		ID: c.ID, Title: c.Title, Model: c.Model, Temperature: c.Temperature, SystemPrompt: c.SystemPrompt,
+		ID: c.ID, Title: c.Title, Model: c.Model, Temperature: c.Temperature,
+		TopP: c.TopP, MaxOutputTokens: c.MaxOutputTokens, Reasoning: c.Reasoning, SystemPrompt: c.SystemPrompt,
 		RagEnabled: c.RagEnabled, BotID: c.BotID, ActiveLeafID: c.ActiveLeafID,
 		PinnedAt: rfc3339Ptr(c.PinnedAt), ArchivedAt: rfc3339Ptr(c.ArchivedAt), TitleSource: c.TitleSource,
 		CreatedAt: c.CreatedAt.UTC().Format(timeRFC3339), UpdatedAt: c.UpdatedAt.UTC().Format(timeRFC3339),
@@ -65,27 +69,74 @@ const maxSystemPromptChars = 4000
 // patch, validating the values against the server's model catalog. A nil
 // modelID leaves the stored model unchanged; an empty (but present) one
 // resets to the server default.
-func (s *Server) settingsPatch(modelID *string, temperature *float64, clearTemperature bool, systemPrompt *string, ragEnabled *bool) (storage.ConversationPatch, error) {
-	patch := storage.ConversationPatch{Temperature: temperature, ClearTemperature: clearTemperature, SystemPrompt: systemPrompt, RagEnabled: ragEnabled}
-	if modelID != nil {
-		if *modelID != "" {
-			spec, ok := chat.FindModel(*modelID)
-			if !ok {
-				return patch, errors.New("unknown model " + *modelID)
-			}
-			if !chat.HasProvider(s.deps.ModelKeys, spec.Provider) {
-				return patch, errors.New("model " + *modelID + " is not configured on this server")
-			}
-		}
-		patch.Model = modelID
+type conversationSettingsInput struct {
+	Model            *string
+	Temperature      *float64
+	ClearTemperature bool
+	TopP             *float64
+	ClearTopP        bool
+	MaxOutputTokens  *int
+	Reasoning        *string
+	SystemPrompt     *string
+	RagEnabled       *bool
+}
+
+func (s *Server) settingsPatch(in conversationSettingsInput) (storage.ConversationPatch, error) {
+	patch := storage.ConversationPatch{
+		Temperature: in.Temperature, ClearTemperature: in.ClearTemperature,
+		TopP: in.TopP, ClearTopP: in.ClearTopP, MaxOutputTokens: in.MaxOutputTokens, Reasoning: in.Reasoning,
+		SystemPrompt: in.SystemPrompt, RagEnabled: in.RagEnabled,
 	}
-	if temperature != nil && (*temperature < 0 || *temperature > 2) {
+	if in.Model != nil {
+		if err := s.validateModelID(*in.Model); err != nil {
+			return patch, err
+		}
+		patch.Model = in.Model
+	}
+	if in.Temperature != nil && (*in.Temperature < 0 || *in.Temperature > 2) {
 		return patch, errors.New("temperature must be between 0 and 2")
 	}
-	if systemPrompt != nil && utf8.RuneCountInString(*systemPrompt) > maxSystemPromptChars {
+	if in.TopP != nil && (*in.TopP < 0 || *in.TopP > 1) {
+		return patch, errors.New("topP must be between 0 and 1")
+	}
+	if in.MaxOutputTokens != nil && (*in.MaxOutputTokens < 0 || *in.MaxOutputTokens > 200000) {
+		return patch, errors.New("maxOutputTokens must be between 0 and 200000")
+	}
+	reasoning := ""
+	if in.Reasoning != nil {
+		reasoning = *in.Reasoning
+	}
+	switch reasoning {
+	case "", "low", "medium", "high":
+	default:
+		return patch, errors.New("reasoning must be low, medium, or high")
+	}
+	if in.SystemPrompt != nil && utf8.RuneCountInString(*in.SystemPrompt) > maxSystemPromptChars {
 		return patch, errors.New("system prompt too long")
 	}
 	return patch, nil
+}
+
+// validateModelID accepts the auto alias (needs at least one configured
+// provider) and catalog models whose provider key is configured.
+func (s *Server) validateModelID(id string) error {
+	if id == "" {
+		return nil
+	}
+	if id == chat.AutoModelID {
+		if len(chat.Available(s.deps.ModelKeys)) == 0 {
+			return errors.New("auto model requires a configured provider")
+		}
+		return nil
+	}
+	spec, ok := chat.FindModel(id)
+	if !ok {
+		return errors.New("unknown model " + id)
+	}
+	if !chat.HasProvider(s.deps.ModelKeys, spec.Provider) {
+		return errors.New("model " + id + " is not configured on this server")
+	}
+	return nil
 }
 
 // queryBool parses an optional strict boolean query parameter: "true"/"1"
@@ -136,6 +187,9 @@ func (s *Server) handleCreateConversation(w http.ResponseWriter, r *http.Request
 		Title            string   `json:"title"`
 		Model            string   `json:"model"`
 		Temperature      *float64 `json:"temperature"`
+		TopP             *float64 `json:"topP"`
+		MaxOutputTokens  *int     `json:"maxOutputTokens"`
+		Reasoning        *string  `json:"reasoning"`
 		SystemPrompt     string   `json:"systemPrompt"`
 		RagEnabled       *bool    `json:"ragEnabled"`
 		ClearTemperature bool     `json:"-"`
@@ -143,7 +197,11 @@ func (s *Server) handleCreateConversation(w http.ResponseWriter, r *http.Request
 	if r.Body != nil {
 		_ = json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req) // optional body
 	}
-	patch, err := s.settingsPatch(&req.Model, req.Temperature, req.ClearTemperature, &req.SystemPrompt, req.RagEnabled)
+	patch, err := s.settingsPatch(conversationSettingsInput{
+		Model: &req.Model, Temperature: req.Temperature, ClearTemperature: req.ClearTemperature,
+		TopP: req.TopP, MaxOutputTokens: req.MaxOutputTokens, Reasoning: req.Reasoning,
+		SystemPrompt: &req.SystemPrompt, RagEnabled: req.RagEnabled,
+	})
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "validation_error", err.Error())
 		return
@@ -497,6 +555,10 @@ func (s *Server) handlePatchConversation(w http.ResponseWriter, r *http.Request)
 		Title            *string  `json:"title"`
 		Model            *string  `json:"model"`
 		Temperature      *float64 `json:"temperature"`
+		TopP             *float64 `json:"topP"`
+		ClearTopP        bool     `json:"clearTopP"`
+		MaxOutputTokens  *int     `json:"maxOutputTokens"`
+		Reasoning        *string  `json:"reasoning"`
 		SystemPrompt     *string  `json:"systemPrompt"`
 		RagEnabled       *bool    `json:"ragEnabled"`
 		ClearTemperature bool     `json:"clearTemperature"`
@@ -509,7 +571,11 @@ func (s *Server) handlePatchConversation(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusBadRequest, "bad_request", "title cannot be empty")
 		return
 	}
-	patch, err := s.settingsPatch(req.Model, req.Temperature, req.ClearTemperature, req.SystemPrompt, req.RagEnabled)
+	patch, err := s.settingsPatch(conversationSettingsInput{
+		Model: req.Model, Temperature: req.Temperature, ClearTemperature: req.ClearTemperature,
+		TopP: req.TopP, ClearTopP: req.ClearTopP, MaxOutputTokens: req.MaxOutputTokens, Reasoning: req.Reasoning,
+		SystemPrompt: req.SystemPrompt, RagEnabled: req.RagEnabled,
+	})
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "validation_error", err.Error())
 		return

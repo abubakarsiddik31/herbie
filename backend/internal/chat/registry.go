@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strconv"
@@ -16,9 +17,14 @@ import (
 // by the HTTP layer: which catalog model to hit, its sampling temperature
 // (nil = provider default), and the system prompt (empty = built-in).
 type RunSpec struct {
-	Model        string
-	Temperature  *float64
-	SystemPrompt string
+	Model       string
+	Temperature *float64
+	// TopP nil, MaxOutputTokens 0, and Reasoning "" leave the provider
+	// default in place.
+	TopP            *float64
+	MaxOutputTokens int
+	Reasoning       string
+	SystemPrompt    string
 	// RagEnabled gates the built-in document search for this run; the
 	// citation guidance joins the prompt exactly when the tool registers.
 	RagEnabled bool
@@ -29,13 +35,25 @@ type RunSpec struct {
 // tests inject fakes.
 type clientFactory func(provider, modelName string, temperature *float64) (model.StreamingModel, error)
 
+// clientOptions carries the provider-agnostic generation controls a RunSpec
+// resolved to. Temperature is provider-clamped before the factory sees it.
+type clientOptions struct {
+	Temperature     *float64
+	TopP            *float64
+	MaxOutputTokens int
+	Reasoning       string
+}
+
+type clientOptionsFactory func(provider, modelName string, opts clientOptions) (model.StreamingModel, error)
+
 // ModelRegistry resolves RunSpecs to streaming clients. Provider clients are
 // immutable and concurrency-safe, so identical specs share one cached
 // instance; construction is pure validation (microseconds), so an unbounded
 // cache keyed by spec is fine — the catalog bounds the distinct keys.
 type ModelRegistry struct {
-	keys ProviderKeys
-	new  clientFactory
+	keys    ProviderKeys
+	new     clientFactory
+	newOpts clientOptionsFactory
 
 	mu    sync.Mutex
 	cache map[string]model.StreamingModel
@@ -51,10 +69,22 @@ func NewModelRegistryWithFactory(keys ProviderKeys, f clientFactory) *ModelRegis
 	return &ModelRegistry{keys: keys, new: f, cache: map[string]model.StreamingModel{}}
 }
 
+// NewModelRegistryWithOptionsFactory is the options-aware test seam.
+func NewModelRegistryWithOptionsFactory(keys ProviderKeys, f clientOptionsFactory) *ModelRegistry {
+	return &ModelRegistry{keys: keys, newOpts: f, cache: map[string]model.StreamingModel{}}
+}
+
 // Resolve returns the client for spec's (provider, model, temperature),
 // building and caching it on first use. Temperatures are normalized to the
 // provider's accepted range up front so clamped values share cache entries.
+// AutoModelID selects the ordered fallback chain over the configured
+// catalog models. It is a UI/alias value, not a catalog row.
+const AutoModelID = "auto"
+
 func (r *ModelRegistry) Resolve(spec RunSpec) (model.StreamingModel, error) {
+	if spec.Model == AutoModelID {
+		return r.resolveAuto(spec)
+	}
 	target, ok := FindModel(spec.Model)
 	if !ok {
 		return nil, fmt.Errorf("unknown model %q", spec.Model)
@@ -68,7 +98,8 @@ func (r *ModelRegistry) Resolve(spec RunSpec) (model.StreamingModel, error) {
 		t := clamp(*temperature, lo, hi)
 		temperature = &t
 	}
-	key := target.Provider + "|" + target.ID + "|" + registryTempKey(deref(temperature))
+	key := target.Provider + "|" + target.ID + "|" + registryTempKey(deref(temperature)) +
+		"|" + optionalFloatKey(spec.TopP) + "|" + strconv.Itoa(spec.MaxOutputTokens) + "|" + spec.Reasoning
 
 	r.mu.Lock()
 	if c, ok := r.cache[key]; ok {
@@ -77,11 +108,20 @@ func (r *ModelRegistry) Resolve(spec RunSpec) (model.StreamingModel, error) {
 	}
 	r.mu.Unlock()
 
-	factory := r.new
-	if factory == nil {
-		factory = r.productionFactory
+	opts := clientOptions{
+		Temperature: temperature, TopP: spec.TopP,
+		MaxOutputTokens: spec.MaxOutputTokens, Reasoning: spec.Reasoning,
 	}
-	client, err := factory(target.Provider, target.ID, temperature)
+	var client model.StreamingModel
+	var err error
+	switch {
+	case r.newOpts != nil:
+		client, err = r.newOpts(target.Provider, target.ID, opts)
+	case r.new != nil:
+		client, err = r.new(target.Provider, target.ID, temperature)
+	default:
+		client, err = r.productionFactory(target.Provider, target.ID, opts)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("build %s client for %s: %w", target.Provider, target.ID, err)
 	}
@@ -94,8 +134,103 @@ func (r *ModelRegistry) Resolve(spec RunSpec) (model.StreamingModel, error) {
 
 // productionFactory constructs the golem provider client for the spec.
 // Temperature is already provider-clamped by Resolve.
-func (r *ModelRegistry) productionFactory(provider, modelName string, temperature *float64) (model.StreamingModel, error) {
+// resolveAuto builds a fresh fallback over the available catalog models so
+// each run gets its own used-model recorder (the provider clients themselves
+// stay cached by their concrete Resolve calls).
+func (r *ModelRegistry) resolveAuto(spec RunSpec) (model.StreamingModel, error) {
+	available := Available(r.keys)
+	if len(available) == 0 {
+		return nil, fmt.Errorf("auto model requires a configured provider")
+	}
+	tracker := &usedModelTracker{}
+	members := make([]model.StreamingModel, 0, len(available))
+	named := make([]model.Model, 0, len(available))
+	for _, candidate := range available {
+		concrete := spec
+		concrete.Model = candidate.ID
+		client, err := r.Resolve(concrete)
+		if err != nil {
+			return nil, fmt.Errorf("auto fallback build %s: %w", candidate.ID, err)
+		}
+		client = &namedModel{name: candidate.ID, inner: client, tracker: tracker}
+		members = append(members, client)
+		named = append(named, client)
+	}
+	if len(members) == 1 {
+		return &autoModel{inner: members[0], tracker: tracker}, nil
+	}
+	fb, err := model.NewFallback(named[0], named[1:]...)
+	if err != nil {
+		return nil, err
+	}
+	return &autoModel{inner: fb, tracker: tracker}, nil
+}
+
+// usedModelRecords is implemented by auto-fallback clients so the agent can
+// report which member answered.
+type usedModelRecords interface {
+	UsedModel() string
+}
+
+type usedModelTracker struct {
+	mu   sync.Mutex
+	name string
+}
+
+func (t *usedModelTracker) set(name string) {
+	t.mu.Lock()
+	t.name = name
+	t.mu.Unlock()
+}
+
+func (t *usedModelTracker) get() string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.name
+}
+
+type namedModel struct {
+	name    string
+	inner   model.StreamingModel
+	tracker *usedModelTracker
+}
+
+func (n *namedModel) Generate(ctx context.Context, req model.Request) (model.Response, error) {
+	resp, err := n.inner.Generate(ctx, req)
+	if err == nil {
+		n.tracker.set(n.name)
+	}
+	return resp, err
+}
+
+func (n *namedModel) GenerateStream(ctx context.Context, req model.Request, onDelta func(model.Delta) error) (model.Response, error) {
+	resp, err := n.inner.GenerateStream(ctx, req, onDelta)
+	if err == nil {
+		n.tracker.set(n.name)
+	}
+	return resp, err
+}
+
+type autoModel struct {
+	inner   model.StreamingModel
+	tracker *usedModelTracker
+}
+
+func (a *autoModel) Generate(ctx context.Context, req model.Request) (model.Response, error) {
+	return a.inner.Generate(ctx, req)
+}
+
+func (a *autoModel) GenerateStream(ctx context.Context, req model.Request, onDelta func(model.Delta) error) (model.Response, error) {
+	return a.inner.GenerateStream(ctx, req, onDelta)
+}
+
+func (a *autoModel) UsedModel() string { return a.tracker.get() }
+
+func (r *ModelRegistry) productionFactory(provider, modelName string, opts clientOptions) (model.StreamingModel, error) {
 	maxOutputTokens := 16384
+	if opts.MaxOutputTokens > 0 {
+		maxOutputTokens = opts.MaxOutputTokens
+	}
 	if envMax := os.Getenv("CHAT_MAX_OUTPUT_TOKENS"); envMax != "" {
 		if v, err := strconv.Atoi(envMax); err == nil && v >= 10000 {
 			maxOutputTokens = v
@@ -108,14 +243,20 @@ func (r *ModelRegistry) productionFactory(provider, modelName string, temperatur
 		if r.keys.GeminiBaseURL == "" {
 			cfg.BaseURL = "https://generativelanguage.googleapis.com"
 		}
-		cfg.Temperature = temperature
+		cfg.Temperature = opts.Temperature
+		cfg.TopP = opts.TopP
+		if opts.Reasoning != "" {
+			cfg.Thinking = &golemgemini.ThinkingConfig{Level: opts.Reasoning}
+		}
 		return golemgemini.New(cfg)
 	case "openai":
 		cfg := golemopenai.Config{APIKey: r.keys.OpenAI, Model: modelName, BaseURL: r.keys.OpenAIBaseURL, MaxTokens: maxOutputTokens}
 		if r.keys.OpenAIBaseURL == "" {
 			cfg.BaseURL = "https://api.openai.com/v1"
 		}
-		cfg.Temperature = temperature
+		cfg.Temperature = opts.Temperature
+		cfg.TopP = opts.TopP
+		cfg.ReasoningEffort = opts.Reasoning
 		return golemopenai.New(cfg)
 	case "anthropic":
 		anthropicMax := maxOutputTokens
@@ -126,7 +267,22 @@ func (r *ModelRegistry) productionFactory(provider, modelName string, temperatur
 		if r.keys.AnthropicBaseURL != "" {
 			cfg.BaseURL = r.keys.AnthropicBaseURL
 		}
-		cfg.Temperature = temperature
+		cfg.Temperature = opts.Temperature
+		cfg.TopP = opts.TopP
+		switch opts.Reasoning {
+		case "low":
+			cfg.Thinking = &golemanthropic.ThinkingConfig{BudgetTokens: 1024}
+		case "medium":
+			cfg.Thinking = &golemanthropic.ThinkingConfig{BudgetTokens: 3072}
+		case "high":
+			cfg.Thinking = &golemanthropic.ThinkingConfig{BudgetTokens: 6144}
+		}
+		if cfg.Thinking != nil && cfg.MaxTokens <= cfg.Thinking.BudgetTokens {
+			cfg.MaxTokens = cfg.Thinking.BudgetTokens + 2048
+			if cfg.MaxTokens > 8192 {
+				cfg.MaxTokens = 8192
+			}
+		}
 		return golemanthropic.New(cfg)
 	}
 	return nil, fmt.Errorf("unsupported provider %q", provider)
@@ -136,6 +292,13 @@ func (r *ModelRegistry) productionFactory(provider, modelName string, temperatur
 // unset shares the empty key with "no temperature" across providers.
 func registryTempKey(t float64) string {
 	return strconv.FormatFloat(t, 'f', -1, 64)
+}
+
+func optionalFloatKey(f *float64) string {
+	if f == nil {
+		return ""
+	}
+	return strconv.FormatFloat(*f, 'f', -1, 64)
 }
 
 func deref(f *float64) float64 {

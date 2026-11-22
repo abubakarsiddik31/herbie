@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/abubakarsiddik31/golem-chatbot/internal/chat"
 	"github.com/abubakarsiddik31/golem-chatbot/internal/storage"
 )
 
@@ -80,3 +81,55 @@ func TestRunSpecPrependsGlobalInstructions(t *testing.T) {
 		t.Fatalf("unset instructions must leave the prompt alone: %q", plain.SystemPrompt)
 	}
 }
+
+func TestRunSpecGenerationDefaultsPrecedence(t *testing.T) {
+	profiles := newFakeProfiles()
+	top := 0.9
+	profiles.defaults["u-1"] = storage.GenerationDefaults{TopP: &top, MaxOutputTokens: 1000, Reasoning: "low"}
+	projects := newFakeProjects()
+	project, err := projects.Create(context.Background(), storage.Project{
+		UserID: "u-1", Name: "project",
+		DefaultTopP: floatPtr(0.8), DefaultMaxOutputTokens: 2000, DefaultReasoning: "medium",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bots := newFakeBots()
+	bot, err := bots.Create(context.Background(), storage.Bot{
+		UserID: "u-1", Name: "Bot", Model: "gemini-2.5-flash",
+		TopP: floatPtr(0.7), MaxOutputTokens: 4000, Reasoning: "high",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{deps: ServerDeps{Profiles: profiles, Projects: projects, Bots: bots, ModelKeys: chat.ProviderKeys{Gemini: "test"}}}
+
+	projectConv := storage.Conversation{UserID: "u-1", ProjectID: &project.ID}
+	spec := s.runSpecFor(context.Background(), projectConv)
+	if spec.TopP == nil || *spec.TopP != 0.8 || spec.MaxOutputTokens != 2000 || spec.Reasoning != "medium" {
+		t.Fatalf("project defaults did not win over user defaults: %+v", spec)
+	}
+
+	conversationTop := 0.5
+	projectConv.TopP = &conversationTop
+	projectConv.MaxOutputTokens = 300
+	projectConv.Reasoning = "high"
+	spec = s.runSpecFor(context.Background(), projectConv)
+	if spec.TopP == nil || *spec.TopP != 0.5 || spec.MaxOutputTokens != 300 || spec.Reasoning != "high" {
+		t.Fatalf("conversation values did not win: %+v", spec)
+	}
+
+	botConv := storage.Conversation{UserID: "u-1", ProjectID: &project.ID, BotID: &bot.ID}
+	spec = s.runSpecFor(context.Background(), botConv)
+	if spec.TopP == nil || *spec.TopP != 0.7 || spec.MaxOutputTokens != 4000 || spec.Reasoning != "high" {
+		t.Fatalf("bot values did not win: %+v", spec)
+	}
+
+	userOnly := storage.Conversation{UserID: "u-1"}
+	spec = s.runSpecFor(context.Background(), userOnly)
+	if spec.TopP == nil || *spec.TopP != 0.9 || spec.MaxOutputTokens != 1000 || spec.Reasoning != "low" {
+		t.Fatalf("user defaults did not apply: %+v", spec)
+	}
+}
+
+func floatPtr(v float64) *float64 { return &v }

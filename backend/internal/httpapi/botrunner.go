@@ -400,8 +400,9 @@ func (r *botRunner) execute(parent context.Context, run *storage.BotRun) {
 
 	// Usage totals across pause cycles feed SetFinished.
 	var totalIn, totalOut, totalReqs int
+	lastModel := spec.Model
 	cost := func() int64 {
-		return s.deps.Rates.ChatCostMicrosFor(spec.Model, totalIn, totalOut)
+		return s.deps.Rates.ChatCostMicrosFor(lastModel, totalIn, totalOut)
 	}
 
 	// Compact exactly like the live send path (runTurn) and approvals
@@ -421,6 +422,9 @@ func (r *botRunner) execute(parent context.Context, run *storage.BotRun) {
 			r.settleFailure(settle, parent, run, spec, startParentID, deferred, resumeSkip, err, totalIn, totalOut, totalReqs, cost())
 			return
 		}
+		if outcome.UsedModel != "" {
+			lastModel = outcome.UsedModel
+		}
 		newFrom := replayedPrefixLen(outcome.Messages)
 		skip := known
 		if deferred {
@@ -430,11 +434,11 @@ func (r *botRunner) execute(parent context.Context, run *storage.BotRun) {
 
 		if len(outcome.Pending) == 0 {
 			// Success: persist the run's rows, meter, finish.
-			if _, perr := s.persistRunMessages(settle, run.UserID, run.ConversationID, spec.Model,
+			if _, perr := s.persistRunMessages(settle, run.UserID, run.ConversationID, lastModel,
 				outcome.Messages, outcome.Usage, outcome.Requests, false, skip, newFrom, startParentID, sourceJSON(sources)); perr != nil {
 				s.deps.Log.Error("persist bot messages", "err", perr, "run_id", run.ID)
 			}
-			if uerr := s.deps.Usage.Add(settle, usageEventFor(run.UserID, run.ConversationID, spec.Model,
+			if uerr := s.deps.Usage.Add(settle, usageEventFor(run.UserID, run.ConversationID, lastModel,
 				outcome.Usage, outcome.Requests, s.deps.Rates)); uerr != nil {
 				s.deps.Log.Error("record bot usage", "err", uerr, "run_id", run.ID)
 			}
@@ -460,12 +464,12 @@ func (r *botRunner) execute(parent context.Context, run *storage.BotRun) {
 		totalIn += outcome.Usage.InputTokens
 		totalOut += outcome.Usage.OutputTokens
 		totalReqs += outcome.Requests
-		res, perr := s.persistRunMessages(settle, run.UserID, run.ConversationID, spec.Model,
+		res, perr := s.persistRunMessages(settle, run.UserID, run.ConversationID, lastModel,
 			outcome.Messages, outcome.Usage, outcome.Requests, false, skip, newFrom, startParentID, nil)
 		if perr != nil {
 			s.deps.Log.Error("persist paused bot messages", "err", perr, "run_id", run.ID)
 		}
-		if uerr := s.deps.Usage.Add(settle, usageEventFor(run.UserID, run.ConversationID, spec.Model,
+		if uerr := s.deps.Usage.Add(settle, usageEventFor(run.UserID, run.ConversationID, lastModel,
 			outcome.Usage, outcome.Requests, s.deps.Rates)); uerr != nil {
 			s.deps.Log.Error("record bot usage", "err", uerr, "run_id", run.ID)
 		}

@@ -94,3 +94,60 @@ func TestResolveRejectsUnknownAndEmptyModel(t *testing.T) {
 }
 
 func ptrFloat(f float64) *float64 { return &f }
+
+func TestResolvePassesGenerationOptions(t *testing.T) {
+	var got clientOptions
+	reg := NewModelRegistryWithOptionsFactory(ProviderKeys{Gemini: "g"}, func(provider, modelName string, opts clientOptions) (model.StreamingModel, error) {
+		got = opts
+		return fakeClient{}, nil
+	})
+	temp := 0.4
+	top := 0.7
+	if _, err := reg.Resolve(RunSpec{
+		Model: "gemini-2.5-flash", Temperature: &temp,
+		TopP: &top, MaxOutputTokens: 1234, Reasoning: "high",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got.Temperature == nil || *got.Temperature != 0.4 || got.TopP == nil || *got.TopP != 0.7 ||
+		got.MaxOutputTokens != 1234 || got.Reasoning != "high" {
+		t.Fatalf("factory options = %+v", got)
+	}
+}
+
+func TestAutoFallbackReportsUsedModel(t *testing.T) {
+	reg := NewModelRegistryWithOptionsFactory(ProviderKeys{Gemini: "g"}, func(provider, modelName string, opts clientOptions) (model.StreamingModel, error) {
+		if modelName == "gemini-3.5-flash" {
+			return failingClient{}, nil
+		}
+		return fakeClient{}, nil
+	})
+	client, err := reg.Resolve(RunSpec{Model: AutoModelID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.GenerateStream(context.Background(), model.Request{}, func(model.Delta) error { return nil }); err != nil {
+		t.Fatalf("fallback should succeed: %v", err)
+	}
+	used, ok := client.(interface{ UsedModel() string })
+	if !ok || used.UsedModel() != "gemini-3.5-pro" {
+		t.Fatalf("used model = %v, want gemini-3.5-pro", client)
+	}
+}
+
+type failingClient struct{}
+
+type retryableFailure struct{}
+
+func (retryableFailure) Error() string   { return "nope" }
+func (retryableFailure) Retryable() bool { return true }
+
+var errRetryable = retryableFailure{}
+
+func (failingClient) Generate(context.Context, model.Request) (model.Response, error) {
+	return model.Response{}, errRetryable
+}
+
+func (failingClient) GenerateStream(context.Context, model.Request, func(model.Delta) error) (model.Response, error) {
+	return model.Response{}, errRetryable
+}

@@ -114,3 +114,36 @@ func (u *Users) SetInstructions(ctx context.Context, userID, text string) error 
 	}
 	return nil
 }
+
+// GenerationDefaults are the user-level fallback generation controls.
+type GenerationDefaults struct {
+	TopP            *float64
+	MaxOutputTokens int
+	Reasoning       string
+}
+
+// GenerationDefaults loads the user's fallback generation controls.
+func (u *Users) GenerationDefaults(ctx context.Context, userID string) (GenerationDefaults, error) {
+	var d GenerationDefaults
+	err := u.pool.QueryRow(ctx,
+		`SELECT default_top_p, default_max_output_tokens, default_reasoning FROM users WHERE id = $1`, userID).
+		Scan(&d.TopP, &d.MaxOutputTokens, &d.Reasoning)
+	if err != nil {
+		return GenerationDefaults{}, fmt.Errorf("user generation defaults: %w", err)
+	}
+	return d, nil
+}
+
+// SetGenerationDefaults replaces the user's fallback generation controls.
+func (u *Users) SetGenerationDefaults(ctx context.Context, userID string, d GenerationDefaults) error {
+	tag, err := u.pool.Exec(ctx,
+		`UPDATE users SET default_top_p = $2, default_max_output_tokens = $3, default_reasoning = $4 WHERE id = $1`,
+		userID, d.TopP, d.MaxOutputTokens, SanitizeText(d.Reasoning))
+	if err != nil {
+		return fmt.Errorf("set user generation defaults: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}

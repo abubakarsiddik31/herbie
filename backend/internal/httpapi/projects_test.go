@@ -67,6 +67,17 @@ func (f *fakeProjects) Update(_ context.Context, id, userID string, patch storag
 	if patch.Instructions != nil {
 		p.Instructions = *patch.Instructions
 	}
+	if patch.ClearTopP {
+		p.DefaultTopP = nil
+	} else if patch.TopP != nil {
+		p.DefaultTopP = patch.TopP
+	}
+	if patch.MaxOutputTokens != nil {
+		p.DefaultMaxOutputTokens = *patch.MaxOutputTokens
+	}
+	if patch.Reasoning != nil {
+		p.DefaultReasoning = *patch.Reasoning
+	}
 	p.UpdatedAt = time.Now()
 	f.rows[id] = p
 	return p, nil

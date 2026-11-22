@@ -82,6 +82,10 @@ export function ProjectsPage() {
         name: editingProject.name.trim(),
         description: editingProject.description,
         instructions: editingProject.instructions,
+        topP: editingProject.defaultTopP ?? null,
+        clearTopP: editingProject.defaultTopP == null,
+        maxOutputTokens: editingProject.defaultMaxOutputTokens ?? 0,
+        reasoning: editingProject.defaultReasoning ?? "",
       },
       {
         onSuccess: () => {
@@ -351,6 +355,66 @@ export function ProjectsPage() {
                     rows={3}
                     className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-xs outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring"
                   />
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="grid gap-1.5">
+                    <Label htmlFor="edit-top-p">Top P (fallback)</Label>
+                    <input
+                      id="edit-top-p"
+                      type="number"
+                      min={0}
+                      max={1}
+                      step={0.05}
+                      value={editingProject.defaultTopP ?? ""}
+                      onChange={(e) =>
+                        setEditingProject({
+                          ...editingProject,
+                          defaultTopP: e.target.value === "" ? null : Number(e.target.value),
+                        })
+                      }
+                      placeholder="Default"
+                      className="h-9 rounded-md border border-input bg-transparent px-2.5 text-xs outline-none"
+                    />
+                  </div>
+                  <div className="grid gap-1.5">
+                    <Label htmlFor="edit-max-tokens">Max output tokens</Label>
+                    <input
+                      id="edit-max-tokens"
+                      type="number"
+                      min={0}
+                      max={200000}
+                      step={256}
+                      value={editingProject.defaultMaxOutputTokens ?? 0}
+                      onChange={(e) =>
+                        setEditingProject({
+                          ...editingProject,
+                          defaultMaxOutputTokens: Math.max(0, Number(e.target.value) || 0),
+                        })
+                      }
+                      className="h-9 rounded-md border border-input bg-transparent px-2.5 text-xs outline-none"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid gap-1.5">
+                  <Label htmlFor="edit-reasoning">Reasoning effort</Label>
+                  <select
+                    id="edit-reasoning"
+                    value={editingProject.defaultReasoning ?? ""}
+                    onChange={(e) =>
+                      setEditingProject({
+                        ...editingProject,
+                        defaultReasoning: e.target.value as "low" | "medium" | "high" | "",
+                      })
+                    }
+                    className="h-9 w-full rounded-md border border-input bg-transparent px-2.5 text-xs outline-none"
+                  >
+                    <option value="">Provider default</option>
+                    <option value="low">Low</option>
+                    <option value="medium">Medium</option>
+                    <option value="high">High</option>
+                  </select>
                 </div>
               </div>
 

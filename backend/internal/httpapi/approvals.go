@@ -151,7 +151,7 @@ func (s *Server) handleApprovals(w http.ResponseWriter, r *http.Request) {
 	// positional boundary can land mid-batch. Rows replayed verbatim are
 	// skipped; resolutions and new answers carry this run's identity and are
 	// persisted at the paused tail.
-	outcome, err := s.deps.Agent.RunDeferred(ctx,
+	outcome, err := s.agentFor(ctx, userID).RunDeferred(ctx,
 		s.buildDeps(userID, convID, &sources, &sourcesMu, s.botFor(ctx, userID, conv.BotID)),
 		history, golem.DeferredResults{Approvals: resolutions},
 		sink, tools, spec)
@@ -252,6 +252,12 @@ func (s *Server) parkPending(ctx context.Context, userID, convID string, spec ch
 
 // finishResumed records usage and emits done without re-persisting messages.
 func (s *Server) finishResumed(ctx context.Context, userID, convID string, spec chat.RunSpec, outcome chat.Outcome, sink *sseSink) {
+	if outcome.UsedModel != "" && outcome.UsedModel != spec.Model {
+		_ = sink.event("meta", map[string]any{
+			"type": "fallback", "requested": spec.Model, "used": outcome.UsedModel,
+		})
+		spec.Model = outcome.UsedModel
+	}
 	if err := s.deps.Usage.Add(ctx, usageEventFor(userID, convID, spec.Model, outcome.Usage, outcome.Requests, s.deps.Rates)); err != nil {
 		s.deps.Log.Error("record usage", "err", err)
 	}

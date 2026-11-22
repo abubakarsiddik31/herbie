@@ -1007,3 +1007,42 @@ func TestPausedKnownRowsScopesToLastTurn(t *testing.T) {
 		t.Fatal("paused skip set is missing the paused turn")
 	}
 }
+
+func TestRegenerateWithModelDoesNotChangeSettings(t *testing.T) {
+	msgs := newFakeMsgs()
+	convs := newFakeConvos(msgs)
+	usage := newFakeUsage()
+	h, token := newHandlerServer(t, newEndlessAgent(t, "answer"), convs, msgs, usage)
+
+	modelID := "gemini-2.5-flash"
+	conv, err := convs.Create(context.Background(), "u-1", "Model override",
+		storage.ConversationPatch{Model: &modelID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec := postMessage(t, h, token, conv.ID, "hi"); rec.Code != http.StatusOK {
+		t.Fatalf("send: %d %s", rec.Code, rec.Body.String())
+	}
+
+	rec := branchReq(t, h, token, http.MethodPost, "/api/conversations/"+conv.ID+"/regenerate",
+		map[string]any{"model": "gemini-3.5-pro"})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("regenerate: %d %s", rec.Code, rec.Body.String())
+	}
+	rows := msgs.forConv(conv.ID, "u-1")
+	last := rows[len(rows)-1]
+	if last.Role != "assistant" || last.Model != "gemini-3.5-pro" {
+		t.Fatalf("regenerated row = role %q model %q", last.Role, last.Model)
+	}
+	if convs.convs[conv.ID].Model != "gemini-2.5-flash" {
+		t.Fatalf("regenerate-with-model changed settings: %q", convs.convs[conv.ID].Model)
+	}
+	if e := usage.events[len(usage.events)-1]; e.Model != "gemini-3.5-pro" {
+		t.Fatalf("usage model = %q, want gemini-3.5-pro", e.Model)
+	}
+
+	if rec := branchReq(t, h, token, http.MethodPost, "/api/conversations/"+conv.ID+"/regenerate",
+		map[string]any{"model": "not-a-model"}); rec.Code != http.StatusBadRequest {
+		t.Fatalf("invalid model = %d %s", rec.Code, rec.Body.String())
+	}
+}

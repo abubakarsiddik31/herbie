@@ -197,15 +197,15 @@ backfill, bot/fork titles, SetTitle overloading, quote composition) and 9 majors
 
 ### Phase 2 — models 2.0 (feature: `feat/models-2`)
 
-- [ ] `top_p`, `max_output_tokens`, reasoning level on conversations/bots/user/project
+- [x] `top_p`, `max_output_tokens`, reasoning level on conversations/bots/user/project
       defaults; provider mapping (OpenAI `ReasoningEffort`, Anthropic thinking,
       Gemini thinking level/budget); capability-gated UI.
-- [ ] `auto` alias → ordered fallback chain via `model.NewFallback` (pre-first-fragment
+- [x] `auto` alias → ordered fallback chain via `model.NewFallback` (pre-first-fragment
       only); used-model stamping in usage/transcript; fallback indicator in the run trace.
-- [ ] Inline model switcher; regenerate-with-model (branch, not a settings change).
-- [ ] BYOK: per-user provider keys in the vault (set/test/delete, audited, never
+- [x] Inline model switcher; regenerate-with-model (branch, not a settings change).
+- [x] BYOK: per-user provider keys in the vault (set/test/delete, audited, never
       returned); server keys as fallback; `ALLOW_USER_PROVIDER_KEYS` flag.
-- [ ] Admin model catalog in Postgres (seeded from the hardcoded list): CRUD, rates,
+- [x] Admin model catalog in Postgres (seeded from the hardcoded list): CRUD, rates,
       capabilities, enabled flag; `/api/models` = enabled ∧ key-available.
 
 ### Phase 3 — context, resilience, compare (features: `feat/context-2`, `feat/compare`)

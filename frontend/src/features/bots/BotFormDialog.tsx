@@ -23,6 +23,7 @@ const PROVIDER_LABEL: Record<string, string> = {
   gemini: "Google Gemini",
   openai: "OpenAI",
   anthropic: "Anthropic",
+  auto: "Auto",
 };
 
 interface Props {
@@ -44,6 +45,9 @@ export function BotFormDialog({ open, onOpenChange, bot }: Props) {
   const [color, setColor] = useState<string>("sage");
   const [instructions, setInstructions] = useState("");
   const [model, setModel] = useState("");
+  const [topP, setTopP] = useState<number | null>(null);
+  const [maxOutputTokens, setMaxOutputTokens] = useState(0);
+  const [reasoning, setReasoning] = useState<"low" | "medium" | "high" | "">("");
   const [ragEnabled, setRagEnabled] = useState(true);
 
   // Re-seed the form each time the dialog opens so cancels never leak edits.
@@ -54,6 +58,9 @@ export function BotFormDialog({ open, onOpenChange, bot }: Props) {
       setColor(bot?.color ?? "sage");
       setInstructions(bot?.instructions ?? "");
       setModel(bot?.model ?? "");
+      setTopP(bot?.topP ?? null);
+      setMaxOutputTokens(bot?.maxOutputTokens ?? 0);
+      setReasoning(bot?.reasoning ?? "");
       setRagEnabled(bot?.ragEnabled ?? true);
     }
   }, [open, bot]);
@@ -65,6 +72,7 @@ export function BotFormDialog({ open, onOpenChange, bot }: Props) {
     byProvider.set(m.provider, list);
   }
   const effectiveModel = model || models?.default || "";
+  const supportsReasoning = models?.models.find((m) => m.id === effectiveModel)?.capabilities?.reasoning !== false;
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -76,6 +84,9 @@ export function BotFormDialog({ open, onOpenChange, bot }: Props) {
       instructions: instructions.trim(),
       model: effectiveModel,
       temperature: null,
+      topP,
+      maxOutputTokens,
+      reasoning,
       ragEnabled,
     };
     const opts = {
@@ -178,6 +189,64 @@ export function BotFormDialog({ open, onOpenChange, bot }: Props) {
                 ))}
               </select>
             </div>
+
+            <div className="grid gap-1.5">
+              <div className="flex items-center justify-between">
+                <Label htmlFor="bot-top-p">Top P</Label>
+                <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <input
+                    type="checkbox"
+                    checked={topP === null}
+                    onChange={(e) => setTopP(e.target.checked ? null : 0.9)}
+                    className="size-3.5 accent-[var(--primary)]"
+                  />
+                  Provider default
+                </label>
+              </div>
+              <input
+                id="bot-top-p"
+                type="range"
+                min={0}
+                max={1}
+                step={0.05}
+                value={topP ?? 0.9}
+                disabled={topP === null}
+                onChange={(e) => setTopP(Number(e.target.value))}
+                className="h-1.5 w-full accent-[var(--primary)] disabled:opacity-40"
+              />
+            </div>
+
+            <div className="grid gap-1.5">
+              <Label htmlFor="bot-max-tokens">Max output tokens</Label>
+              <input
+                id="bot-max-tokens"
+                type="number"
+                min={0}
+                max={200000}
+                step={256}
+                value={maxOutputTokens}
+                onChange={(e) => setMaxOutputTokens(Math.max(0, Number(e.target.value) || 0))}
+                placeholder="Provider default"
+                className="h-9 rounded-md border border-input bg-transparent px-2.5 text-sm outline-none"
+              />
+            </div>
+
+            {supportsReasoning && (
+            <div className="grid gap-1.5">
+              <Label htmlFor="bot-reasoning">Reasoning effort</Label>
+              <select
+                id="bot-reasoning"
+                value={reasoning}
+                onChange={(e) => setReasoning(e.target.value as typeof reasoning)}
+                className="h-9 w-full rounded-md border border-input bg-transparent px-2.5 text-sm outline-none"
+              >
+                <option value="">Provider default</option>
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+              </select>
+            </div>
+            )}
 
             <div className="flex items-center justify-between gap-3">
               <div className="grid gap-0.5">

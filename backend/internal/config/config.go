@@ -33,6 +33,9 @@ type Config struct {
 	// TitleModel enables asynchronous conversation auto-titling; empty keeps
 	// the first-message heuristic title.
 	TitleModel string
+	// AllowUserProviderKeys lets users store their own provider keys, which
+	// override the server keys for their runs.
+	AllowUserProviderKeys bool
 
 	// User-tool runtime settings.
 	ToolHTTPTimeout       time.Duration
@@ -314,21 +317,22 @@ func Load() (Config, error) {
 	}
 
 	cfg := Config{
-		Port:             env("PORT", env("APP_PORT", "8080")),
-		DatabaseURL:      os.Getenv("DATABASE_URL"),
-		GeminiAPIKey:     os.Getenv("GEMINI_API_KEY"),
-		GeminiModel:      env("GEMINI_MODEL", "gemini-2.5-flash"),
-		GeminiBaseURL:    os.Getenv("GEMINI_BASE_URL"),
-		OpenAIAPIKey:     os.Getenv("OPENAI_API_KEY"),
-		OpenAIBaseURL:    os.Getenv("OPENAI_BASE_URL"),
-		AnthropicAPIKey:  os.Getenv("ANTHROPIC_API_KEY"),
-		AnthropicBaseURL: os.Getenv("ANTHROPIC_BASE_URL"),
-		JWTSecret:        os.Getenv("JWT_SECRET"),
-		FrontendOrigin:   env("FRONTEND_ORIGIN", "http://localhost:5173"),
-		AdminEmails:      adminEmails,
-		ChatInputRate:    inputRate,
-		ChatOutputRate:   outputRate,
-		TitleModel:       os.Getenv("TITLE_MODEL"),
+		Port:                  env("PORT", env("APP_PORT", "8080")),
+		DatabaseURL:           os.Getenv("DATABASE_URL"),
+		GeminiAPIKey:          os.Getenv("GEMINI_API_KEY"),
+		GeminiModel:           env("GEMINI_MODEL", "gemini-2.5-flash"),
+		GeminiBaseURL:         os.Getenv("GEMINI_BASE_URL"),
+		OpenAIAPIKey:          os.Getenv("OPENAI_API_KEY"),
+		OpenAIBaseURL:         os.Getenv("OPENAI_BASE_URL"),
+		AnthropicAPIKey:       os.Getenv("ANTHROPIC_API_KEY"),
+		AnthropicBaseURL:      os.Getenv("ANTHROPIC_BASE_URL"),
+		JWTSecret:             os.Getenv("JWT_SECRET"),
+		FrontendOrigin:        env("FRONTEND_ORIGIN", "http://localhost:5173"),
+		AdminEmails:           adminEmails,
+		ChatInputRate:         inputRate,
+		ChatOutputRate:        outputRate,
+		TitleModel:            os.Getenv("TITLE_MODEL"),
+		AllowUserProviderKeys: envBool("ALLOW_USER_PROVIDER_KEYS", false),
 
 		OAuth: OAuthConfig{
 			Google: OAuthProviderConfig{
