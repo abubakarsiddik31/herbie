@@ -24,6 +24,8 @@ var (
 	ErrEmailUnverified    = errors.New("email not verified")
 	ErrInvalidToken       = errors.New("invalid or expired token")
 	ErrSessionNotFound    = errors.New("session not found")
+	ErrInvalidPassword    = errors.New("invalid password")
+	ErrLastAdmin          = errors.New("cannot delete the last admin")
 )
 
 const oauthCodeTTL = 5 * time.Minute

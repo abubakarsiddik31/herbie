@@ -44,7 +44,7 @@ Golem is on v1.1.0; its new seams are called out where they unlock an item.
 
 - [x] CI gate: GitHub Actions runs `make check`, `make fe-check`, Docker build, and `scripts/smoke.sh`; protect `main` (`.github/workflows/ci.yml`).
 - [x] Project isolation bug: `search_documents`, `list_documents`, `read_document`, and the project-files route now scope to the conversation's `project_id` (empty project stays empty); cross-project tests cover search, read, list, and the HTTP route.
-- [ ] Auth lifecycle: password reset, email verification, login/register rate limiting, session list + revoke, account deletion, full data export (JSON + original files).
+- [x] Auth lifecycle: password reset, email verification, login/register rate limiting, session list + revoke (3a); account deletion and a ZIP export of JSON plus original files, with secrets redacted (3b).
 - [ ] Per-user budgets: daily/monthly token and USD caps with warning thresholds and admin suspension; keep the golem per-run limit as the hard stop.
 - [ ] Admin control plane: configure providers/keys/model catalog, set quotas, inspect per-user usage. Routine operations should not require editing `.env`.
 - [ ] Observability: wire `golem/telemetry` to OpenTelemetry, add metrics, `/readyz` for Postgres/Weaviate/MinIO, structured error reporting, and audit every privileged action.

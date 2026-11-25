@@ -32,6 +32,7 @@ import { useAuth } from "@/stores/auth";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useProfile, useUpdateProfile } from "@/features/profile/useProfile";
 import {
@@ -46,6 +47,7 @@ import { useToolOAuthProviders, useWorkflows } from "@/features/workflows/useWor
 import { useMCPServers } from "@/features/mcp/useMCPServers";
 import { useLinkCatalogApp, useUnlinkCatalogApp } from "@/features/mcp/useMCPCatalog";
 import { useSessions, useRevokeSession, useRevokeAllSessions } from "@/features/account/useSessions";
+import { useExportAccount, useDeleteAccount } from "@/features/account/useAccount";
 import { OAuthPopupDialog } from "@/features/workflows/OAuthPopupDialog";
 
 export const MAX_INSTRUCTIONS_CHARS = 4000;
@@ -66,6 +68,11 @@ export function SettingsDialog({ open, onOpenChange, defaultTab = "general" }: P
   const { data: sessions, isLoading: sessionsLoading } = useSessions();
   const revokeSession = useRevokeSession();
   const revokeAllSessions = useRevokeAllSessions();
+  const exportAccount = useExportAccount();
+  const deleteAccount = useDeleteAccount();
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deletePassword, setDeletePassword] = useState("");
+  const [deleteConfirm, setDeleteConfirm] = useState("");
 
   async function handleLogout() {
     try {
@@ -989,6 +996,101 @@ export function SettingsDialog({ open, onOpenChange, defaultTab = "general" }: P
                       <p className="text-[11px] text-muted-foreground">No active sessions.</p>
                     )}
                   </div>
+                </div>
+
+                <div className="border-t pt-4">
+                  <h4 className="text-xs font-semibold">Data & account</h4>
+                  <p className="text-[11px] text-muted-foreground">
+                    Download everything, or permanently delete this account.
+                  </p>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={exportAccount.isPending}
+                      onClick={() =>
+                        exportAccount.mutate(undefined, {
+                          onError: (err) =>
+                            toast.error(
+                              err instanceof ApiError ? err.message : "Could not export data",
+                            ),
+                        })
+                      }
+                    >
+                      {exportAccount.isPending ? "Preparing…" : "Export data"}
+                    </Button>
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      onClick={() => {
+                        setDeleteOpen((open) => !open);
+                        setDeletePassword("");
+                        setDeleteConfirm("");
+                      }}
+                    >
+                      Delete account
+                    </Button>
+                  </div>
+                  {deleteOpen && (
+                    <div className="mt-3 space-y-2 rounded-xl border border-destructive/30 bg-destructive/5 p-3 text-xs">
+                      <p className="text-muted-foreground">
+                        This permanently deletes every conversation, document, and setting.
+                        Type <span className="font-mono font-semibold">DELETE</span> to confirm.
+                      </p>
+                      <Input
+                        type="password"
+                        placeholder="Password (blank for OAuth-only accounts)"
+                        autoComplete="current-password"
+                        value={deletePassword}
+                        onChange={(e) => setDeletePassword(e.target.value)}
+                        className="h-9 text-xs"
+                      />
+                      <Input
+                        placeholder="Type DELETE to confirm"
+                        value={deleteConfirm}
+                        onChange={(e) => setDeleteConfirm(e.target.value)}
+                        className="h-9 text-xs"
+                      />
+                      <div className="flex justify-end gap-2">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            setDeleteOpen(false);
+                            setDeletePassword("");
+                            setDeleteConfirm("");
+                          }}
+                          disabled={deleteAccount.isPending}
+                        >
+                          Cancel
+                        </Button>
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          disabled={deleteAccount.isPending || deleteConfirm !== "DELETE"}
+                          onClick={() =>
+                            deleteAccount.mutate(
+                              { password: deletePassword, confirm: deleteConfirm },
+                              {
+                                onSuccess: () => {
+                                  useAuth.getState().clear();
+                                  window.location.href = "/login";
+                                },
+                                onError: (err) =>
+                                  toast.error(
+                                    err instanceof ApiError
+                                      ? err.message
+                                      : "Could not delete account",
+                                  ),
+                              },
+                            )
+                          }
+                        >
+                          {deleteAccount.isPending ? "Deleting…" : "Permanently delete"}
+                        </Button>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 <div className="border-t pt-4 flex items-center justify-between">

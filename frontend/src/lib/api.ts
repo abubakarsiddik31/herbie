@@ -68,4 +68,27 @@ export async function apiFetch<T>(path: string, opts: RequestInit & { json?: unk
   return (await res.json()) as T;
 }
 
+export async function apiFetchBlob(path: string, opts: RequestInit = {}): Promise<Blob> {
+  const doFetch = () => {
+    const headers = new Headers(opts.headers);
+    const token = useAuth.getState().accessToken;
+    if (token) headers.set("Authorization", `Bearer ${token}`);
+    return fetch(`${BASE}${path}`, { ...opts, headers, credentials: "include" });
+  };
+  let res = await doFetch();
+  if (res.status === 401 && (await tryRefresh())) {
+    res = await doFetch();
+  }
+  if (!res.ok) {
+    let code = "error", message = `request failed (${res.status})`;
+    try {
+      const body = (await res.json()) as { error?: { code: string; message: string } };
+      if (body.error) { code = body.error.code; message = body.error.message; }
+    } catch { /* non-JSON error body */ }
+    if (res.status === 401) useAuth.getState().clear();
+    throw new ApiError(res.status, code, message);
+  }
+  return res.blob();
+}
+
 export { BASE };
