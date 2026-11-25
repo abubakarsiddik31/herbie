@@ -7,6 +7,9 @@ import { RequireAuth } from "@/components/RequireAuth";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { LoginPage } from "@/pages/LoginPage";
 import { RegisterPage } from "@/pages/RegisterPage";
+import { ForgotPasswordPage } from "@/pages/ForgotPasswordPage";
+import { ResetPasswordPage } from "@/pages/ResetPasswordPage";
+import { VerifyEmailPage } from "@/pages/VerifyEmailPage";
 import { LandingPage } from "@/pages/LandingPage";
 import { OAuthCallbackPage } from "@/pages/OAuthCallbackPage";
 import { PreferencesPage } from "@/pages/PreferencesPage";
@@ -27,8 +30,16 @@ const queryClient = new QueryClient();
 
 export default function App() {
   const [initializing, setInitializing] = useState(() => {
-    if (typeof window !== "undefined" && window.location.pathname.startsWith("/auth/callback")) {
-      return false;
+    if (typeof window !== "undefined") {
+      const path = window.location.pathname;
+      if (
+        path.startsWith("/auth/callback") ||
+        path.startsWith("/forgot-password") ||
+        path.startsWith("/reset-password") ||
+        path.startsWith("/verify-email")
+      ) {
+        return false;
+      }
     }
     return true;
   });
@@ -60,6 +71,9 @@ export default function App() {
           <Route path="/landing" element={<LandingPage />} />
           <Route path="/login" element={token ? <Navigate to="/chat" replace /> : <LoginPage />} />
           <Route path="/register" element={token ? <Navigate to="/chat" replace /> : <RegisterPage />} />
+          <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+          <Route path="/reset-password" element={<ResetPasswordPage />} />
+          <Route path="/verify-email" element={<VerifyEmailPage />} />
           <Route path="/auth/callback" element={<OAuthCallbackPage />} />
           <Route path="/s/:token" element={<SharedPage />} />
           <Route element={<RequireAuth />}>

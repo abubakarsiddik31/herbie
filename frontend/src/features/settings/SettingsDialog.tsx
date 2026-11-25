@@ -45,6 +45,7 @@ import { useDocuments } from "@/features/documents/useDocuments";
 import { useToolOAuthProviders, useWorkflows } from "@/features/workflows/useWorkflows";
 import { useMCPServers } from "@/features/mcp/useMCPServers";
 import { useLinkCatalogApp, useUnlinkCatalogApp } from "@/features/mcp/useMCPCatalog";
+import { useSessions, useRevokeSession, useRevokeAllSessions } from "@/features/account/useSessions";
 import { OAuthPopupDialog } from "@/features/workflows/OAuthPopupDialog";
 
 export const MAX_INSTRUCTIONS_CHARS = 4000;
@@ -62,6 +63,9 @@ export function SettingsDialog({ open, onOpenChange, defaultTab = "general" }: P
   const [activeTab, setActiveTab] = useState<SettingsTab>(defaultTab);
   const { theme, setTheme } = useTheme();
   const user = useAuth((s) => s.user);
+  const { data: sessions, isLoading: sessionsLoading } = useSessions();
+  const revokeSession = useRevokeSession();
+  const revokeAllSessions = useRevokeAllSessions();
 
   async function handleLogout() {
     try {
@@ -902,6 +906,88 @@ export function SettingsDialog({ open, onOpenChange, defaultTab = "general" }: P
                         {user?.id ?? "—"}
                       </span>
                     </div>
+                  </div>
+                </div>
+
+                <div className="border-t pt-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <h4 className="text-xs font-semibold">Sessions</h4>
+                      <p className="text-[11px] text-muted-foreground">
+                        Devices signed in with your account.
+                      </p>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={revokeAllSessions.isPending || !sessions?.length}
+                      onClick={() =>
+                        revokeAllSessions.mutate(undefined, {
+                          onSuccess: () => {
+                            useAuth.getState().clear();
+                            window.location.href = "/login";
+                          },
+                          onError: (err) =>
+                            toast.error(
+                              err instanceof ApiError ? err.message : "Could not sign out",
+                            ),
+                        })
+                      }
+                    >
+                      Sign out everywhere
+                    </Button>
+                  </div>
+                  <div className="mt-3 space-y-2">
+                    {sessionsLoading ? (
+                      <Skeleton className="h-12 w-full" />
+                    ) : sessions?.length ? (
+                      sessions.map((session) => (
+                        <div
+                          key={session.id}
+                          className="flex items-center justify-between gap-3 rounded-lg border border-border/50 p-2.5 text-xs"
+                        >
+                          <div className="min-w-0">
+                            <p className="font-medium truncate">
+                              {session.userAgent || "Unknown device"}
+                              {session.current && (
+                                <span className="ml-2 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium text-emerald-600 dark:text-emerald-400">
+                                  This device
+                                </span>
+                              )}
+                            </p>
+                            <p className="text-muted-foreground text-[11px] truncate">
+                              {session.ip || "unknown IP"} · Last used{" "}
+                              {new Date(session.lastUsedAt).toLocaleString()}
+                            </p>
+                          </div>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            disabled={revokeSession.isPending}
+                            onClick={() =>
+                              revokeSession.mutate(session.id, {
+                                onSuccess: () => {
+                                  if (session.current) {
+                                    useAuth.getState().clear();
+                                    window.location.href = "/login";
+                                  }
+                                },
+                                onError: (err) =>
+                                  toast.error(
+                                    err instanceof ApiError
+                                      ? err.message
+                                      : "Could not revoke session",
+                                  ),
+                              })
+                            }
+                          >
+                            {session.current ? "Sign out" : "Revoke"}
+                          </Button>
+                        </div>
+                      ))
+                    ) : (
+                      <p className="text-[11px] text-muted-foreground">No active sessions.</p>
+                    )}
                   </div>
                 </div>
 

@@ -50,10 +50,20 @@ export function AuthForm({ mode }: { mode: keyof typeof copy }) {
     e.preventDefault();
     setPending(true);
     try {
-      const res = await apiFetch<{ accessToken: string; user: User }>(t.endpoint, {
+      const res = await apiFetch<{
+        accessToken?: string;
+        user: User;
+        verificationRequired?: boolean;
+      }>(t.endpoint, {
         method: "POST",
         json: { email, password },
       });
+      if (res.verificationRequired) {
+        toast.success("Check your email to verify your account, then sign in.");
+        navigate("/login", { replace: true });
+        return;
+      }
+      if (!res.accessToken) throw new Error("missing access token");
       useAuth.getState().setAuth(res.user, res.accessToken);
       navigate("/", { replace: true });
     } catch (err) {
@@ -153,8 +163,15 @@ export function AuthForm({ mode }: { mode: keyof typeof copy }) {
                     <Lock className="size-3.5 text-muted-foreground" />
                     <span>Password</span>
                   </Label>
-                  {mode === "register" && (
+                  {mode === "register" ? (
                     <span className="text-[11px] text-muted-foreground">Min. 10 chars</span>
+                  ) : (
+                    <Link
+                      to="/forgot-password"
+                      className="text-[11px] font-medium text-brand hover:underline underline-offset-4"
+                    >
+                      Forgot password?
+                    </Link>
                   )}
                 </div>
                 <div className="relative">
