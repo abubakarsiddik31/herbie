@@ -112,8 +112,21 @@ func main() {
 	// store, and object store all need the rag compose profile running.
 	var ragSearch httpapi.RagSearchFunc
 	var ragRunner httpapi.RagRunner
-	var vectors rag.VectorStore
+	// Build the external stores even when RAG serving is off: account
+	// deletion must still be able to remove originals and vectors from a
+	// previously enabled deployment. Connections are lazy.
+	vs := weaviate.New(cfg.RAG.WeaviateURL, cfg.RAG.EmbeddingDims, nil)
+	vectors := rag.VectorStore(vs)
 	var objects storage.ObjectStore
+	if cfg.RAG.MinIOEndpoint != "" {
+		objs, err := storage.NewMinIOStore(cfg.RAG.MinIOEndpoint, cfg.RAG.MinIOAccessKey,
+			cfg.RAG.MinIOSecretKey, cfg.RAG.DocumentsBucket, cfg.RAG.MinIOUseSSL)
+		if err != nil {
+			log.Warn("object store unavailable", "err", err)
+		} else {
+			objects = objs
+		}
+	}
 	if cfg.RAG.Enabled {
 		if cfg.GeminiAPIKey == "" {
 			log.Error("rag", "err", "RAG_ENABLED requires GEMINI_API_KEY for embeddings")
@@ -124,15 +137,13 @@ func main() {
 			log.Error("rag embedder", "err", err)
 			os.Exit(1)
 		}
-		vs := weaviate.New(cfg.RAG.WeaviateURL, cfg.RAG.EmbeddingDims, nil)
 		if err := vs.EnsureCollection(ctx); err != nil {
 			log.Error("rag weaviate", "err", err)
 			os.Exit(1)
 		}
-		objs, err := storage.NewMinIOStore(cfg.RAG.MinIOEndpoint, cfg.RAG.MinIOAccessKey,
-			cfg.RAG.MinIOSecretKey, cfg.RAG.DocumentsBucket, cfg.RAG.MinIOUseSSL)
-		if err != nil {
-			log.Error("rag minio", "err", err)
+		objs, ok := objects.(*storage.MinIOStore)
+		if !ok {
+			log.Error("rag minio", "err", "object store not configured")
 			os.Exit(1)
 		}
 		if err := objs.EnsureBucket(ctx); err != nil {
@@ -152,8 +163,6 @@ func main() {
 			return svc.Search(ctx, userID, query, rag.SearchOptions{TopK: k, DocIDs: docIDs})
 		}
 		ragRunner = svc
-		vectors = vs
-		objects = objs
 		log.Info("rag enabled", "model", cfg.RAG.EmbeddingModel, "weaviate", cfg.RAG.WeaviateURL, "minio", cfg.RAG.MinIOEndpoint)
 	}
 
@@ -234,6 +243,7 @@ func main() {
 		Vault:            vault.New(cfg.CredentialEncryptionKey),
 		Vectors:          vectors,
 		Objects:          objects,
+		Account:          storage.NewAccounts(pool),
 	})
 	srv := &http.Server{Addr: ":" + cfg.Port, Handler: handler, ReadHeaderTimeout: 10 * time.Second}
 	errCh := make(chan error, 1)

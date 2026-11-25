@@ -79,6 +79,8 @@ type ServerDeps struct {
 	MCPServers MCPServerStore
 	Vectors    rag.VectorStore
 	Objects    storage.ObjectStore
+	// Account handles data export and account deletion. Nil = feature off.
+	Account AccountStore
 }
 
 // PromptStore bridges the saved-prompt library to storage.
@@ -186,6 +188,8 @@ func newServer(deps ServerDeps) (*Server, http.Handler) {
 	authed.HandleFunc("GET /api/account/sessions", s.handleListSessions)
 	authed.HandleFunc("DELETE /api/account/sessions", s.handleRevokeAllSessions)
 	authed.HandleFunc("DELETE /api/account/sessions/{id}", s.handleRevokeSession)
+	authed.HandleFunc("GET /api/account/export", s.handleExportAccount)
+	authed.HandleFunc("POST /api/account/delete", s.handleDeleteAccount)
 	authed.HandleFunc("GET /api/profile", s.handleGetProfile)
 	authed.HandleFunc("PATCH /api/profile", s.handlePatchProfile)
 	authed.HandleFunc("GET /api/memories", s.handleListMemories)
