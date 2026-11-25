@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"net/netip"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -13,7 +14,9 @@ import (
 	"github.com/abubakarsiddik31/golem-chatbot/internal/chat"
 	"github.com/abubakarsiddik31/golem-chatbot/internal/config"
 	"github.com/abubakarsiddik31/golem-chatbot/internal/cost"
+	"github.com/abubakarsiddik31/golem-chatbot/internal/mailer"
 	"github.com/abubakarsiddik31/golem-chatbot/internal/rag"
+	"github.com/abubakarsiddik31/golem-chatbot/internal/ratelimit"
 	"github.com/abubakarsiddik31/golem-chatbot/internal/storage"
 	"github.com/abubakarsiddik31/golem-chatbot/internal/vault"
 	"github.com/abubakarsiddik31/golem-chatbot/internal/websearch"
@@ -26,6 +29,8 @@ type ServerDeps struct {
 	Log    *slog.Logger
 	Auth   *auth.Service
 	Tokens *auth.TokenMaker
+	// Mailer delivers verification and password-reset links. Nil drops them.
+	Mailer mailer.Mailer
 	// OAuth lists the configured social-login providers in display
 	// order. Empty = password auth only; the login UI hides the
 	// provider buttons.
@@ -119,6 +124,10 @@ type Server struct {
 	// Single-instance deployment assumption — the process is the only writer
 	// to these conversations.
 	runs sync.Map // conversation ID -> struct{}
+	// authLimiter throttles unauthenticated credential endpoints (per
+	// process; nil in unit servers that build Server directly).
+	authLimiter    *ratelimit.Limiter
+	trustedProxies []netip.Prefix
 }
 
 // NewServer builds the root handler, CORS outermost. Auth endpoints are
@@ -137,6 +146,15 @@ func NewServerWithRunner(deps ServerDeps) (*Server, http.Handler) {
 
 func newServer(deps ServerDeps) (*Server, http.Handler) {
 	s := &Server{deps: deps, mux: http.NewServeMux(), botAgent: deps.Agent}
+	s.authLimiter = ratelimit.New(deps.Cfg.AuthRateLimitMax, deps.Cfg.AuthRateLimitWindow)
+	for _, raw := range deps.Cfg.TrustedProxies {
+		prefix, err := netip.ParsePrefix(raw)
+		if err != nil {
+			deps.Log.Warn("ignoring invalid TRUSTED_PROXIES entry", "value", raw, "err", err)
+			continue
+		}
+		s.trustedProxies = append(s.trustedProxies, prefix)
+	}
 	s.mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
@@ -147,6 +165,10 @@ func newServer(deps ServerDeps) (*Server, http.Handler) {
 	s.mux.HandleFunc("POST /api/auth/login", s.handleLogin)
 	s.mux.HandleFunc("POST /api/auth/refresh", s.handleRefresh)
 	s.mux.HandleFunc("POST /api/auth/logout", s.handleLogout)
+	s.mux.HandleFunc("POST /api/auth/forgot-password", s.handleForgotPassword)
+	s.mux.HandleFunc("POST /api/auth/reset-password", s.handleResetPassword)
+	s.mux.HandleFunc("POST /api/auth/verify-email", s.handleVerifyEmail)
+	s.mux.HandleFunc("POST /api/auth/verify-email/resend", s.handleResendVerification)
 	s.mux.HandleFunc("GET /api/auth/providers", s.handleOAuthProviders)
 	s.mux.HandleFunc("GET /api/auth/oauth/{provider}", s.handleOAuthStart)
 	s.mux.HandleFunc("GET /api/auth/oauth/{provider}/callback", s.handleOAuthCallback)
@@ -161,6 +183,9 @@ func newServer(deps ServerDeps) (*Server, http.Handler) {
 	// requires a valid bearer token.
 	authed := http.NewServeMux()
 	authed.HandleFunc("GET /api/me", s.handleMe)
+	authed.HandleFunc("GET /api/account/sessions", s.handleListSessions)
+	authed.HandleFunc("DELETE /api/account/sessions", s.handleRevokeAllSessions)
+	authed.HandleFunc("DELETE /api/account/sessions/{id}", s.handleRevokeSession)
 	authed.HandleFunc("GET /api/profile", s.handleGetProfile)
 	authed.HandleFunc("PATCH /api/profile", s.handlePatchProfile)
 	authed.HandleFunc("GET /api/memories", s.handleListMemories)
@@ -272,7 +297,7 @@ func newServer(deps ServerDeps) (*Server, http.Handler) {
 	authed.Handle("PATCH /api/admin/models/{id}", requireRole("admin", http.HandlerFunc(s.handleAdminUpsertModel)))
 	authed.Handle("DELETE /api/admin/models/{id}", requireRole("admin", http.HandlerFunc(s.handleAdminDeleteModel)))
 
-	s.mux.Handle("/api/", requireAuth(deps.Tokens, authed))
+	s.mux.Handle("/api/", s.requireAuth(authed))
 
 	return s, withCORS(deps.Cfg.FrontendOrigin, logRequests(deps.Log, s.mux))
 }

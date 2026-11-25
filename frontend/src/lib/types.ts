@@ -351,3 +351,12 @@ export interface MessageSearchResponse {
   hits: MessageSearchHit[];
   nextOffset: number | null;
 }
+
+export interface Session {
+  id: string;
+  userAgent: string;
+  ip: string;
+  createdAt: string;
+  lastUsedAt: string;
+  current: boolean;
+}

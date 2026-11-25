@@ -104,7 +104,7 @@ func (s *Server) handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 		fail("unverified_email")
 		return
 	}
-	res, err := s.deps.Auth.OAuthLogin(r.Context(), p.ID, prof.Subject, prof.Email)
+	user, err := s.deps.Auth.ResolveOAuthUser(r.Context(), p.ID, prof.Subject, prof.Email)
 	if err != nil {
 		if errors.Is(err, auth.ErrOAuthConflict) {
 			fail("account_taken")
@@ -113,7 +113,7 @@ func (s *Server) handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 		fail("provider_error")
 		return
 	}
-	handoff, err := s.deps.Auth.IssueOAuthCode(r.Context(), res.User.ID)
+	handoff, err := s.deps.Auth.IssueOAuthCode(r.Context(), user.ID)
 	if err != nil {
 		fail("provider_error")
 		return
@@ -129,7 +129,7 @@ func (s *Server) handleOAuthConsume(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "bad_request", "oauth code is required")
 		return
 	}
-	res, err := s.deps.Auth.ConsumeOAuthCode(r.Context(), req.Code)
+	res, err := s.deps.Auth.ConsumeOAuthCode(r.Context(), req.Code, s.sessionMeta(r))
 	if err != nil {
 		writeError(w, http.StatusUnauthorized, "invalid_code", "invalid or expired oauth code")
 		return

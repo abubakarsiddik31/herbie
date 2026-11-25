@@ -22,6 +22,7 @@ import (
 	"github.com/abubakarsiddik31/golem-chatbot/internal/config"
 	"github.com/abubakarsiddik31/golem-chatbot/internal/cost"
 	"github.com/abubakarsiddik31/golem-chatbot/internal/httpapi"
+	"github.com/abubakarsiddik31/golem-chatbot/internal/mailer"
 	"github.com/abubakarsiddik31/golem-chatbot/internal/rag"
 	"github.com/abubakarsiddik31/golem-chatbot/internal/storage"
 	"github.com/abubakarsiddik31/golem-chatbot/internal/vault"
@@ -77,6 +78,13 @@ func main() {
 	if len(cfg.AdminEmails) > 0 {
 		svc.SetAdminEmails(cfg.AdminEmails)
 	}
+	svc.SetAuthTokens(storage.NewAuthTokens(pool))
+	svc.SetEmailVerificationRequired(cfg.EmailVerificationRequired)
+	authMailer := mailer.NewAsync(mailer.New(mailer.Config{
+		Host: cfg.SMTP.Host, Port: cfg.SMTP.Port, User: cfg.SMTP.User, Pass: cfg.SMTP.Pass,
+		From: cfg.SMTP.From, ImplicitTLS: cfg.SMTP.ImplicitTLS, AllowPlaintext: cfg.SMTP.AllowPlaintext,
+	}, log, cfg.EmailLogLinks), 128)
+	defer authMailer.Close()
 	tokens, err := auth.NewTokenMaker(cfg.JWTSecret)
 	if err != nil {
 		log.Error("auth", "err", err)
@@ -190,6 +198,7 @@ func main() {
 		Log:              log,
 		Auth:             svc,
 		Tokens:           tokens,
+		Mailer:           authMailer,
 		OAuth:            oauthProviders(cfg),
 		Convos:           storage.NewConversations(pool),
 		Prompts:          storage.NewSavedPrompts(pool),

@@ -6,8 +6,6 @@ import (
 	"net/http"
 	"strings"
 	"time"
-
-	"github.com/abubakarsiddik31/golem-chatbot/internal/auth"
 )
 
 type statusResponseWriter struct {
@@ -53,8 +51,9 @@ func logRequests(log *slog.Logger, next http.Handler) http.Handler {
 type ctxKey int
 
 const (
-	userKey ctxKey = 1
-	roleKey ctxKey = 2
+	userKey    ctxKey = 1
+	roleKey    ctxKey = 2
+	sessionKey ctxKey = 3
 )
 
 func withUser(ctx context.Context, userID string, role ...string) context.Context {
@@ -71,6 +70,17 @@ func userIDFrom(ctx context.Context) (string, bool) {
 	return id, ok
 }
 
+func withSession(ctx context.Context, sessionID string) context.Context {
+	return context.WithValue(ctx, sessionKey, sessionID)
+}
+
+// sessionIDFrom returns the refresh-token session bound to the access token
+// (empty for tokens minted before sessions existed).
+func sessionIDFrom(ctx context.Context) string {
+	id, _ := ctx.Value(sessionKey).(string)
+	return id
+}
+
 func userRoleFrom(ctx context.Context) string {
 	role, ok := ctx.Value(roleKey).(string)
 	if !ok || role == "" {
@@ -80,8 +90,11 @@ func userRoleFrom(ctx context.Context) string {
 }
 
 // requireAuth validates the bearer token and puts the user ID and role on the
-// request context for downstream handlers.
-func requireAuth(tokens *auth.TokenMaker, next http.Handler) http.Handler {
+// request context for downstream handlers. Tokens carrying a session are
+// rejected once that session has been revoked, so "sign out everywhere" and
+// password reset take effect immediately rather than waiting out the access
+// token TTL.
+func (s *Server) requireAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		header := r.Header.Get("Authorization")
 		token, ok := strings.CutPrefix(header, "Bearer ")
@@ -90,12 +103,20 @@ func requireAuth(tokens *auth.TokenMaker, next http.Handler) http.Handler {
 			writeError(w, http.StatusUnauthorized, "unauthorized", "missing bearer token")
 			return
 		}
-		userID, role, err := tokens.VerifyClaims(token)
+		userID, role, sessionID, err := s.deps.Tokens.VerifySession(token)
 		if err != nil {
 			writeError(w, http.StatusUnauthorized, "unauthorized", "invalid token")
 			return
 		}
-		next.ServeHTTP(w, r.WithContext(withUser(r.Context(), userID, role)))
+		if sessionID != "" && s.deps.Auth != nil {
+			live, liveErr := s.deps.Auth.SessionLive(r.Context(), userID, sessionID)
+			if liveErr != nil || !live {
+				writeError(w, http.StatusUnauthorized, "unauthorized", "session revoked")
+				return
+			}
+		}
+		ctx := withUser(r.Context(), userID, role)
+		next.ServeHTTP(w, r.WithContext(withSession(ctx, sessionID)))
 	})
 }
 

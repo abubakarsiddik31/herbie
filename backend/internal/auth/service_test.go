@@ -62,7 +62,7 @@ type failRotateStore struct {
 	*authtest.FakeRefreshStore
 }
 
-func (s *failRotateStore) Rotate(_ context.Context, _, _ string, _ time.Time) error {
+func (s *failRotateStore) Rotate(_ context.Context, _, _ string, _ time.Time, _ auth.SessionMeta) error {
 	return auth.ErrInvalidRefresh
 }
 
@@ -235,4 +235,168 @@ func TestFirstUserAdminAndRBAC(t *testing.T) {
 	if vip.User.Role != "admin" {
 		t.Fatalf("vip user should be admin, got %q", vip.User.Role)
 	}
+}
+
+func newSessionService() (*auth.Service, *authtest.FakeRefreshStore) {
+	users := authtest.NewFakeUsers()
+	refresh := authtest.NewFakeRefreshStore()
+	tokens := authtest.NewFakeAuthTokens(users)
+	tokens.BindRefresh(refresh)
+	return authtest.NewServiceWithStores("0123456789abcdef0123456789abcdef", users, refresh, tokens), refresh
+}
+
+func TestSessionsAreIsolatedAndLogoutIsCurrentOnly(t *testing.T) {
+	ctx := context.Background()
+	svc, _ := newSessionService()
+
+	a, err := svc.Register(ctx, "iso@b.co", "longenough1", auth.SessionMeta{UserAgent: "A", IP: "1.1.1.1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := svc.Login(ctx, "iso@b.co", "longenough1", auth.SessionMeta{UserAgent: "B", IP: "2.2.2.2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := svc.Login(ctx, "iso@b.co", "longenough1", auth.SessionMeta{UserAgent: "C", IP: "3.3.3.3"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.SessionID == b.SessionID {
+		t.Fatal("each login must get its own session")
+	}
+	a2, err := svc.Refresh(ctx, a.RefreshToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a2.SessionID != a.SessionID {
+		t.Fatal("refresh must keep the session")
+	}
+
+	// Reuse of a rotated token kills only that session.
+	if _, err := svc.Refresh(ctx, a.RefreshToken); !errors.Is(err, auth.ErrInvalidRefresh) {
+		t.Fatalf("reuse = %v", err)
+	}
+	if _, err := svc.Refresh(ctx, a2.RefreshToken); !errors.Is(err, auth.ErrInvalidRefresh) {
+		t.Fatal("session A should be dead")
+	}
+	b2, err := svc.Refresh(ctx, b.RefreshToken, auth.SessionMeta{UserAgent: "B", IP: "2.2.2.2"})
+	if err != nil {
+		t.Fatalf("session B must survive A's reuse: %v", err)
+	}
+
+	sessions, err := svc.Sessions(ctx, a.User.ID)
+	if err != nil || len(sessions) != 2 {
+		t.Fatalf("sessions = %+v err=%v", sessions, err)
+	}
+	byID := map[string]auth.Session{}
+	for _, sess := range sessions {
+		byID[sess.ID] = sess
+	}
+	if byID[b.SessionID].UserAgent != "B" || byID[b.SessionID].IP != "2.2.2.2" {
+		t.Fatalf("session metadata: %+v", byID[b.SessionID])
+	}
+
+	if err := svc.Logout(ctx, b2.RefreshToken); err != nil {
+		t.Fatal(err)
+	}
+	sessions, _ = svc.Sessions(ctx, a.User.ID)
+	if len(sessions) != 1 || sessions[0].ID != c.SessionID {
+		t.Fatalf("logout should clear only the current session, left %+v", sessions)
+	}
+}
+
+func TestPasswordResetSpendsTokenAndRevokesSessions(t *testing.T) {
+	ctx := context.Background()
+	svc, _ := newSessionService()
+	reg, err := svc.Register(ctx, "reset@b.co", "longenough1")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	token, to, err := svc.IssuePasswordReset(ctx, "reset@b.co")
+	if err != nil || token == "" || to != "reset@b.co" {
+		t.Fatalf("issue reset = %q %q %v", token, to, err)
+	}
+	// Issuing again supersedes the first link.
+	second, _, err := svc.IssuePasswordReset(ctx, "reset@b.co")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.ResetPassword(ctx, token, "evenlonger12"); !errors.Is(err, auth.ErrInvalidToken) {
+		t.Fatalf("superseded token = %v", err)
+	}
+	if err := svc.ResetPassword(ctx, second, "short"); !errors.Is(err, auth.ErrWeakPassword) {
+		t.Fatalf("weak password = %v", err)
+	}
+	if err := svc.ResetPassword(ctx, second, "evenlonger12"); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.ResetPassword(ctx, second, "evenlonger12"); !errors.Is(err, auth.ErrInvalidToken) {
+		t.Fatalf("reuse = %v", err)
+	}
+	if _, err := svc.Login(ctx, "reset@b.co", "longenough1"); !errors.Is(err, auth.ErrInvalidCredentials) {
+		t.Fatalf("old password = %v", err)
+	}
+	if _, err := svc.Login(ctx, "reset@b.co", "evenlonger12"); err != nil {
+		t.Fatalf("new password = %v", err)
+	}
+	if _, err := svc.Refresh(ctx, reg.RefreshToken); !errors.Is(err, auth.ErrInvalidRefresh) {
+		t.Fatal("reset must revoke existing sessions")
+	}
+}
+
+func TestEmailVerificationGate(t *testing.T) {
+	ctx := context.Background()
+	svc, _ := newSessionService()
+	svc.SetEmailVerificationRequired(true)
+
+	reg, err := svc.Register(ctx, "verify@b.co", "longenough1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reg.VerificationRequired || reg.AccessToken != "" || reg.RefreshToken != "" || reg.VerificationToken == "" {
+		t.Fatalf("register result: %+v", reg)
+	}
+	if _, err := svc.Login(ctx, "verify@b.co", "longenough1"); !errors.Is(err, auth.ErrEmailUnverified) {
+		t.Fatalf("unverified login = %v", err)
+	}
+	if err := svc.VerifyEmail(ctx, reg.VerificationToken); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.VerifyEmail(ctx, reg.VerificationToken); !errors.Is(err, auth.ErrInvalidToken) {
+		t.Fatalf("reuse = %v", err)
+	}
+	if _, err := svc.Login(ctx, "verify@b.co", "longenough1"); err != nil {
+		t.Fatalf("verified login = %v", err)
+	}
+
+	if token, _, err := svc.IssueEmailVerification(ctx, "nobody@b.co"); err != nil || token != "" {
+		t.Fatalf("unknown email must be silent: %q %v", token, err)
+	}
+}
+
+func TestOAuthEmailsCountAsVerified(t *testing.T) {
+	ctx := context.Background()
+	svc, _ := newSessionService()
+	svc.SetEmailVerificationRequired(true)
+	res, err := svc.OAuthLogin(ctx, "google", "sub-1", "oauth@b.co")
+	if err != nil {
+		t.Fatal(err)
+	}
+	user, err := svc.Login(ctx, "oauth@b.co", "anything")
+	if err == nil {
+		t.Fatalf("passwordless account should reject password login: %+v", user)
+	}
+	// The account itself is verified, so a reset can establish a password.
+	token, _, err := svc.IssuePasswordReset(ctx, "oauth@b.co")
+	if err != nil || token == "" {
+		t.Fatalf("reset for oauth account: %q %v", token, err)
+	}
+	if err := svc.ResetPassword(ctx, token, "longenough1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Login(ctx, "oauth@b.co", "longenough1"); err != nil {
+		t.Fatalf("login after reset: %v", err)
+	}
+	_ = res
 }

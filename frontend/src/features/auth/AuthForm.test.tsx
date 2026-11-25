@@ -141,4 +141,28 @@ describe("AuthForm", () => {
     );
     expect(screen.getByText("guarded home")).toBeInTheDocument();
   });
+
+  it("handles a verification-required registration without storing a token", async () => {
+    server.use(
+      http.post("*/api/auth/register", () =>
+        HttpResponse.json(
+          { verificationRequired: true, user: { id: "u3", email: "v@b.co" } },
+          { status: 201 },
+        ),
+      ),
+    );
+    const successSpy = vi.spyOn(toast, "success").mockReturnValue("");
+    renderRoutes("/register");
+    await userEvent.type(screen.getByLabelText("Email"), "v@b.co");
+    await userEvent.type(screen.getByLabelText("Password"), "longenoughpass");
+    await userEvent.click(screen.getByRole("button", { name: "Sign up" }));
+
+    await vi.waitFor(() =>
+      expect(successSpy).toHaveBeenCalledWith(
+        "Check your email to verify your account, then sign in.",
+      ),
+    );
+    expect(useAuth.getState().accessToken).toBeNull();
+    successSpy.mockRestore();
+  });
 });
