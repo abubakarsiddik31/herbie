@@ -26,7 +26,7 @@ import (
 
 // newRagHandlerServer is newHandlerServerFull with RagSearch wired and an
 // embedding rate on the ledger.
-func newRagHandlerServer(t *testing.T, agent *chat.Agent, convs ConvoStore, msgs MsgStore, usage *fakeUsage, ragSearch RagSearchFunc) (http.Handler, string) {
+func newRagHandlerServer(t *testing.T, agent *chat.Agent, convs ConvoStore, msgs MsgStore, usage *fakeUsage, ragSearch RagSearchFunc, docs DocStore) (http.Handler, string) {
 	t.Helper()
 	tm, err := auth.NewTokenMaker(testSecret)
 	if err != nil {
@@ -50,6 +50,7 @@ func newRagHandlerServer(t *testing.T, agent *chat.Agent, convs ConvoStore, msgs
 			ByModel: map[string]cost.Rates{"gemini-embedding-001": {ChatInputPerM: 0.15}}},
 		ModelKeys: chat.ProviderKeys{Gemini: "test"},
 		RagSearch: ragSearch,
+		Docs:      docs,
 	})
 	token, _, err := tm.Issue("u-1", time.Now())
 	if err != nil {
@@ -77,7 +78,7 @@ func TestSendMessageSearchesDocumentsAndMetersEmbedding(t *testing.T) {
 			rag.UsageReport{Embed: rag.EmbedUsage{InputTokens: 7}}, nil
 	}
 
-	h, token := newRagHandlerServer(t, agent, convs, msgs, usage, ragSearch)
+	h, token := newRagHandlerServer(t, agent, convs, msgs, usage, ragSearch, nil)
 	conv := convs.mustCreate("u-1", "")
 	rec := postMessage(t, h, token, conv.ID, "what is the capital?")
 	body := rec.Body.String()
@@ -146,7 +147,7 @@ func TestSendMessageRecordsRerankUsage(t *testing.T) {
 			}, nil
 	}
 
-	h, token := newRagHandlerServer(t, agent, convs, msgs, usage, ragSearch)
+	h, token := newRagHandlerServer(t, agent, convs, msgs, usage, ragSearch, nil)
 	conv := convs.mustCreate("u-1", "")
 	rec := postMessage(t, h, token, conv.ID, "what is the capital?")
 	if rec.Code != http.StatusOK {
@@ -188,7 +189,7 @@ func TestSendMessagePersistsSourcesOnFinalMessage(t *testing.T) {
 			rag.UsageReport{Embed: rag.EmbedUsage{InputTokens: 7}}, nil
 	}
 
-	h, token := newRagHandlerServer(t, agent, convs, msgs, usage, ragSearch)
+	h, token := newRagHandlerServer(t, agent, convs, msgs, usage, ragSearch, nil)
 	conv := convs.mustCreate("u-1", "")
 	rec := postMessage(t, h, token, conv.ID, "what is the capital?")
 	if rec.Code != http.StatusOK {
@@ -307,7 +308,7 @@ func TestConversationRagToggleRoundTrip(t *testing.T) {
 	ragSearch := func(_ context.Context, _, _ string, _ int, _ []string) ([]rag.Scored, rag.UsageReport, error) {
 		return nil, rag.UsageReport{}, nil
 	}
-	h, token := newRagHandlerServer(t, agent, convs, msgs, newFakeUsage(), ragSearch)
+	h, token := newRagHandlerServer(t, agent, convs, msgs, newFakeUsage(), ragSearch, nil)
 	conv := convs.mustCreate("u-1", "")
 
 	patch := reqJSON(http.MethodPatch, "/api/conversations/"+conv.ID, map[string]any{"ragEnabled": false})
@@ -795,6 +796,37 @@ func TestBuildDepsThreadsProjectScope(t *testing.T) {
 	}
 	if _, err := deps.ReadDoc(context.Background(), "d2", 0, 1); err == nil {
 		t.Fatal("buildDeps read must reject a non-project document")
+	}
+}
+
+func TestSendMessageScopesRetrievalToProject(t *testing.T) {
+	p1, p2 := "p-1", "p-2"
+	docs := &fakeDocs{rows: []storage.Document{
+		{ID: "d1", UserID: "u-1", ProjectID: &p1, Filename: "one.txt", Status: "ready", ChunkCount: 1},
+		{ID: "d2", UserID: "u-1", ProjectID: &p2, Filename: "two.txt", Status: "ready", ChunkCount: 1},
+	}}
+	m := testmodel.New().
+		Respond(toolCallResponse("call-1", "search_documents", json.RawMessage(`{"query":"x"}`))).
+		Respond(model.Response{Message: model.Message{Role: model.RoleAssistant, Content: "ok [1]"}, Usage: model.Usage{InputTokens: 1, OutputTokens: 1}})
+	agent := newTestAgent(t, m)
+	msgs := newFakeMsgs()
+	convs := newFakeConvos(msgs)
+	conv, err := convs.Create(context.Background(), "u-1", "Project Chat", storage.ConversationPatch{ProjectID: &p1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var gotDocs []string
+	ragSearch := func(_ context.Context, _, _ string, _ int, docIDs []string) ([]rag.Scored, rag.UsageReport, error) {
+		gotDocs = append([]string(nil), docIDs...)
+		return []rag.Scored{{Chunk: rag.Chunk{DocumentID: "d1", DocTitle: "one.txt", Content: "hit"}}}, rag.UsageReport{}, nil
+	}
+	h, token := newRagHandlerServer(t, agent, convs, msgs, newFakeUsage(), ragSearch, docs)
+	rec := postMessage(t, h, token, conv.ID, "search")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
+	}
+	if len(gotDocs) != 1 || gotDocs[0] != "d1" {
+		t.Fatalf("send scoped docs = %v, want [d1]", gotDocs)
 	}
 }
 

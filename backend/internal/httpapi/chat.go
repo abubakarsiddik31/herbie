@@ -1101,8 +1101,9 @@ func (s *Server) readDocDeps(userID, projectID string, sources *[]rag.Scored, mu
 // embed is an exact-token `embedding` usage event priced from the rate
 // table), optional rerank generation metering, and per-run source collection
 // for the sources SSE event. Nil when RAG is disabled. A project chat is
-// restricted to its project's ready documents before retrieval, so neither
-// the model, the reranker, nor the emitted sources can see another project.
+// restricted to its project's ready documents before retrieval, and results
+// are filtered again before surfacing, so neither the model nor the emitted
+// sources can see another project.
 func (s *Server) searchDeps(userID, convID, projectID string, sources *[]rag.Scored, mu ...*sync.Mutex) chat.SearchFunc {
 	if s.deps.RagSearch == nil {
 		return nil
@@ -1113,7 +1114,7 @@ func (s *Server) searchDeps(userID, convID, projectID string, sources *[]rag.Sco
 	}
 	return func(ctx context.Context, query string, k int, docIDs []string) ([]rag.Scored, int, error) {
 		effectiveDocIDs := docIDs
-		var allowed map[string]struct{}
+		var scope map[string]struct{}
 		if projectID != "" {
 			if s.deps.Docs == nil {
 				return nil, 0, fmt.Errorf("project document scope is unavailable")
@@ -1122,18 +1123,24 @@ func (s *Server) searchDeps(userID, convID, projectID string, sources *[]rag.Sco
 			if err != nil {
 				return nil, 0, fmt.Errorf("list project documents: %w", err)
 			}
-			allowed = make(map[string]struct{}, len(ids))
+			scope = make(map[string]struct{}, len(ids))
 			for _, id := range ids {
-				allowed[id] = struct{}{}
+				scope[id] = struct{}{}
 			}
 			if len(docIDs) > 0 {
 				intersected := make([]string, 0, len(docIDs))
 				for _, id := range docIDs {
-					if _, ok := allowed[id]; ok {
+					if _, ok := scope[id]; ok {
 						intersected = append(intersected, id)
 					}
 				}
 				effectiveDocIDs = intersected
+				// Guard against retrieval over-returning within the same
+				// project when the model narrowed to specific documents.
+				scope = make(map[string]struct{}, len(intersected))
+				for _, id := range intersected {
+					scope[id] = struct{}{}
+				}
 			} else {
 				effectiveDocIDs = ids
 			}
@@ -1150,12 +1157,12 @@ func (s *Server) searchDeps(userID, convID, projectID string, sources *[]rag.Sco
 		if err != nil {
 			return nil, 0, err
 		}
-		if allowed != nil {
-			// Defense in depth: never surface a chunk outside the project,
+		if scope != nil {
+			// Defense in depth: never surface a chunk outside the scoped set,
 			// even if retrieval's filter is buggy.
 			filtered := scored[:0]
 			for _, sc := range scored {
-				if _, ok := allowed[sc.Chunk.DocumentID]; ok {
+				if _, ok := scope[sc.Chunk.DocumentID]; ok {
 					filtered = append(filtered, sc)
 				}
 			}

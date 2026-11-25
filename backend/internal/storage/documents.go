@@ -114,7 +114,7 @@ func (d *Documents) ListByProject(ctx context.Context, projectID, userID string)
 // project; non-ready rows have no vectors and are excluded.
 func (d *Documents) ReadyIDsByProject(ctx context.Context, projectID, userID string) ([]string, error) {
 	rows, err := d.pool.Query(ctx,
-		`SELECT id FROM documents WHERE user_id = $1 AND project_id = $2 AND status = 'ready' ORDER BY created_at`,
+		`SELECT id FROM documents WHERE user_id = $1 AND project_id = $2 AND status = 'ready' ORDER BY created_at, id`,
 		userID, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("list project document ids: %w", err)

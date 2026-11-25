@@ -138,7 +138,31 @@ func TestReadyIDsByProjectScopesAndFiltersStatus(t *testing.T) {
 	if other, err := repo.ReadyIDsByProject(ctx, p2.ID, user.ID); err != nil || len(other) != 1 {
 		t.Fatalf("p2 ready ids = %v err=%v", other, err)
 	}
-	if none, err := repo.ReadyIDsByProject(ctx, p1.ID, "00000000-0000-0000-0000-000000000000"); err != nil || len(none) != 0 {
-		t.Fatalf("cross-user ids = %v err=%v", none, err)
+	other, err := users.Create(ctx, "docs-ids-other@test.dev", "hash")
+	if err != nil {
+		other, err = users.ByEmail(ctx, "docs-ids-other@test.dev")
+	}
+	if err != nil {
+		t.Fatalf("seed other user: %v", err)
+	}
+	p3, err := projects.Create(ctx, Project{UserID: other.ID, Name: "P3"})
+	if err != nil {
+		t.Fatalf("create p3: %v", err)
+	}
+	otherDoc, err := repo.Create(ctx, Document{
+		UserID: other.ID, ObjectKey: other.ID + "/x.txt", Filename: "x.txt",
+		Mime: "text/plain", SizeBytes: 1, ProjectID: &p3.ID,
+	})
+	if err != nil {
+		t.Fatalf("create other doc: %v", err)
+	}
+	if err := repo.SetStatus(ctx, otherDoc.ID, other.ID, "ready", "", 1); err != nil {
+		t.Fatalf("ready other doc: %v", err)
+	}
+	if got, err := repo.ReadyIDsByProject(ctx, p3.ID, other.ID); err != nil || len(got) != 1 || got[0] != otherDoc.ID {
+		t.Fatalf("other user's ids = %v err=%v", got, err)
+	}
+	if cross, err := repo.ReadyIDsByProject(ctx, p1.ID, other.ID); err != nil || len(cross) != 0 {
+		t.Fatalf("cross-user ids = %v err=%v", cross, err)
 	}
 }
