@@ -30,6 +30,8 @@ afterEach(() => {
   server.resetHandlers();
   useAuth.getState().clear();
   vi.restoreAllMocks();
+  delete (URL as unknown as { createObjectURL?: unknown }).createObjectURL;
+  delete (URL as unknown as { revokeObjectURL?: unknown }).revokeObjectURL;
 });
 afterAll(() => server.close());
 

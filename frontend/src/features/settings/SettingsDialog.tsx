@@ -1022,7 +1022,11 @@ export function SettingsDialog({ open, onOpenChange, defaultTab = "general" }: P
                     <Button
                       variant="destructive"
                       size="sm"
-                      onClick={() => setDeleteOpen((open) => !open)}
+                      onClick={() => {
+                        setDeleteOpen((open) => !open);
+                        setDeletePassword("");
+                        setDeleteConfirm("");
+                      }}
                     >
                       Delete account
                     </Button>
@@ -1051,7 +1055,11 @@ export function SettingsDialog({ open, onOpenChange, defaultTab = "general" }: P
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={() => setDeleteOpen(false)}
+                          onClick={() => {
+                            setDeleteOpen(false);
+                            setDeletePassword("");
+                            setDeleteConfirm("");
+                          }}
                           disabled={deleteAccount.isPending}
                         >
                           Cancel
@@ -1078,7 +1086,7 @@ export function SettingsDialog({ open, onOpenChange, defaultTab = "general" }: P
                             )
                           }
                         >
-                          {deleteAccount.isPending ? "Deleting…" : "Delete account"}
+                          {deleteAccount.isPending ? "Deleting…" : "Permanently delete"}
                         </Button>
                       </div>
                     </div>

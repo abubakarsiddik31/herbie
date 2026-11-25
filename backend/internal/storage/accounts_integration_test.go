@@ -55,6 +55,17 @@ func TestAccountExportIncludesOwnedDataAndOmitsSecrets(t *testing.T) {
 	if _, err := NewSavedPrompts(pool).Create(ctx, user.ID, "p", "body", 100); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO workflows (user_id, name, nodes, edges, webhook_secret)
+		 VALUES ($1, 'w', $2, '[]', 'whsec')`,
+		user.ID, `[{"headers":{"Authorization":"Bearer node-secret"}}]`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO conversation_shares (conversation_id, token_hash) VALUES ($1, 'share-hash')`,
+		conv.ID); err != nil {
+		t.Fatal(err)
+	}
 
 	var buf bytes.Buffer
 	files, err := NewAccounts(pool).WriteExport(ctx, user.ID, &buf)
@@ -62,7 +73,7 @@ func TestAccountExportIncludesOwnedDataAndOmitsSecrets(t *testing.T) {
 		t.Fatal(err)
 	}
 	raw := buf.String()
-	for _, forbidden := range []string{"password_hash", "search_vector", "encrypted_key", "token_hash"} {
+	for _, forbidden := range []string{"password_hash", "search_vector", "encrypted_key", "token_hash", "webhook_secret", "whsec", "node-secret", "share-hash", "Authorization"} {
 		if strings.Contains(raw, forbidden) {
 			t.Fatalf("export leaked %q", forbidden)
 		}
@@ -71,7 +82,7 @@ func TestAccountExportIncludesOwnedDataAndOmitsSecrets(t *testing.T) {
 	if err := json.Unmarshal(buf.Bytes(), &bundle); err != nil {
 		t.Fatalf("invalid export json: %v", err)
 	}
-	for _, key := range []string{"profile", "conversations", "messages", "projects", "documents", "memories", "savedPrompts"} {
+	for _, key := range []string{"profile", "conversations", "messages", "projects", "documents", "memories", "savedPrompts", "pendingToolCalls", "auditLog"} {
 		if _, ok := bundle[key]; !ok {
 			t.Fatalf("missing %q in %v", key, keys(bundle))
 		}

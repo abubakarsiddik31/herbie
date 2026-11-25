@@ -2,9 +2,11 @@ package storage
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"github.com/abubakarsiddik31/golem-chatbot/internal/auth"
@@ -78,7 +80,8 @@ var exportTables = []struct {
 		FROM workflows WHERE user_id = $1
 	) t`},
 	{"workflowRuns", `SELECT row_to_json(t) FROM (
-		SELECT id, workflow_id, status, trigger_source, error, duration_ms, created_at, finished_at
+		SELECT id, workflow_id, status, trigger_source, input_data, output_data, node_results,
+		       error, duration_ms, created_at, finished_at
 		FROM workflow_runs WHERE user_id = $1
 	) t`},
 	{"workflowCredentials", `SELECT row_to_json(t) FROM (
@@ -114,6 +117,60 @@ var exportTables = []struct {
 		FROM conversation_shares s JOIN conversations c ON c.id = s.conversation_id
 		WHERE c.user_id = $1
 	) t`},
+	{"pendingToolCalls", `SELECT row_to_json(t) FROM (
+		SELECT call_id, conversation_id, tool_name, args, reason, status, created_at
+		FROM pending_tool_calls WHERE user_id = $1
+	) t`},
+	{"auditLog", `SELECT row_to_json(t) FROM (
+		SELECT caller_type, caller_id, tool_name, action, status, error, duration_ms, created_at
+		FROM tool_audit_logs WHERE user_id = $1
+	) t`},
+}
+
+// secretKeys are removed recursively from exported JSON values. Keys are
+// normalized to lowercase with dashes as underscores.
+var secretKeys = map[string]bool{
+	"authorization": true, "proxy_authorization": true,
+	"api_key": true, "apikey": true, "access_token": true, "refresh_token": true,
+	"token": true, "tokens": true, "secret": true, "client_secret": true, "password": true,
+	"passwd": true, "webhook_secret": true, "headers": true, "cookie": true,
+	"cookies": true, "set_cookie": true, "encrypted_key": true, "private_key": true,
+	"bearer": true,
+}
+
+func normalizeKey(key string) string {
+	key = strings.ToLower(strings.TrimSpace(key))
+	return strings.ReplaceAll(key, "-", "_")
+}
+
+func redactValue(v any) any {
+	switch value := v.(type) {
+	case map[string]any:
+		for key, child := range value {
+			if secretKeys[normalizeKey(key)] {
+				delete(value, key)
+				continue
+			}
+			value[key] = redactValue(child)
+		}
+		return value
+	case []any:
+		for i, child := range value {
+			value[i] = redactValue(child)
+		}
+		return value
+	default:
+		return v
+	}
+}
+
+// redactJSON removes known secret-bearing fields from one row's JSON.
+func redactJSON(raw []byte) ([]byte, error) {
+	var value any
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return nil, err
+	}
+	return json.Marshal(redactValue(value))
 }
 
 func writeJSONArray(ctx context.Context, pool *pgxpool.Pool, w io.Writer, key, query, userID string) error {
@@ -131,13 +188,17 @@ func writeJSONArray(ctx context.Context, pool *pgxpool.Pool, w io.Writer, key, q
 		if err := rows.Scan(&raw); err != nil {
 			return fmt.Errorf("export %s row: %w", key, err)
 		}
+		clean, err := redactJSON(raw)
+		if err != nil {
+			return fmt.Errorf("redact %s row: %w", key, err)
+		}
 		if !first {
 			if _, err := w.Write([]byte(",")); err != nil {
 				return err
 			}
 		}
 		first = false
-		if _, err := w.Write(raw); err != nil {
+		if _, err := w.Write(clean); err != nil {
 			return err
 		}
 	}

@@ -22,12 +22,16 @@ import (
 type fakeAccount struct {
 	exportJSON []byte
 	files      []storage.ExportFile
+	exportErr  error
 	deleteErr  error
 	deletedID  string
 	password   string
 }
 
 func (f *fakeAccount) WriteExport(_ context.Context, _ string, w io.Writer) ([]storage.ExportFile, error) {
+	if f.exportErr != nil {
+		return nil, f.exportErr
+	}
 	_, _ = w.Write(f.exportJSON)
 	return f.files, nil
 }
@@ -149,6 +153,25 @@ func TestAccountExportSkipsMissingObject(t *testing.T) {
 		rc.Close()
 		if !strings.Contains(string(b), "gone.txt") {
 			t.Fatalf("manifest missing skipped file: %s", b)
+		}
+	}
+}
+
+func TestAccountExportErrors(t *testing.T) {
+	for _, tc := range []struct {
+		err  error
+		code int
+	}{
+		{storage.ErrNotFound, http.StatusNotFound},
+		{io.ErrUnexpectedEOF, http.StatusInternalServerError},
+	} {
+		h, token, _ := newAccountHandler(t, &fakeAccount{exportErr: tc.err}, &fakeDocs{}, &fakeVectors{}, &fakeObjects{})
+		req := httptest.NewRequest(http.MethodGet, "/api/account/export", nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != tc.code {
+			t.Fatalf("%v -> %d, want %d", tc.err, rec.Code, tc.code)
 		}
 	}
 }

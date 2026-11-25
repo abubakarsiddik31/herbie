@@ -73,14 +73,26 @@ func (s *Server) handleExportAccount(w http.ResponseWriter, r *http.Request) {
 	}
 	files, err := s.deps.Account.WriteExport(r.Context(), userID, entry)
 	if err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "not_found", "account not found")
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "internal", "could not build export")
 		return
 	}
-	index, err := zw.Create("documents/index.json")
-	if err == nil {
-		_ = json.NewEncoder(index).Encode(map[string]any{"files": files})
+	if files == nil {
+		files = []storage.ExportFile{}
 	}
-	var skipped []string
+	index, err := zw.Create("documents/index.json")
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "could not prepare export")
+		return
+	}
+	if err := json.NewEncoder(index).Encode(map[string]any{"files": files}); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "could not build export")
+		return
+	}
+	skipped := []string{}
 	for _, f := range files {
 		if s.deps.Objects == nil || f.ObjectKey == "" {
 			skipped = append(skipped, f.Filename)
@@ -106,11 +118,17 @@ func (s *Server) handleExportAccount(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if manifest, err := zw.Create("export-manifest.json"); err == nil {
-		_ = json.NewEncoder(manifest).Encode(map[string]any{
-			"generatedAt":  time.Now().UTC().Format(time.RFC3339),
-			"skippedFiles": skipped,
-		})
+	manifest, err := zw.Create("export-manifest.json")
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "could not finish export")
+		return
+	}
+	if err := json.NewEncoder(manifest).Encode(map[string]any{
+		"generatedAt":  time.Now().UTC().Format(time.RFC3339),
+		"skippedFiles": skipped,
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "could not finish export")
+		return
 	}
 	if err := zw.Close(); err != nil {
 		writeError(w, http.StatusInternalServerError, "internal", "could not finish export")
@@ -154,10 +172,10 @@ func (s *Server) handleDeleteAccount(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "confirm_required", `type "DELETE" to confirm`)
 		return
 	}
-	if !s.allowAuth(w, r, "delete", "") {
+	userID, _ := userIDFrom(r.Context())
+	if !s.allowAuth(w, r, "delete", userID) {
 		return
 	}
-	userID, _ := userIDFrom(r.Context())
 
 	var docs []storage.Document
 	if s.deps.Docs != nil {
@@ -178,15 +196,25 @@ func (s *Server) handleDeleteAccount(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal", "could not delete account")
 		return
 	}
+	s.clearRefreshCookie(w, r)
+	// The account row is gone; finish external cleanup even if the client
+	// disconnects, and log failures for operators (there is no durable
+	// retry queue in this single-process deployment).
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 30*time.Second)
+	defer cancel()
 	for _, doc := range docs {
 		if doc.ObjectKey != "" && s.deps.Objects != nil {
-			_ = s.deps.Objects.Delete(r.Context(), doc.ObjectKey)
-			_ = s.deps.Objects.Delete(r.Context(), string(rag.ParsedObjectKey(doc.ObjectKey)))
+			for _, key := range []string{doc.ObjectKey, string(rag.ParsedObjectKey(doc.ObjectKey))} {
+				if err := s.deps.Objects.Delete(cleanupCtx, key); err != nil && s.deps.Log != nil {
+					s.deps.Log.Warn("account cleanup: object delete failed", "key", key, "err", err)
+				}
+			}
 		}
 		if s.deps.Vectors != nil {
-			_ = s.deps.Vectors.DeleteDocument(r.Context(), doc.ID)
+			if err := s.deps.Vectors.DeleteDocument(cleanupCtx, doc.ID); err != nil && s.deps.Log != nil {
+				s.deps.Log.Warn("account cleanup: vector delete failed", "document", doc.ID, "err", err)
+			}
 		}
 	}
-	s.clearRefreshCookie(w, r)
 	w.WriteHeader(http.StatusNoContent)
 }
