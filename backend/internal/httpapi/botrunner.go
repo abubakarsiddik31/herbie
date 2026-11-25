@@ -372,7 +372,7 @@ func (r *botRunner) execute(parent context.Context, run *storage.BotRun) {
 
 	var sources []rag.Scored
 	var sourcesMu sync.Mutex
-	deps := s.buildDeps(run.UserID, run.ConversationID, &sources, &sourcesMu, bot)
+	deps := s.buildDeps(run.UserID, run.ConversationID, projectScope(conv), &sources, &sourcesMu, bot)
 
 	sink := &runSink{}
 	runCtx, cancelRun := context.WithCancel(parent)

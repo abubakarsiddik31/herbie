@@ -262,3 +262,37 @@ func TestUploadProjectFileAuth(t *testing.T) {
 		t.Fatalf("expected 404 not found for nonexistent project, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
+
+func TestListProjectFilesEmptyProjectDoesNotFallBack(t *testing.T) {
+	p1 := "p-1"
+	docs := &fakeDocs{rows: []storage.Document{
+		{ID: "d1", UserID: "u-1", Filename: "global.txt", Status: "ready"},
+		{ID: "d2", UserID: "u-1", ProjectID: &p1, Filename: "project.txt", Status: "ready"},
+	}}
+	srv := &Server{deps: ServerDeps{Docs: docs}}
+
+	list := func(projectID string) []documentJSON {
+		r := httptest.NewRequest(http.MethodGet, "/api/projects/"+projectID+"/files", nil)
+		r.SetPathValue("id", projectID)
+		r = r.WithContext(withUser(r.Context(), "u-1"))
+		w := httptest.NewRecorder()
+		srv.handleListProjectFiles(w, r)
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d: %s", w.Code, w.Body.String())
+		}
+		var resp struct {
+			Files []documentJSON `json:"files"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+			t.Fatal(err)
+		}
+		return resp.Files
+	}
+
+	if got := list(p1); len(got) != 1 || got[0].ID != "d2" {
+		t.Fatalf("project files: %+v", got)
+	}
+	if got := list("p-empty"); len(got) != 0 {
+		t.Fatalf("empty project must not fall back to global files: %+v", got)
+	}
+}

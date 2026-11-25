@@ -310,7 +310,7 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 	if err := s.deps.Convos.SetActiveLeaf(ctx, convID, userID, promptID); err != nil {
 		s.deps.Log.Error("could not set active leaf", "err", err, "conv_id", convID)
 	}
-	s.runTurn(ctx, userID, convID, spec, conv.BotID, historyFrom(path, len(path)), modelContent, parts, knownRows(path), promptID, w)
+	s.runTurn(ctx, userID, convID, projectScope(conv), spec, conv.BotID, historyFrom(path, len(path)), modelContent, parts, knownRows(path), promptID, w)
 }
 
 // unarchiveForTurn clears the archived flag before a new turn is persisted.
@@ -399,7 +399,7 @@ func canonicalJSON(raw []byte) string {
 // remember-tool writes to the bot's memory instead of the user's (nil =
 // plain conversation). The sink opens only after those steps so failures
 // stay plain HTTP errors.
-func (s *Server) runTurn(ctx context.Context, userID, convID string, spec chat.RunSpec, botID *string, history []model.Message, prompt string, parts []model.Part, known map[string]bool, startParentID string, w http.ResponseWriter) {
+func (s *Server) runTurn(ctx context.Context, userID, convID, projectID string, spec chat.RunSpec, botID *string, history []model.Message, prompt string, parts []model.Part, known map[string]bool, startParentID string, w http.ResponseWriter) {
 	spec, history, compacted := s.maybeCompact(ctx, userID, convID, spec, history)
 	// Tools load before the SSE sink goes out so failures can still be
 	// plain HTTP errors. One broken config skips that tool only (logged by
@@ -441,7 +441,7 @@ func (s *Server) runTurn(ctx context.Context, userID, convID string, spec chat.R
 	}
 	var sources []rag.Scored
 	var sourcesMu sync.Mutex
-	outcome, err := s.agentFor(ctx, userID).Run(ctx, s.buildDeps(userID, convID, &sources, &sourcesMu, s.botFor(ctx, userID, botID)),
+	outcome, err := s.agentFor(ctx, userID).Run(ctx, s.buildDeps(userID, convID, projectID, &sources, &sourcesMu, s.botFor(ctx, userID, botID)),
 		history, prompt, parts, sink, tools, spec)
 	if err != nil {
 		s.persistFailure(ctx, userID, convID, spec, startParentID, nil, -1, err, sink)
@@ -451,22 +451,33 @@ func (s *Server) runTurn(ctx context.Context, userID, convID string, spec chat.R
 	s.settleRun(ctx, userID, convID, spec, outcome, sink, known, startParentID, sourceJSON(sources))
 }
 
+// projectScope returns the conversation's project ID, or "" for a chat
+// outside any project. Retrieval tools scope to it so a project chat can
+// never search or read another project's documents.
+func projectScope(conv storage.Conversation) string {
+	if conv.ProjectID == nil {
+		return ""
+	}
+	return *conv.ProjectID
+}
+
 // buildDeps assembles the per-run tool identity for one conversation turn:
 // retrieval metering (searchDeps), doc readers, per-bot memory routing
 // (saveMemoryFor), and source collection. The send path (runTurn), the
 // approvals resume, and the background bot runner share it so metering and
-// memory routing stay identical everywhere. sources/mu collect the run's
-// retrieved chunks; bot carries the run's bot identity (nil = plain
-// conversation) — its ID routes remember-writes and identifies the run's
-// file workspace on chat.Deps.
-func (s *Server) buildDeps(userID, convID string, sources *[]rag.Scored, sourcesMu *sync.Mutex, bot *storage.Bot) chat.Deps {
+// memory routing stay identical everywhere. projectID comes from the loaded
+// conversation ("" = no project) and scopes retrieval to that project.
+// sources/mu collect the run's retrieved chunks; bot carries the run's bot
+// identity (nil = plain conversation) — its ID routes remember-writes and
+// identifies the run's file workspace on chat.Deps.
+func (s *Server) buildDeps(userID, convID, projectID string, sources *[]rag.Scored, sourcesMu *sync.Mutex, bot *storage.Bot) chat.Deps {
 	var botID *string
 	deps := chat.Deps{
 		UserID:         userID,
 		ConversationID: convID,
-		Search:         s.searchDeps(userID, convID, sources, sourcesMu),
-		ListDocs:       s.listDocsDeps(userID, convID),
-		ReadDoc:        s.readDocDeps(userID, convID, sources, sourcesMu),
+		Search:         s.searchDeps(userID, convID, projectID, sources, sourcesMu),
+		ListDocs:       s.listDocsDeps(userID, projectID),
+		ReadDoc:        s.readDocDeps(userID, projectID, sources, sourcesMu),
 		RecordSearch:   s.recordSearchFunc(userID, convID),
 		AddWebSources:  s.webSourcesDeps(sources, sourcesMu),
 	}
@@ -958,19 +969,19 @@ func (s *Server) calendarClient(ctx context.Context, userID string) chat.Calenda
 	}
 }
 
-func (s *Server) listDocsDeps(userID, convID string) chat.ListDocsFunc {
+func (s *Server) listDocsDeps(userID, projectID string) chat.ListDocsFunc {
 	if s.deps.Docs == nil {
 		return nil
 	}
 	return func(ctx context.Context) ([]chat.DocumentInfo, error) {
 		var docs []storage.Document
 		var err error
-		if s.deps.Convos != nil && convID != "" {
-			if conv, cerr := s.deps.Convos.ByID(ctx, convID, userID); cerr == nil && conv.ProjectID != nil {
-				docs, err = s.deps.Docs.ListByProject(ctx, *conv.ProjectID, userID)
-			}
-		}
-		if docs == nil && err == nil {
+		if projectID != "" {
+			// A project chat sees only its project's documents; an empty
+			// project stays empty instead of falling back to the user's
+			// whole library.
+			docs, err = s.deps.Docs.ListByProject(ctx, projectID, userID)
+		} else {
 			docs, err = s.deps.Docs.List(ctx, userID)
 		}
 		if err != nil {
@@ -991,7 +1002,7 @@ func (s *Server) listDocsDeps(userID, convID string) chat.ListDocsFunc {
 	}
 }
 
-func (s *Server) readDocDeps(userID, convID string, sources *[]rag.Scored, mu ...*sync.Mutex) chat.ReadDocFunc {
+func (s *Server) readDocDeps(userID, projectID string, sources *[]rag.Scored, mu ...*sync.Mutex) chat.ReadDocFunc {
 	if s.deps.Vectors == nil || s.deps.Docs == nil {
 		return nil
 	}
@@ -1002,6 +1013,11 @@ func (s *Server) readDocDeps(userID, convID string, sources *[]rag.Scored, mu ..
 	return func(ctx context.Context, documentID string, offset, limit int) (chat.ReadDocResult, error) {
 		doc, err := s.deps.Docs.Get(ctx, documentID, userID)
 		if err != nil {
+			return chat.ReadDocResult{}, fmt.Errorf("document %q not found", documentID)
+		}
+		if projectID != "" && (doc.ProjectID == nil || *doc.ProjectID != projectID) {
+			// Same message as a missing row: a project chat must not learn
+			// that another project's document exists.
 			return chat.ReadDocResult{}, fmt.Errorf("document %q not found", documentID)
 		}
 		if doc.Status != "ready" {
@@ -1084,8 +1100,10 @@ func (s *Server) readDocDeps(userID, convID string, sources *[]rag.Scored, mu ..
 // searchDeps wraps the raw RagSearch with embedding metering (every query
 // embed is an exact-token `embedding` usage event priced from the rate
 // table), optional rerank generation metering, and per-run source collection
-// for the sources SSE event. Nil when RAG is disabled.
-func (s *Server) searchDeps(userID, convID string, sources *[]rag.Scored, mu ...*sync.Mutex) chat.SearchFunc {
+// for the sources SSE event. Nil when RAG is disabled. A project chat is
+// restricted to its project's ready documents before retrieval, so neither
+// the model, the reranker, nor the emitted sources can see another project.
+func (s *Server) searchDeps(userID, convID, projectID string, sources *[]rag.Scored, mu ...*sync.Mutex) chat.SearchFunc {
 	if s.deps.RagSearch == nil {
 		return nil
 	}
@@ -1095,11 +1113,53 @@ func (s *Server) searchDeps(userID, convID string, sources *[]rag.Scored, mu ...
 	}
 	return func(ctx context.Context, query string, k int, docIDs []string) ([]rag.Scored, int, error) {
 		effectiveDocIDs := docIDs
+		var allowed map[string]struct{}
+		if projectID != "" {
+			if s.deps.Docs == nil {
+				return nil, 0, fmt.Errorf("project document scope is unavailable")
+			}
+			ids, err := s.deps.Docs.ReadyIDsByProject(ctx, projectID, userID)
+			if err != nil {
+				return nil, 0, fmt.Errorf("list project documents: %w", err)
+			}
+			allowed = make(map[string]struct{}, len(ids))
+			for _, id := range ids {
+				allowed[id] = struct{}{}
+			}
+			if len(docIDs) > 0 {
+				intersected := make([]string, 0, len(docIDs))
+				for _, id := range docIDs {
+					if _, ok := allowed[id]; ok {
+						intersected = append(intersected, id)
+					}
+				}
+				effectiveDocIDs = intersected
+			} else {
+				effectiveDocIDs = ids
+			}
+			// An empty DocIDs slice is the upstream "all documents" sentinel.
+			// A project with no ready documents (or only out-of-project IDs)
+			// must stop here instead of searching the user's whole corpus.
+			if len(effectiveDocIDs) == 0 {
+				return nil, 0, nil
+			}
+		}
 		start := time.Now()
 		scored, rep, err := s.deps.RagSearch(ctx, userID, query, k, effectiveDocIDs)
 		dur := time.Since(start).Milliseconds()
 		if err != nil {
 			return nil, 0, err
+		}
+		if allowed != nil {
+			// Defense in depth: never surface a chunk outside the project,
+			// even if retrieval's filter is buggy.
+			filtered := scored[:0]
+			for _, sc := range scored {
+				if _, ok := allowed[sc.Chunk.DocumentID]; ok {
+					filtered = append(filtered, sc)
+				}
+			}
+			scored = filtered
 		}
 		s.recordSearch(ctx, userID, convID, query, "document_search", "rag", len(scored), dur)
 

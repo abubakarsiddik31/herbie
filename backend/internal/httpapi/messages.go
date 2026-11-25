@@ -122,7 +122,7 @@ func (s *Server) handleEditMessage(w http.ResponseWriter, r *http.Request) {
 		s.deps.Log.Error("could not set active leaf", "err", err, "conv_id", convID)
 	}
 	_ = s.deps.Convos.Touch(ctx, convID)
-	s.runTurn(ctx, userID, convID, spec, conv.BotID, historyFrom(path, idx), payload.Content, payload.Parts, knownRows(path), siblingID, w)
+	s.runTurn(ctx, userID, convID, projectScope(conv), spec, conv.BotID, historyFrom(path, idx), payload.Content, payload.Parts, knownRows(path), siblingID, w)
 }
 
 // handleRegenerate creates a sibling assistant chain for the last user row on
@@ -205,7 +205,7 @@ func (s *Server) handleRegenerate(w http.ResponseWriter, r *http.Request) {
 	_ = s.deps.Convos.Touch(ctx, convID)
 	s.unarchiveForTurn(ctx, conv)
 	modelContent := composeUserContent(path[lastUser].Content, path[lastUser].QuoteText)
-	s.runTurn(ctx, userID, convID, spec, conv.BotID, historyFrom(path, lastUser), modelContent, payload.Parts, knownRows(path), path[lastUser].ID, w)
+	s.runTurn(ctx, userID, convID, projectScope(conv), spec, conv.BotID, historyFrom(path, lastUser), modelContent, payload.Parts, knownRows(path), path[lastUser].ID, w)
 }
 
 // handleDeleteMessage deletes one message's whole branch (subtree). Deleting

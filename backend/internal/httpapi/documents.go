@@ -22,6 +22,7 @@ type DocStore interface {
 	Get(ctx context.Context, id, userID string) (storage.Document, error)
 	List(ctx context.Context, userID string) ([]storage.Document, error)
 	ListByProject(ctx context.Context, projectID, userID string) ([]storage.Document, error)
+	ReadyIDsByProject(ctx context.Context, projectID, userID string) ([]string, error)
 	SetStatus(ctx context.Context, id, userID, status, errMsg string, chunkCount int) error
 	Delete(ctx context.Context, id, userID string) error
 }
