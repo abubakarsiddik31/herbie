@@ -180,6 +180,15 @@ func (f *FakeRefreshStore) RevokeAll(_ context.Context, userID string) error {
 	return nil
 }
 
+func (f *FakeRefreshStore) SessionLive(_ context.Context, userID, sessionID string) (bool, error) {
+	for _, rec := range f.tokens {
+		if rec.UserID == userID && rec.SessionID == sessionID && !rec.Revoked && time.Now().Before(rec.ExpiresAt) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func (f *FakeRefreshStore) ListSessions(_ context.Context, userID string) ([]auth.Session, error) {
 	byID := map[string]*fakeRefresh{}
 	for _, rec := range f.tokens {

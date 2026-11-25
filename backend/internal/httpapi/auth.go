@@ -69,9 +69,12 @@ func prefixContains(prefixes []netip.Prefix, addr netip.Addr) bool {
 // allowAuth enforces the auth limiter and writes 429 when it trips. Keys
 // cover the client IP plus, for account-scoped actions, the email.
 func (s *Server) allowAuth(w http.ResponseWriter, r *http.Request, scope, email string) bool {
-	keys := []string{scope + "|" + s.clientIP(r)}
+	ip := s.clientIP(r)
+	keys := []string{scope + "|" + ip}
 	if email != "" {
-		keys = append(keys, scope+"|email|"+strings.ToLower(strings.TrimSpace(email)))
+		// Keep the account key scoped to the caller's IP: a global per-email
+		// bucket would let anyone lock a known account out of login/reset.
+		keys = append(keys, scope+"|"+ip+"|email|"+strings.ToLower(strings.TrimSpace(email)))
 	}
 	ok, retry := s.authLimiter.Allow(keys...)
 	if ok {
@@ -96,9 +99,8 @@ func (s *Server) authLink(path, token string) string {
 		return ""
 	}
 	u.Path = strings.TrimSuffix(u.Path, "/") + path
-	q := u.Query()
-	q.Set("token", token)
-	u.RawQuery = q.Encode()
+	// Fragments never reach the server, logs, or Referer headers.
+	u.Fragment = "token=" + url.QueryEscape(token)
 	return u.String()
 }
 
@@ -293,7 +295,11 @@ func (s *Server) handleVerifyEmail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.deps.Auth.VerifyEmail(r.Context(), req.Token); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_token", "this verification link is invalid or has expired")
+		if errors.Is(err, auth.ErrInvalidToken) {
+			writeError(w, http.StatusBadRequest, "invalid_token", "this verification link is invalid or has expired")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "internal", "could not verify email")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

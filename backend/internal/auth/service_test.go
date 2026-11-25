@@ -257,6 +257,10 @@ func TestSessionsAreIsolatedAndLogoutIsCurrentOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	c, err := svc.Login(ctx, "iso@b.co", "longenough1", auth.SessionMeta{UserAgent: "C", IP: "3.3.3.3"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if a.SessionID == b.SessionID {
 		t.Fatal("each login must get its own session")
 	}
@@ -281,18 +285,22 @@ func TestSessionsAreIsolatedAndLogoutIsCurrentOnly(t *testing.T) {
 	}
 
 	sessions, err := svc.Sessions(ctx, a.User.ID)
-	if err != nil || len(sessions) != 1 || sessions[0].ID != b.SessionID {
+	if err != nil || len(sessions) != 2 {
 		t.Fatalf("sessions = %+v err=%v", sessions, err)
 	}
-	if sessions[0].UserAgent != "B" || sessions[0].IP != "2.2.2.2" {
-		t.Fatalf("session metadata: %+v", sessions[0])
+	byID := map[string]auth.Session{}
+	for _, sess := range sessions {
+		byID[sess.ID] = sess
+	}
+	if byID[b.SessionID].UserAgent != "B" || byID[b.SessionID].IP != "2.2.2.2" {
+		t.Fatalf("session metadata: %+v", byID[b.SessionID])
 	}
 
 	if err := svc.Logout(ctx, b2.RefreshToken); err != nil {
 		t.Fatal(err)
 	}
 	sessions, _ = svc.Sessions(ctx, a.User.ID)
-	if len(sessions) != 0 {
+	if len(sessions) != 1 || sessions[0].ID != c.SessionID {
 		t.Fatalf("logout should clear only the current session, left %+v", sessions)
 	}
 }

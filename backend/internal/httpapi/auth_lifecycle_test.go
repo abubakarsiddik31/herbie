@@ -260,8 +260,8 @@ func TestSessionListAndRevoke(t *testing.T) {
 	if len(cookies) == 0 || cookies[0].MaxAge >= 0 {
 		t.Fatalf("revoke all should clear the refresh cookie: %+v", cookies)
 	}
-	if left := list(tokenB).Sessions; len(left) != 0 {
-		t.Fatalf("after revoke all: %+v", left)
+	if rec := doJSON(h, http.MethodGet, "/api/account/sessions", tokenB, nil); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("revoked access token must be rejected: %d %s", rec.Code, rec.Body.String())
 	}
 	_ = tokenA
 }

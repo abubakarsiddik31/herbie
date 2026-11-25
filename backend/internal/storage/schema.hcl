@@ -265,10 +265,6 @@ table "auth_tokens" {
     type = timestamptz
     null = false
   }
-  column "used_at" {
-    type = timestamptz
-    null = true
-  }
   column "created_at" {
     type    = timestamptz
     null    = false
@@ -285,6 +281,10 @@ table "auth_tokens" {
   index "auth_tokens_token_hash_key" {
     unique  = true
     columns = [column.token_hash]
+  }
+  index "auth_tokens_user_purpose_key" {
+    unique  = true
+    columns = [column.user_id, column.purpose]
   }
   index "idx_auth_tokens_user_purpose" {
     columns = [column.user_id, column.purpose]

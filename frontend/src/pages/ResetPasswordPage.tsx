@@ -1,5 +1,5 @@
-import { useState, type FormEvent } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router";
+import { useEffect, useState, type FormEvent } from "react";
+import { Link, useLocation, useNavigate, useSearchParams } from "react-router";
 import { toast } from "sonner";
 import { ApiError, apiFetch } from "@/lib/api";
 import { AuthPageShell } from "@/features/auth/AuthPageShell";
@@ -9,11 +9,23 @@ import { Label } from "@/components/ui/label";
 
 export function ResetPasswordPage() {
   const [params] = useSearchParams();
-  const token = params.get("token") ?? "";
+  const location = useLocation();
+  const [token] = useState(
+    () =>
+      new URLSearchParams(location.hash.replace(/^#/, "")).get("token") ??
+      params.get("token") ??
+      "",
+  );
   const navigate = useNavigate();
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [pending, setPending] = useState(false);
+
+  useEffect(() => {
+    if (location.hash || params.get("token")) {
+      window.history.replaceState(null, "", window.location.pathname);
+    }
+  }, [location.hash, params]);
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();

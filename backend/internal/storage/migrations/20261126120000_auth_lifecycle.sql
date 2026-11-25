@@ -20,9 +20,9 @@ CREATE TABLE auth_tokens (
     token_hash text NOT NULL UNIQUE,
     purpose    text NOT NULL CHECK (purpose IN ('verify_email', 'reset_password')),
     expires_at timestamptz NOT NULL,
-    used_at    timestamptz,
     created_at timestamptz NOT NULL DEFAULT now()
 );
+CREATE UNIQUE INDEX auth_tokens_user_purpose_key ON auth_tokens (user_id, purpose);
 CREATE INDEX idx_auth_tokens_user_purpose ON auth_tokens (user_id, purpose);
 CREATE INDEX idx_auth_tokens_expiry ON auth_tokens (expires_at);
 

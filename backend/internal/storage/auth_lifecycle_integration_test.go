@@ -94,16 +94,35 @@ func TestRefreshSessionsListAndRevoke(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	before, err := rt.ListSessions(ctx, user.ID)
+	if err != nil || len(before) != 2 {
+		t.Fatalf("sessions = %+v err=%v", before, err)
+	}
+	created := map[string]time.Time{}
+	for _, sess := range before {
+		created[sess.ID] = sess.CreatedAt
+	}
+	// Rotating within a session must not reset its first-seen timestamp.
+	_, h1b, _ := auth.NewRefreshToken()
+	if err := rt.Rotate(ctx, h1, h1b, time.Now().Add(time.Hour), auth.SessionMeta{UserAgent: "A2", IP: "1.1.1.1"}); err != nil {
+		t.Fatal(err)
+	}
 	sessions, err := rt.ListSessions(ctx, user.ID)
 	if err != nil || len(sessions) != 2 {
-		t.Fatalf("sessions = %+v err=%v", sessions, err)
+		t.Fatalf("sessions after rotate = %+v err=%v", sessions, err)
 	}
 	found := map[string]auth.Session{}
 	for _, s := range sessions {
 		found[s.ID] = s
 	}
-	if found[sid1].UserAgent != "A" || found[sid2].IP != "2.2.2.2" {
+	if found[sid1].UserAgent != "A2" || found[sid2].IP != "2.2.2.2" {
 		t.Fatalf("metadata: %+v", sessions)
+	}
+	if !found[sid1].CreatedAt.Equal(created[sid1]) {
+		t.Fatalf("first-seen changed after rotation: %v -> %v", created[sid1], found[sid1].CreatedAt)
+	}
+	if live, err := rt.SessionLive(ctx, user.ID, sid1); err != nil || !live {
+		t.Fatalf("session should be live: %v %v", live, err)
 	}
 
 	if err := rt.RevokeSession(ctx, other.ID, sid1); !errors.Is(err, auth.ErrSessionNotFound) {
@@ -111,6 +130,9 @@ func TestRefreshSessionsListAndRevoke(t *testing.T) {
 	}
 	if err := rt.RevokeSession(ctx, user.ID, sid1); err != nil {
 		t.Fatal(err)
+	}
+	if live, err := rt.SessionLive(ctx, user.ID, sid1); err != nil || live {
+		t.Fatalf("revoked session still live: %v %v", live, err)
 	}
 	if err := rt.RevokeSession(ctx, user.ID, sid1); !errors.Is(err, auth.ErrSessionNotFound) {
 		t.Fatalf("double revoke = %v", err)

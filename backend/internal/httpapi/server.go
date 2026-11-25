@@ -297,7 +297,7 @@ func newServer(deps ServerDeps) (*Server, http.Handler) {
 	authed.Handle("PATCH /api/admin/models/{id}", requireRole("admin", http.HandlerFunc(s.handleAdminUpsertModel)))
 	authed.Handle("DELETE /api/admin/models/{id}", requireRole("admin", http.HandlerFunc(s.handleAdminDeleteModel)))
 
-	s.mux.Handle("/api/", requireAuth(deps.Tokens, authed))
+	s.mux.Handle("/api/", s.requireAuth(authed))
 
 	return s, withCORS(deps.Cfg.FrontendOrigin, logRequests(deps.Log, s.mux))
 }

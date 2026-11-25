@@ -43,7 +43,7 @@ describe("auth pages", () => {
   });
 
   it("resets the password and returns to sign in", async () => {
-    renderApp("/reset-password?token=abc");
+    renderApp("/reset-password#token=abc");
     await userEvent.type(screen.getByLabelText("New password"), "longenoughpass");
     await userEvent.type(screen.getByLabelText("Confirm password"), "longenoughpass");
     await userEvent.click(screen.getByRole("button", { name: "Update password" }));
@@ -56,7 +56,7 @@ describe("auth pages", () => {
   });
 
   it("verifies an email token", async () => {
-    renderApp("/verify-email?token=abc");
+    renderApp("/verify-email#token=abc");
     expect(await screen.findByRole("link", { name: "Continue to sign in" })).toBeInTheDocument();
   });
 });

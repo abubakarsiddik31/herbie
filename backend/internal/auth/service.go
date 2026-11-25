@@ -103,6 +103,7 @@ type RefreshStore interface {
 	RevokeSession(ctx context.Context, userID, sessionID string) error
 	RevokeAll(ctx context.Context, userID string) error
 	ListSessions(ctx context.Context, userID string) ([]Session, error)
+	SessionLive(ctx context.Context, userID, sessionID string) (bool, error)
 }
 
 // AuthTokenStore owns the single-use email verification and password reset
@@ -313,10 +314,10 @@ func (s *Service) markVerified(ctx context.Context, user *UserRecord) {
 	}
 }
 
-// OAuthLogin resolves a verified provider identity to a session. A linked
-// identity signs in; an email matching a password account links it; a new
-// email provisions a passwordless account and links it.
-func (s *Service) OAuthLogin(ctx context.Context, provider, subject, email string, meta ...SessionMeta) (AuthResult, error) {
+// ResolveOAuthUser maps a verified provider identity to an account without
+// minting tokens. The OAuth callback only needs the user ID for its handoff
+// code; issuing a session there would leave a never-delivered family behind.
+func (s *Service) ResolveOAuthUser(ctx context.Context, provider, subject, email string) (UserRecord, error) {
 	email = normalizeEmail(email)
 	if user, err := s.oauth.FindUserByProvider(ctx, provider, subject); err == nil {
 		if user.Role == "" {
@@ -331,13 +332,13 @@ func (s *Service) OAuthLogin(ctx context.Context, provider, subject, email strin
 				user.Role = "admin"
 			}
 		}
-		return s.issue(ctx, user, metaOf(meta))
+		return user, nil
 	} else if !errors.Is(err, ErrOAuthUnlinked) {
-		return AuthResult{}, err
+		return UserRecord{}, err
 	}
 	if existing, err := s.users.ByEmail(ctx, email); err == nil {
 		if err := s.oauth.LinkProvider(ctx, existing.ID, provider, subject); err != nil {
-			return AuthResult{}, err
+			return UserRecord{}, err
 		}
 		if existing.Role == "" {
 			existing.Role = "user"
@@ -351,9 +352,9 @@ func (s *Service) OAuthLogin(ctx context.Context, provider, subject, email strin
 				existing.Role = "admin"
 			}
 		}
-		return s.issue(ctx, existing, metaOf(meta))
+		return existing, nil
 	} else if !errors.Is(err, ErrUserNotFound) && !errors.Is(err, ErrInvalidCredentials) {
-		return AuthResult{}, err
+		return UserRecord{}, err
 	}
 	role := "user"
 	if s.isAdminEmail(email) || s.isFirstUser(ctx) {
@@ -361,13 +362,22 @@ func (s *Service) OAuthLogin(ctx context.Context, provider, subject, email strin
 	}
 	user, err := s.oauth.CreateOAuthUser(ctx, email, role)
 	if err != nil {
-		return AuthResult{}, err
+		return UserRecord{}, err
 	}
 	if user.Role == "" {
 		user.Role = role
 	}
 	s.markVerified(ctx, &user)
 	if err := s.oauth.LinkProvider(ctx, user.ID, provider, subject); err != nil {
+		return UserRecord{}, err
+	}
+	return user, nil
+}
+
+// OAuthLogin resolves a verified provider identity to a session.
+func (s *Service) OAuthLogin(ctx context.Context, provider, subject, email string, meta ...SessionMeta) (AuthResult, error) {
+	user, err := s.ResolveOAuthUser(ctx, provider, subject, email)
+	if err != nil {
 		return AuthResult{}, err
 	}
 	return s.issue(ctx, user, metaOf(meta))
@@ -467,6 +477,16 @@ func (s *Service) RevokeAllSessions(ctx context.Context, userID string) error {
 	return s.refresh.RevokeAll(ctx, userID)
 }
 
+// SessionLive reports whether a session still has an active refresh token.
+// The auth middleware uses it so a revoked session cannot keep calling APIs
+// with an access token minted before revocation.
+func (s *Service) SessionLive(ctx context.Context, userID, sessionID string) (bool, error) {
+	if sessionID == "" {
+		return true, nil
+	}
+	return s.refresh.SessionLive(ctx, userID, sessionID)
+}
+
 func (s *Service) issueAuthToken(ctx context.Context, userID, purpose string, ttl time.Duration) (string, error) {
 	if s.authTokens == nil {
 		return "", errors.New("auth: token store not configured")
@@ -487,7 +507,10 @@ func (s *Service) issueAuthToken(ctx context.Context, userID, purpose string, tt
 func (s *Service) IssueEmailVerification(ctx context.Context, email string) (token, to string, err error) {
 	user, err := s.users.ByEmail(ctx, normalizeEmail(email))
 	if err != nil {
-		return "", "", nil
+		if errors.Is(err, ErrUserNotFound) {
+			return "", "", nil
+		}
+		return "", "", err
 	}
 	if user.Verified() {
 		return "", "", nil
@@ -504,7 +527,10 @@ func (s *Service) VerifyEmail(ctx context.Context, token string) error {
 		return ErrInvalidToken
 	}
 	if _, err := s.authTokens.ConsumeVerify(ctx, HashRefreshToken(token), time.Now()); err != nil {
-		return ErrInvalidToken
+		if errors.Is(err, ErrInvalidToken) {
+			return ErrInvalidToken
+		}
+		return err
 	}
 	return nil
 }
@@ -514,7 +540,10 @@ func (s *Service) VerifyEmail(ctx context.Context, token string) error {
 func (s *Service) IssuePasswordReset(ctx context.Context, email string) (token, to string, err error) {
 	user, err := s.users.ByEmail(ctx, normalizeEmail(email))
 	if err != nil {
-		return "", "", nil
+		if errors.Is(err, ErrUserNotFound) {
+			return "", "", nil
+		}
+		return "", "", err
 	}
 	token, err = s.issueAuthToken(ctx, user.ID, PurposeResetPassword, passwordResetTTL)
 	if err != nil {
@@ -537,7 +566,10 @@ func (s *Service) ResetPassword(ctx context.Context, token, newPassword string) 
 		return ErrInvalidToken
 	}
 	if _, err := s.authTokens.ConsumeReset(ctx, HashRefreshToken(token), hash, time.Now()); err != nil {
-		return ErrInvalidToken
+		if errors.Is(err, ErrInvalidToken) {
+			return ErrInvalidToken
+		}
+		return err
 	}
 	return nil
 }

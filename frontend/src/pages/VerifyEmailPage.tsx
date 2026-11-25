@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { Link, useSearchParams } from "react-router";
+import { useEffect, useRef, useState } from "react";
+import { Link, useLocation, useSearchParams } from "react-router";
 import { ApiError, apiFetch } from "@/lib/api";
 import { AuthPageShell } from "@/features/auth/AuthPageShell";
 import { Button } from "@/components/ui/button";
@@ -8,12 +8,21 @@ type State = "verifying" | "done" | "error";
 
 export function VerifyEmailPage() {
   const [params] = useSearchParams();
-  const token = params.get("token") ?? "";
+  const location = useLocation();
+  const [token] = useState(
+    () =>
+      new URLSearchParams(location.hash.replace(/^#/, "")).get("token") ??
+      params.get("token") ??
+      "",
+  );
+  const ran = useRef(false);
   const [state, setState] = useState<State>(token ? "verifying" : "error");
   const [message, setMessage] = useState(token ? "" : "This link is missing its token.");
 
   useEffect(() => {
-    if (!token) return;
+    if (!token || ran.current) return;
+    ran.current = true;
+    window.history.replaceState(null, "", window.location.pathname);
     let cancelled = false;
     apiFetch<void>("/api/auth/verify-email", { method: "POST", json: { token } })
       .then(() => {

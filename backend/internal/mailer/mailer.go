@@ -14,6 +14,7 @@ import (
 	"net/smtp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -80,7 +81,8 @@ func (m *SMTPMailer) Send(_ context.Context, to, subject, body string) error {
 		return fmt.Errorf("mailer: invalid recipient: %w", err)
 	}
 	fromAddr := m.cfg.From
-	if _, err := mail.ParseAddress(fromAddr); err != nil {
+	fromParsed, err := mail.ParseAddress(fromAddr)
+	if err != nil {
 		return fmt.Errorf("mailer: invalid sender %q: %w", fromAddr, err)
 	}
 	addr := net.JoinHostPort(m.cfg.Host, strconv.Itoa(m.cfg.Port))
@@ -112,7 +114,7 @@ func (m *SMTPMailer) Send(_ context.Context, to, subject, body string) error {
 				client.Close()
 				return fmt.Errorf("mailer: starttls: %w", err)
 			}
-		} else if m.cfg.User != "" && !m.cfg.AllowPlaintext {
+		} else if !m.cfg.AllowPlaintext {
 			client.Close()
 			return errors.New("mailer: server does not offer STARTTLS and SMTP_ALLOW_PLAINTEXT is false")
 		}
@@ -125,7 +127,7 @@ func (m *SMTPMailer) Send(_ context.Context, to, subject, body string) error {
 			return fmt.Errorf("mailer: auth: %w", err)
 		}
 	}
-	if err := client.Mail(fromAddr); err != nil {
+	if err := client.Mail(fromParsed.Address); err != nil {
 		return fmt.Errorf("mailer: mail from: %w", err)
 	}
 	if err := client.Rcpt(toAddr.Address); err != nil {
@@ -150,8 +152,11 @@ func (m *SMTPMailer) Send(_ context.Context, to, subject, body string) error {
 // not make account-recovery responses time-differ by whether the address
 // exists. A full queue drops the message and reports the error to the caller.
 type Async struct {
-	inner Mailer
-	ch    chan asyncMsg
+	inner  Mailer
+	ch     chan asyncMsg
+	done   chan struct{}
+	mu     sync.RWMutex
+	closed bool
 }
 
 type asyncMsg struct {
@@ -162,8 +167,11 @@ func NewAsync(inner Mailer, size int) *Async {
 	if size <= 0 {
 		size = 128
 	}
-	a := &Async{inner: inner, ch: make(chan asyncMsg, size)}
-	go a.worker()
+	a := &Async{inner: inner, ch: make(chan asyncMsg, size), done: make(chan struct{})}
+	go func() {
+		a.worker()
+		close(a.done)
+	}()
 	return a
 }
 
@@ -176,6 +184,11 @@ func (a *Async) worker() {
 }
 
 func (a *Async) Send(_ context.Context, to, subject, body string) error {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	if a.closed {
+		return errors.New("mailer: closed")
+	}
 	select {
 	case a.ch <- asyncMsg{to: to, subject: subject, body: body}:
 		return nil
@@ -184,7 +197,15 @@ func (a *Async) Send(_ context.Context, to, subject, body string) error {
 	}
 }
 
-// Close stops the worker after draining queued messages.
+// Close stops accepting mail, drains the queue, then waits for the worker.
 func (a *Async) Close() {
+	a.mu.Lock()
+	if a.closed {
+		a.mu.Unlock()
+		return
+	}
+	a.closed = true
 	close(a.ch)
+	a.mu.Unlock()
+	<-a.done
 }

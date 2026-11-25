@@ -25,12 +25,12 @@ func NewRefreshTokens(pool *pgxpool.Pool) *RefreshTokens { return &RefreshTokens
 
 func trimSessionMeta(meta auth.SessionMeta) (string, string) {
 	ua := strings.TrimSpace(meta.UserAgent)
-	if len(ua) > maxUserAgent {
-		ua = ua[:maxUserAgent]
+	if runes := []rune(ua); len(runes) > maxUserAgent {
+		ua = string(runes[:maxUserAgent])
 	}
 	ip := strings.TrimSpace(meta.IP)
-	if len(ip) > maxIP {
-		ip = ip[:maxIP]
+	if runes := []rune(ip); len(runes) > maxIP {
+		ip = string(runes[:maxIP])
 	}
 	return ua, ip
 }
@@ -129,13 +129,18 @@ func (r *RefreshTokens) RevokeAll(ctx context.Context, userID string) error {
 // surviving row's metadata reflects that session's latest use.
 func (r *RefreshTokens) ListSessions(ctx context.Context, userID string) ([]auth.Session, error) {
 	rows, err := r.pool.Query(ctx,
-		`SELECT session_id, user_agent, ip, first_seen, last_used_at FROM (
-		   SELECT session_id, user_agent, ip, last_used_at,
-		          MIN(created_at) OVER (PARTITION BY session_id) AS first_seen,
+		`WITH firsts AS (
+		   SELECT session_id, MIN(created_at) AS first_seen
+		   FROM refresh_tokens WHERE user_id = $1 GROUP BY session_id
+		 ), live AS (
+		   SELECT session_id, user_agent, ip, last_used_at, created_at,
 		          ROW_NUMBER() OVER (PARTITION BY session_id ORDER BY created_at DESC) AS rn
 		   FROM refresh_tokens
 		   WHERE user_id = $1 AND revoked_at IS NULL AND replaced_by IS NULL AND expires_at > now()
-		 ) s WHERE rn = 1 ORDER BY last_used_at DESC`, userID)
+		 )
+		 SELECT l.session_id, l.user_agent, l.ip, f.first_seen, l.last_used_at
+		 FROM live l JOIN firsts f USING (session_id)
+		 WHERE l.rn = 1 ORDER BY l.last_used_at DESC`, userID)
 	if err != nil {
 		return nil, fmt.Errorf("list sessions: %w", err)
 	}
@@ -149,4 +154,18 @@ func (r *RefreshTokens) ListSessions(ctx context.Context, userID string) ([]auth
 		out = append(out, s)
 	}
 	return out, rows.Err()
+}
+
+// SessionLive reports whether the session still has an active token.
+func (r *RefreshTokens) SessionLive(ctx context.Context, userID, sessionID string) (bool, error) {
+	var live bool
+	if err := r.pool.QueryRow(ctx,
+		`SELECT EXISTS(
+		   SELECT 1 FROM refresh_tokens
+		   WHERE user_id = $1 AND session_id = $2 AND revoked_at IS NULL
+		     AND replaced_by IS NULL AND expires_at > now()
+		 )`, userID, sessionID).Scan(&live); err != nil {
+		return false, fmt.Errorf("session live: %w", err)
+	}
+	return live, nil
 }

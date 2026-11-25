@@ -28,7 +28,7 @@ func (a *AuthTokens) Create(ctx context.Context, userID, tokenHash, purpose stri
 	}
 	defer tx.Rollback(ctx)
 	if _, err := tx.Exec(ctx,
-		`DELETE FROM auth_tokens WHERE user_id = $1 AND purpose = $2 AND used_at IS NULL`,
+		`DELETE FROM auth_tokens WHERE user_id = $1 AND purpose = $2`,
 		userID, purpose); err != nil {
 		return fmt.Errorf("clear prior auth tokens: %w", err)
 	}
@@ -37,17 +37,20 @@ func (a *AuthTokens) Create(ctx context.Context, userID, tokenHash, purpose stri
 		userID, tokenHash, purpose, expiresAt); err != nil {
 		return fmt.Errorf("insert auth token: %w", err)
 	}
-	if _, err := tx.Exec(ctx, `DELETE FROM auth_tokens WHERE expires_at < now()`); err != nil {
-		return fmt.Errorf("prune expired auth tokens: %w", err)
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit auth token: %w", err)
 	}
-	return tx.Commit(ctx)
+	// Best-effort cleanup outside the critical path; a failure here must not
+	// block issuing a reset or verification link.
+	_, _ = a.pool.Exec(ctx, `DELETE FROM auth_tokens WHERE expires_at < now()`)
+	return nil
 }
 
 func (a *AuthTokens) consume(ctx context.Context, tx pgx.Tx, tokenHash, purpose string, now time.Time) (string, error) {
 	var userID string
 	err := tx.QueryRow(ctx,
 		`DELETE FROM auth_tokens
-		 WHERE token_hash = $1 AND purpose = $2 AND used_at IS NULL AND expires_at > $3
+		 WHERE token_hash = $1 AND purpose = $2 AND expires_at > $3
 		 RETURNING user_id`, tokenHash, purpose, now).Scan(&userID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", auth.ErrInvalidToken
