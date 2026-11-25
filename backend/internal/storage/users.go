@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/abubakarsiddik31/golem-chatbot/internal/auth"
 	"github.com/jackc/pgx/v5"
@@ -23,7 +24,7 @@ func (u *Users) Create(ctx context.Context, email, passwordHash string, role ...
 	}
 	row := u.pool.QueryRow(ctx,
 		`INSERT INTO users (email, password_hash, role) VALUES ($1, $2, $3)
-		 RETURNING id, email::text, password_hash, role`,
+		 RETURNING id, email::text, password_hash, role, email_verified_at`,
 		email, passwordHash, userRole)
 	rec, err := scanUser(row)
 	if err != nil {
@@ -37,7 +38,7 @@ func (u *Users) Create(ctx context.Context, email, passwordHash string, role ...
 
 func (u *Users) ByEmail(ctx context.Context, email string) (auth.UserRecord, error) {
 	rec, err := scanUser(u.pool.QueryRow(ctx,
-		`SELECT id, email::text, password_hash, role FROM users WHERE email = $1`, email))
+		`SELECT id, email::text, password_hash, role, email_verified_at FROM users WHERE email = $1`, email))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return auth.UserRecord{}, fmt.Errorf("%w: %w", ErrNotFound, auth.ErrUserNotFound)
@@ -49,7 +50,7 @@ func (u *Users) ByEmail(ctx context.Context, email string) (auth.UserRecord, err
 
 func (u *Users) ByID(ctx context.Context, id string) (auth.UserRecord, error) {
 	rec, err := scanUser(u.pool.QueryRow(ctx,
-		`SELECT id, email::text, password_hash, role FROM users WHERE id = $1`, id))
+		`SELECT id, email::text, password_hash, role, email_verified_at FROM users WHERE id = $1`, id))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return auth.UserRecord{}, fmt.Errorf("%w: %w", ErrNotFound, auth.ErrUserNotFound)
@@ -60,7 +61,7 @@ func (u *Users) ByID(ctx context.Context, id string) (auth.UserRecord, error) {
 }
 
 func (u *Users) List(ctx context.Context) ([]auth.UserRecord, error) {
-	rows, err := u.pool.Query(ctx, `SELECT id, email::text, password_hash, role FROM users ORDER BY created_at ASC`)
+	rows, err := u.pool.Query(ctx, `SELECT id, email::text, password_hash, role, email_verified_at FROM users ORDER BY created_at ASC`)
 	if err != nil {
 		return nil, fmt.Errorf("list users: %w", err)
 	}
@@ -89,6 +90,20 @@ func (u *Users) SetRole(ctx context.Context, userID, role string) error {
 	tag, err := u.pool.Exec(ctx, `UPDATE users SET role = $2 WHERE id = $1`, userID, role)
 	if err != nil {
 		return fmt.Errorf("set user role: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// SetEmailVerified records proven ownership of the account email.
+func (u *Users) SetEmailVerified(ctx context.Context, userID string, at time.Time) error {
+	tag, err := u.pool.Exec(ctx,
+		`UPDATE users SET email_verified_at = COALESCE(email_verified_at, $2) WHERE id = $1`,
+		userID, at)
+	if err != nil {
+		return fmt.Errorf("set email verified: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
 		return ErrNotFound

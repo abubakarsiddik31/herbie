@@ -28,16 +28,26 @@ func (t *TokenMaker) Issue(userID string, now time.Time) (string, time.Time, err
 
 // IssueWithRole returns a signed HS256 access token with a designated role and its expiry.
 func (t *TokenMaker) IssueWithRole(userID, role string, now time.Time) (string, time.Time, error) {
+	return t.IssueWithSession(userID, role, "", now)
+}
+
+// IssueWithSession additionally binds the access token to a refresh-token
+// session so authenticated endpoints can identify the current device.
+func (t *TokenMaker) IssueWithSession(userID, role, sessionID string, now time.Time) (string, time.Time, error) {
 	if role == "" {
 		role = "user"
 	}
 	exp := now.Add(accessTTL)
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+	claims := jwt.MapClaims{
 		"sub":  userID,
 		"role": role,
 		"iat":  now.Unix(),
 		"exp":  exp.Unix(),
-	})
+	}
+	if sessionID != "" {
+		claims["sid"] = sessionID
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	signed, err := token.SignedString(t.secret)
 	if err != nil {
 		return "", time.Time{}, fmt.Errorf("sign token: %w", err)
@@ -53,6 +63,13 @@ func (t *TokenMaker) Verify(token string) (string, error) {
 
 // VerifyClaims validates the token and returns subject (user ID) and role.
 func (t *TokenMaker) VerifyClaims(token string) (string, string, error) {
+	sub, role, _, err := t.VerifySession(token)
+	return sub, role, err
+}
+
+// VerifySession validates the token and also returns its session ID (empty
+// for tokens minted before sessions existed).
+func (t *TokenMaker) VerifySession(token string) (string, string, string, error) {
 	parsed, err := jwt.Parse(token, func(tok *jwt.Token) (any, error) {
 		if _, ok := tok.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method %v", tok.Header["alg"])
@@ -60,19 +77,20 @@ func (t *TokenMaker) VerifyClaims(token string) (string, string, error) {
 		return t.secret, nil
 	})
 	if err != nil || !parsed.Valid {
-		return "", "", fmt.Errorf("invalid token: %w", err)
+		return "", "", "", fmt.Errorf("invalid token: %w", err)
 	}
 	claims, ok := parsed.Claims.(jwt.MapClaims)
 	if !ok {
-		return "", "", errors.New("invalid claims")
+		return "", "", "", errors.New("invalid claims")
 	}
 	sub, ok := claims["sub"].(string)
 	if !ok || sub == "" {
-		return "", "", errors.New("missing subject")
+		return "", "", "", errors.New("missing subject")
 	}
 	role, _ := claims["role"].(string)
 	if role == "" {
 		role = "user"
 	}
-	return sub, role, nil
+	sid, _ := claims["sid"].(string)
+	return sub, role, sid, nil
 }

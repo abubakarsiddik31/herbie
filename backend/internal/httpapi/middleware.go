@@ -53,8 +53,9 @@ func logRequests(log *slog.Logger, next http.Handler) http.Handler {
 type ctxKey int
 
 const (
-	userKey ctxKey = 1
-	roleKey ctxKey = 2
+	userKey    ctxKey = 1
+	roleKey    ctxKey = 2
+	sessionKey ctxKey = 3
 )
 
 func withUser(ctx context.Context, userID string, role ...string) context.Context {
@@ -69,6 +70,17 @@ func withUser(ctx context.Context, userID string, role ...string) context.Contex
 func userIDFrom(ctx context.Context) (string, bool) {
 	id, ok := ctx.Value(userKey).(string)
 	return id, ok
+}
+
+func withSession(ctx context.Context, sessionID string) context.Context {
+	return context.WithValue(ctx, sessionKey, sessionID)
+}
+
+// sessionIDFrom returns the refresh-token session bound to the access token
+// (empty for tokens minted before sessions existed).
+func sessionIDFrom(ctx context.Context) string {
+	id, _ := ctx.Value(sessionKey).(string)
+	return id
 }
 
 func userRoleFrom(ctx context.Context) string {
@@ -90,12 +102,13 @@ func requireAuth(tokens *auth.TokenMaker, next http.Handler) http.Handler {
 			writeError(w, http.StatusUnauthorized, "unauthorized", "missing bearer token")
 			return
 		}
-		userID, role, err := tokens.VerifyClaims(token)
+		userID, role, sessionID, err := tokens.VerifySession(token)
 		if err != nil {
 			writeError(w, http.StatusUnauthorized, "unauthorized", "invalid token")
 			return
 		}
-		next.ServeHTTP(w, r.WithContext(withUser(r.Context(), userID, role)))
+		ctx := withUser(r.Context(), userID, role)
+		next.ServeHTTP(w, r.WithContext(withSession(ctx, sessionID)))
 	})
 }
 

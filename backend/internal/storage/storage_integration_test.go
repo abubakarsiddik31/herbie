@@ -40,12 +40,14 @@ func TestRefreshRotationPersistence(t *testing.T) {
 		t.Fatalf("create user: %v", err)
 	}
 	rt := NewRefreshTokens(pool)
+	sessionID := "11111111-1111-1111-1111-111111111111"
+	meta := auth.SessionMeta{UserAgent: "test-agent", IP: "127.0.0.1"}
 	_, oldHash, _ := auth.NewRefreshToken()
-	if err := rt.Create(ctx, user.ID, oldHash, time.Now().Add(auth.RefreshTTL)); err != nil {
+	if err := rt.Create(ctx, user.ID, sessionID, oldHash, time.Now().Add(auth.RefreshTTL), meta); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 	newTok, newHash, _ := auth.NewRefreshToken()
-	if err := rt.Rotate(ctx, oldHash, newHash, time.Now().Add(auth.RefreshTTL)); err != nil {
+	if err := rt.Rotate(ctx, oldHash, newHash, time.Now().Add(auth.RefreshTTL), meta); err != nil {
 		t.Fatalf("rotate: %v", err)
 	}
 	if _, err := rt.Get(ctx, oldHash); err != nil {

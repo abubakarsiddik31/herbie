@@ -33,6 +33,20 @@ type Config struct {
 	// TitleModel enables asynchronous conversation auto-titling; empty keeps
 	// the first-message heuristic title.
 	TitleModel string
+
+	// AppURL is the public SPA origin used in emailed links (defaults to
+	// FrontendOrigin). EmailVerificationRequired gates password login on a
+	// proven email; EmailLogLinks lets the dev log mailer print the link.
+	AppURL                    string
+	EmailVerificationRequired bool
+	EmailLogLinks             bool
+	// AuthRateLimit caps login/register/reset/verify attempts per window;
+	// 0 disables the limiter. TrustedProxies are CIDRs whose X-Forwarded-For
+	// hop is trusted when deriving the client IP.
+	AuthRateLimitMax    int
+	AuthRateLimitWindow time.Duration
+	TrustedProxies      []string
+	SMTP                SMTPConfig
 	// AllowUserProviderKeys lets users store their own provider keys, which
 	// override the server keys for their runs.
 	AllowUserProviderKeys bool
@@ -115,6 +129,16 @@ type RAGConfig struct {
 	CompactionThreshold     int
 	CompactionKeepRecent    int
 	CompactionSummaryTokens int
+}
+
+type SMTPConfig struct {
+	Host           string
+	Port           int
+	User           string
+	Pass           string
+	From           string
+	ImplicitTLS    bool
+	AllowPlaintext bool
 }
 
 type OAuthProviderConfig struct {
@@ -316,23 +340,59 @@ func Load() (Config, error) {
 		}
 	}
 
+	rateWindow := 15 * time.Minute
+	if raw := os.Getenv("AUTH_RATE_LIMIT_WINDOW"); raw != "" {
+		parsed, perr := time.ParseDuration(raw)
+		if perr != nil {
+			return Config{}, fmt.Errorf("invalid AUTH_RATE_LIMIT_WINDOW: %q", raw)
+		}
+		rateWindow = parsed
+	}
+	var trustedProxies []string
+	if raw := strings.TrimSpace(os.Getenv("TRUSTED_PROXIES")); raw != "" {
+		for _, p := range strings.Split(raw, ",") {
+			if trimmed := strings.TrimSpace(p); trimmed != "" {
+				trustedProxies = append(trustedProxies, trimmed)
+			}
+		}
+	}
+	smtpPort, err := envInt("SMTP_PORT", 587)
+	if err != nil {
+		return Config{}, err
+	}
+
 	cfg := Config{
-		Port:                  env("PORT", env("APP_PORT", "8080")),
-		DatabaseURL:           os.Getenv("DATABASE_URL"),
-		GeminiAPIKey:          os.Getenv("GEMINI_API_KEY"),
-		GeminiModel:           env("GEMINI_MODEL", "gemini-2.5-flash"),
-		GeminiBaseURL:         os.Getenv("GEMINI_BASE_URL"),
-		OpenAIAPIKey:          os.Getenv("OPENAI_API_KEY"),
-		OpenAIBaseURL:         os.Getenv("OPENAI_BASE_URL"),
-		AnthropicAPIKey:       os.Getenv("ANTHROPIC_API_KEY"),
-		AnthropicBaseURL:      os.Getenv("ANTHROPIC_BASE_URL"),
-		JWTSecret:             os.Getenv("JWT_SECRET"),
-		FrontendOrigin:        env("FRONTEND_ORIGIN", "http://localhost:5173"),
-		AdminEmails:           adminEmails,
-		ChatInputRate:         inputRate,
-		ChatOutputRate:        outputRate,
-		TitleModel:            os.Getenv("TITLE_MODEL"),
-		AllowUserProviderKeys: envBool("ALLOW_USER_PROVIDER_KEYS", false),
+		Port:                      env("PORT", env("APP_PORT", "8080")),
+		DatabaseURL:               os.Getenv("DATABASE_URL"),
+		GeminiAPIKey:              os.Getenv("GEMINI_API_KEY"),
+		GeminiModel:               env("GEMINI_MODEL", "gemini-2.5-flash"),
+		GeminiBaseURL:             os.Getenv("GEMINI_BASE_URL"),
+		OpenAIAPIKey:              os.Getenv("OPENAI_API_KEY"),
+		OpenAIBaseURL:             os.Getenv("OPENAI_BASE_URL"),
+		AnthropicAPIKey:           os.Getenv("ANTHROPIC_API_KEY"),
+		AnthropicBaseURL:          os.Getenv("ANTHROPIC_BASE_URL"),
+		JWTSecret:                 os.Getenv("JWT_SECRET"),
+		FrontendOrigin:            env("FRONTEND_ORIGIN", "http://localhost:5173"),
+		AdminEmails:               adminEmails,
+		ChatInputRate:             inputRate,
+		ChatOutputRate:            outputRate,
+		TitleModel:                os.Getenv("TITLE_MODEL"),
+		AllowUserProviderKeys:     envBool("ALLOW_USER_PROVIDER_KEYS", false),
+		AppURL:                    os.Getenv("APP_URL"),
+		EmailVerificationRequired: envBool("EMAIL_VERIFICATION_REQUIRED", false),
+		EmailLogLinks:             envBool("EMAIL_LOG_LINKS", false),
+		AuthRateLimitMax:          envIntOr("AUTH_RATE_LIMIT_MAX", 20),
+		AuthRateLimitWindow:       rateWindow,
+		TrustedProxies:            trustedProxies,
+		SMTP: SMTPConfig{
+			Host:           os.Getenv("SMTP_HOST"),
+			Port:           smtpPort,
+			User:           os.Getenv("SMTP_USER"),
+			Pass:           os.Getenv("SMTP_PASS"),
+			From:           env("SMTP_FROM", os.Getenv("SMTP_USER")),
+			ImplicitTLS:    envBool("SMTP_IMPLICIT_TLS", false),
+			AllowPlaintext: envBool("SMTP_ALLOW_PLAINTEXT", false),
+		},
 
 		OAuth: OAuthConfig{
 			Google: OAuthProviderConfig{
@@ -420,6 +480,9 @@ func Load() (Config, error) {
 		},
 	}
 	var errs []error
+	if cfg.AppURL == "" {
+		cfg.AppURL = cfg.FrontendOrigin
+	}
 	if cfg.OAuth.RedirectBase == "" {
 		cfg.OAuth.RedirectBase = "http://localhost:" + cfg.Port
 	}

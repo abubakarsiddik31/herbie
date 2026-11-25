@@ -53,6 +53,10 @@ table "users" {
     null    = false
     default = ""
   }
+  column "email_verified_at" {
+    type = timestamptz
+    null = true
+  }
   column "created_at" {
     type    = timestamptz
     null    = false
@@ -194,6 +198,25 @@ table "refresh_tokens" {
     type = text
     null = true
   }
+  column "session_id" {
+    type = uuid
+    null = false
+  }
+  column "user_agent" {
+    type    = text
+    null    = false
+    default = ""
+  }
+  column "ip" {
+    type    = text
+    null    = false
+    default = ""
+  }
+  column "last_used_at" {
+    type    = timestamptz
+    null    = false
+    default = sql("now()")
+  }
   column "created_at" {
     type    = timestamptz
     null    = false
@@ -213,6 +236,61 @@ table "refresh_tokens" {
   }
   index "idx_refresh_tokens_user" {
     columns = [column.user_id]
+  }
+  index "idx_refresh_tokens_session" {
+    columns = [column.user_id, column.session_id]
+  }
+}
+
+table "auth_tokens" {
+  schema = schema.public
+  column "id" {
+    type    = uuid
+    null    = false
+    default = sql("gen_random_uuid()")
+  }
+  column "user_id" {
+    type = uuid
+    null = false
+  }
+  column "token_hash" {
+    type = text
+    null = false
+  }
+  column "purpose" {
+    type = text
+    null = false
+  }
+  column "expires_at" {
+    type = timestamptz
+    null = false
+  }
+  column "used_at" {
+    type = timestamptz
+    null = true
+  }
+  column "created_at" {
+    type    = timestamptz
+    null    = false
+    default = sql("now()")
+  }
+  primary_key {
+    columns = [column.id]
+  }
+  foreign_key "auth_tokens_user_id_fkey" {
+    columns     = [column.user_id]
+    ref_columns = [table.users.column.id]
+    on_delete   = CASCADE
+  }
+  index "auth_tokens_token_hash_key" {
+    unique  = true
+    columns = [column.token_hash]
+  }
+  index "idx_auth_tokens_user_purpose" {
+    columns = [column.user_id, column.purpose]
+  }
+  index "idx_auth_tokens_expiry" {
+    columns = [column.expires_at]
   }
 }
 
