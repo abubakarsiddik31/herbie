@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -25,7 +26,7 @@ import (
 
 // newRagHandlerServer is newHandlerServerFull with RagSearch wired and an
 // embedding rate on the ledger.
-func newRagHandlerServer(t *testing.T, agent *chat.Agent, convs ConvoStore, msgs MsgStore, usage *fakeUsage, ragSearch RagSearchFunc) (http.Handler, string) {
+func newRagHandlerServer(t *testing.T, agent *chat.Agent, convs ConvoStore, msgs MsgStore, usage *fakeUsage, ragSearch RagSearchFunc, docs DocStore) (http.Handler, string) {
 	t.Helper()
 	tm, err := auth.NewTokenMaker(testSecret)
 	if err != nil {
@@ -49,6 +50,7 @@ func newRagHandlerServer(t *testing.T, agent *chat.Agent, convs ConvoStore, msgs
 			ByModel: map[string]cost.Rates{"gemini-embedding-001": {ChatInputPerM: 0.15}}},
 		ModelKeys: chat.ProviderKeys{Gemini: "test"},
 		RagSearch: ragSearch,
+		Docs:      docs,
 	})
 	token, _, err := tm.Issue("u-1", time.Now())
 	if err != nil {
@@ -76,7 +78,7 @@ func TestSendMessageSearchesDocumentsAndMetersEmbedding(t *testing.T) {
 			rag.UsageReport{Embed: rag.EmbedUsage{InputTokens: 7}}, nil
 	}
 
-	h, token := newRagHandlerServer(t, agent, convs, msgs, usage, ragSearch)
+	h, token := newRagHandlerServer(t, agent, convs, msgs, usage, ragSearch, nil)
 	conv := convs.mustCreate("u-1", "")
 	rec := postMessage(t, h, token, conv.ID, "what is the capital?")
 	body := rec.Body.String()
@@ -145,7 +147,7 @@ func TestSendMessageRecordsRerankUsage(t *testing.T) {
 			}, nil
 	}
 
-	h, token := newRagHandlerServer(t, agent, convs, msgs, usage, ragSearch)
+	h, token := newRagHandlerServer(t, agent, convs, msgs, usage, ragSearch, nil)
 	conv := convs.mustCreate("u-1", "")
 	rec := postMessage(t, h, token, conv.ID, "what is the capital?")
 	if rec.Code != http.StatusOK {
@@ -187,7 +189,7 @@ func TestSendMessagePersistsSourcesOnFinalMessage(t *testing.T) {
 			rag.UsageReport{Embed: rag.EmbedUsage{InputTokens: 7}}, nil
 	}
 
-	h, token := newRagHandlerServer(t, agent, convs, msgs, usage, ragSearch)
+	h, token := newRagHandlerServer(t, agent, convs, msgs, usage, ragSearch, nil)
 	conv := convs.mustCreate("u-1", "")
 	rec := postMessage(t, h, token, conv.ID, "what is the capital?")
 	if rec.Code != http.StatusOK {
@@ -306,7 +308,7 @@ func TestConversationRagToggleRoundTrip(t *testing.T) {
 	ragSearch := func(_ context.Context, _, _ string, _ int, _ []string) ([]rag.Scored, rag.UsageReport, error) {
 		return nil, rag.UsageReport{}, nil
 	}
-	h, token := newRagHandlerServer(t, agent, convs, msgs, newFakeUsage(), ragSearch)
+	h, token := newRagHandlerServer(t, agent, convs, msgs, newFakeUsage(), ragSearch, nil)
 	conv := convs.mustCreate("u-1", "")
 
 	patch := reqJSON(http.MethodPatch, "/api/conversations/"+conv.ID, map[string]any{"ragEnabled": false})
@@ -497,13 +499,10 @@ func TestListDocsDepsScoping(t *testing.T) {
 			{ID: "d1", UserID: "u-1", Filename: "user_doc.txt", Status: "ready", ChunkCount: 3, SizeBytes: 1024},
 		},
 	}
-	msgs := newFakeMsgs()
-	convs := newFakeConvos(msgs)
-	srv := &Server{deps: ServerDeps{Docs: docs, Convos: convs}}
+	srv := &Server{deps: ServerDeps{Docs: docs}}
 
 	// 1. Regular conversation -> returns user docs
-	conv1 := convs.mustCreate("u-1", "")
-	fn1 := srv.listDocsDeps("u-1", conv1.ID)
+	fn1 := srv.listDocsDeps("u-1", "")
 	res1, err := fn1(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -514,16 +513,10 @@ func TestListDocsDepsScoping(t *testing.T) {
 
 	// 2. Project conversation -> returns project docs
 	projID := "p-123"
-	conv2, err := convs.Create(context.Background(), "u-1", "Project Chat", storage.ConversationPatch{
-		ProjectID: &projID,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	docs.rows = append(docs.rows, storage.Document{
 		ID: "d2", UserID: "u-1", ProjectID: &projID, Filename: "project_doc.pdf", Status: "ready", ChunkCount: 10, SizeBytes: 50000,
 	})
-	fn2 := srv.listDocsDeps("u-1", conv2.ID)
+	fn2 := srv.listDocsDeps("u-1", projID)
 	res2, err := fn2(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -573,7 +566,7 @@ func TestReadDocDepsScopingAndPaging(t *testing.T) {
 	srv := &Server{deps: ServerDeps{Docs: docs, Vectors: vecs}}
 
 	var sources []rag.Scored
-	fn := srv.readDocDeps("u-1", "conv-1", &sources)
+	fn := srv.readDocDeps("u-1", "", &sources)
 	if fn == nil {
 		t.Fatal("readDocDeps should not be nil")
 	}
@@ -612,6 +605,228 @@ func TestReadDocDepsScopingAndPaging(t *testing.T) {
 	_, err = fn(context.Background(), "doc-missing", 0, 2)
 	if err == nil {
 		t.Fatal("expected error for missing doc")
+	}
+}
+
+func TestSearchDepsScopesToProject(t *testing.T) {
+	p1, p2 := "p-1", "p-2"
+	docs := &fakeDocs{rows: []storage.Document{
+		{ID: "d1", UserID: "u-1", ProjectID: &p1, Filename: "one.txt", Status: "ready", ChunkCount: 1},
+		{ID: "d2", UserID: "u-1", ProjectID: &p2, Filename: "two.txt", Status: "ready", ChunkCount: 1},
+		{ID: "d3", UserID: "u-1", Filename: "global.txt", Status: "ready", ChunkCount: 1},
+		{ID: "d4", UserID: "u-1", ProjectID: &p1, Filename: "pending.txt", Status: "processing"},
+	}}
+	var gotDocIDs [][]string
+	ragSearch := func(_ context.Context, _, _ string, _ int, docIDs []string) ([]rag.Scored, rag.UsageReport, error) {
+		gotDocIDs = append(gotDocIDs, append([]string(nil), docIDs...))
+		return []rag.Scored{
+			{Chunk: rag.Chunk{DocumentID: "d1", DocTitle: "one.txt", Content: "project hit"}},
+			{Chunk: rag.Chunk{DocumentID: "d2", DocTitle: "two.txt", Content: "other project"}},
+			{Chunk: rag.Chunk{DocumentID: "d3", DocTitle: "global.txt", Content: "global"}},
+		}, rag.UsageReport{}, nil
+	}
+	srv := &Server{deps: ServerDeps{Docs: docs, RagSearch: ragSearch}}
+	var sources []rag.Scored
+	fn := srv.searchDeps("u-1", "c-1", p1, &sources)
+
+	// Implicit search: only the project's ready documents are retrieved.
+	scored, offset, err := fn(context.Background(), "q", 5, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(gotDocIDs) != 1 || len(gotDocIDs[0]) != 1 || gotDocIDs[0][0] != "d1" {
+		t.Fatalf("project docs passed to rag: %v", gotDocIDs)
+	}
+	if len(scored) != 1 || scored[0].Chunk.DocumentID != "d1" || offset != 0 {
+		t.Fatalf("scoped results: %+v offset=%d", scored, offset)
+	}
+	if len(sources) != 1 || sources[0].Chunk.DocumentID != "d1" {
+		t.Fatalf("sources leaked: %+v", sources)
+	}
+
+	// Explicit out-of-project IDs: no retrieval at all.
+	before := len(gotDocIDs)
+	scored, _, err = fn(context.Background(), "q", 5, []string{"d2", "d3"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(scored) != 0 || len(gotDocIDs) != before {
+		t.Fatalf("out-of-project search should not call rag: %+v calls=%d", scored, len(gotDocIDs))
+	}
+
+	// Mixed IDs: intersect to the project and keep cumulative offsets.
+	scored, offset, err = fn(context.Background(), "q", 5, []string{"d1", "d2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(gotDocIDs) != before+1 || len(gotDocIDs[before]) != 1 || gotDocIDs[before][0] != "d1" {
+		t.Fatalf("mixed ids passed: %v", gotDocIDs[before:])
+	}
+	if offset != 1 || len(scored) != 1 || scored[0].Chunk.DocumentID != "d1" {
+		t.Fatalf("mixed results: %+v offset=%d", scored, offset)
+	}
+	if len(sources) != 2 || sources[1].Chunk.DocumentID != "d1" {
+		t.Fatalf("sources after mixed: %+v", sources)
+	}
+}
+
+func TestSearchDepsEmptyProjectDoesNotSearchUserCorpus(t *testing.T) {
+	called := false
+	ragSearch := func(_ context.Context, _, _ string, _ int, _ []string) ([]rag.Scored, rag.UsageReport, error) {
+		called = true
+		return []rag.Scored{{Chunk: rag.Chunk{DocumentID: "global"}}}, rag.UsageReport{}, nil
+	}
+	docs := &fakeDocs{rows: []storage.Document{
+		{ID: "d1", UserID: "u-1", Filename: "global.txt", Status: "ready", ChunkCount: 1},
+	}}
+	srv := &Server{deps: ServerDeps{Docs: docs, RagSearch: ragSearch}}
+	var sources []rag.Scored
+	fn := srv.searchDeps("u-1", "c-1", "empty-project", &sources)
+
+	for _, ids := range [][]string{nil, {"d1"}} {
+		scored, offset, err := fn(context.Background(), "q", 5, ids)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if called {
+			t.Fatalf("rag must not be called for an empty project (ids=%v)", ids)
+		}
+		if len(scored) != 0 || offset != 0 {
+			t.Fatalf("empty project results: %+v offset=%d", scored, offset)
+		}
+	}
+	if len(sources) != 0 {
+		t.Fatalf("empty project leaked sources: %+v", sources)
+	}
+}
+
+func TestReadDocDepsRejectsOtherProject(t *testing.T) {
+	p1, p2 := "p-1", "p-2"
+	docs := &fakeDocs{rows: []storage.Document{
+		{ID: "d1", UserID: "u-1", ProjectID: &p1, Filename: "own.pdf", Status: "ready", ChunkCount: 1},
+		{ID: "d2", UserID: "u-1", ProjectID: &p2, Filename: "other.pdf", Status: "ready", ChunkCount: 1},
+		{ID: "d3", UserID: "u-1", Filename: "global.pdf", Status: "ready", ChunkCount: 1},
+	}}
+	vecs := &fakeChatVectorsStore{chunks: []rag.Chunk{
+		{DocumentID: "d1", DocTitle: "own.pdf", Index: 0, Content: "own"},
+		{DocumentID: "d2", DocTitle: "other.pdf", Index: 0, Content: "other"},
+		{DocumentID: "d3", DocTitle: "global.pdf", Index: 0, Content: "global"},
+	}}
+	srv := &Server{deps: ServerDeps{Docs: docs, Vectors: vecs}}
+	var sources []rag.Scored
+	fn := srv.readDocDeps("u-1", p1, &sources)
+
+	for _, id := range []string{"d2", "d3"} {
+		if _, err := fn(context.Background(), id, 0, 1); err == nil {
+			t.Fatalf("read %q must be rejected in project %q", id, p1)
+		}
+	}
+	if len(sources) != 0 {
+		t.Fatalf("rejected reads leaked sources: %+v", sources)
+	}
+	res, err := fn(context.Background(), "d1", 0, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.DocumentID != "d1" || len(sources) != 1 {
+		t.Fatalf("own project read failed: %+v sources=%d", res, len(sources))
+	}
+}
+
+func TestListDocsDepsProjectScope(t *testing.T) {
+	p1 := "p-1"
+	docs := &fakeDocs{rows: []storage.Document{
+		{ID: "d1", UserID: "u-1", Filename: "global.txt", Status: "ready"},
+		{ID: "d2", UserID: "u-1", ProjectID: &p1, Filename: "one.txt", Status: "ready"},
+	}}
+	srv := &Server{deps: ServerDeps{Docs: docs}}
+	ctx := context.Background()
+
+	all, err := srv.listDocsDeps("u-1", "")(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 2 {
+		t.Fatalf("unscoped docs: %+v", all)
+	}
+	p1docs, err := srv.listDocsDeps("u-1", p1)(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p1docs) != 1 || p1docs[0].ID != "d2" {
+		t.Fatalf("project docs: %+v", p1docs)
+	}
+	empty, err := srv.listDocsDeps("u-1", "p-empty")(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(empty) != 0 {
+		t.Fatalf("empty project must not fall back to user docs: %+v", empty)
+	}
+}
+
+func TestBuildDepsThreadsProjectScope(t *testing.T) {
+	p1 := "p-1"
+	docs := &fakeDocs{rows: []storage.Document{
+		{ID: "d1", UserID: "u-1", ProjectID: &p1, Filename: "one.txt", Status: "ready", ChunkCount: 1},
+		{ID: "d2", UserID: "u-1", Filename: "global.txt", Status: "ready", ChunkCount: 1},
+	}}
+	var got []string
+	ragSearch := func(_ context.Context, _, _ string, _ int, docIDs []string) ([]rag.Scored, rag.UsageReport, error) {
+		got = append([]string(nil), docIDs...)
+		return []rag.Scored{{Chunk: rag.Chunk{DocumentID: "d1"}}}, rag.UsageReport{}, nil
+	}
+	srv := &Server{deps: ServerDeps{Docs: docs, RagSearch: ragSearch, Vectors: &fakeChatVectorsStore{}}}
+	var sources []rag.Scored
+	var mu sync.Mutex
+	deps := srv.buildDeps("u-1", "c-1", p1, &sources, &mu, nil)
+
+	if _, _, err := deps.Search(context.Background(), "q", 5, nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0] != "d1" {
+		t.Fatalf("buildDeps search scope: %v", got)
+	}
+	listed, err := deps.ListDocs(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listed) != 1 || listed[0].ID != "d1" {
+		t.Fatalf("buildDeps list scope: %+v", listed)
+	}
+	if _, err := deps.ReadDoc(context.Background(), "d2", 0, 1); err == nil {
+		t.Fatal("buildDeps read must reject a non-project document")
+	}
+}
+
+func TestSendMessageScopesRetrievalToProject(t *testing.T) {
+	p1, p2 := "p-1", "p-2"
+	docs := &fakeDocs{rows: []storage.Document{
+		{ID: "d1", UserID: "u-1", ProjectID: &p1, Filename: "one.txt", Status: "ready", ChunkCount: 1},
+		{ID: "d2", UserID: "u-1", ProjectID: &p2, Filename: "two.txt", Status: "ready", ChunkCount: 1},
+	}}
+	m := testmodel.New().
+		Respond(toolCallResponse("call-1", "search_documents", json.RawMessage(`{"query":"x"}`))).
+		Respond(model.Response{Message: model.Message{Role: model.RoleAssistant, Content: "ok [1]"}, Usage: model.Usage{InputTokens: 1, OutputTokens: 1}})
+	agent := newTestAgent(t, m)
+	msgs := newFakeMsgs()
+	convs := newFakeConvos(msgs)
+	conv, err := convs.Create(context.Background(), "u-1", "Project Chat", storage.ConversationPatch{ProjectID: &p1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var gotDocs []string
+	ragSearch := func(_ context.Context, _, _ string, _ int, docIDs []string) ([]rag.Scored, rag.UsageReport, error) {
+		gotDocs = append([]string(nil), docIDs...)
+		return []rag.Scored{{Chunk: rag.Chunk{DocumentID: "d1", DocTitle: "one.txt", Content: "hit"}}}, rag.UsageReport{}, nil
+	}
+	h, token := newRagHandlerServer(t, agent, convs, msgs, newFakeUsage(), ragSearch, docs)
+	rec := postMessage(t, h, token, conv.ID, "search")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
+	}
+	if len(gotDocs) != 1 || gotDocs[0] != "d1" {
+		t.Fatalf("send scoped docs = %v, want [d1]", gotDocs)
 	}
 }
 

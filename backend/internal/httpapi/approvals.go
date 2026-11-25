@@ -152,7 +152,7 @@ func (s *Server) handleApprovals(w http.ResponseWriter, r *http.Request) {
 	// skipped; resolutions and new answers carry this run's identity and are
 	// persisted at the paused tail.
 	outcome, err := s.agentFor(ctx, userID).RunDeferred(ctx,
-		s.buildDeps(userID, convID, &sources, &sourcesMu, s.botFor(ctx, userID, conv.BotID)),
+		s.buildDeps(userID, convID, projectScope(conv), &sources, &sourcesMu, s.botFor(ctx, userID, conv.BotID)),
 		history, golem.DeferredResults{Approvals: resolutions},
 		sink, tools, spec)
 	if err != nil {

@@ -43,7 +43,7 @@ Golem is on v1.1.0; its new seams are called out where they unlock an item.
 ### P0 — correctness, trust, production readiness (first)
 
 - [x] CI gate: GitHub Actions runs `make check`, `make fe-check`, Docker build, and `scripts/smoke.sh`; protect `main` (`.github/workflows/ci.yml`).
-- [ ] Project isolation bug: enforce the conversation's project scope inside `search_documents` and `read_document`. Search currently defaults to all user documents and read accepts any document ID. Add cross-project tests.
+- [x] Project isolation bug: `search_documents`, `list_documents`, `read_document`, and the project-files route now scope to the conversation's `project_id` (empty project stays empty); cross-project tests cover search, read, list, and the HTTP route.
 - [ ] Auth lifecycle: password reset, email verification, login/register rate limiting, session list + revoke, account deletion, full data export (JSON + original files).
 - [ ] Per-user budgets: daily/monthly token and USD caps with warning thresholds and admin suspension; keep the golem per-run limit as the hard stop.
 - [ ] Admin control plane: configure providers/keys/model catalog, set quotas, inspect per-user usage. Routine operations should not require editing `.env`.

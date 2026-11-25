@@ -109,6 +109,28 @@ func (d *Documents) ListByProject(ctx context.Context, projectID, userID string)
 	return out, rows.Err()
 }
 
+// ReadyIDsByProject lists the IDs of a project's indexed documents. Retrieval
+// scoping uses it so a project conversation can never search outside its
+// project; non-ready rows have no vectors and are excluded.
+func (d *Documents) ReadyIDsByProject(ctx context.Context, projectID, userID string) ([]string, error) {
+	rows, err := d.pool.Query(ctx,
+		`SELECT id FROM documents WHERE user_id = $1 AND project_id = $2 AND status = 'ready' ORDER BY created_at, id`,
+		userID, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("list project document ids: %w", err)
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan document id: %w", err)
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
 // SetStatus moves a document out of processing. On failure Error carries the
 // model-visible reason; on success ChunkCount is the indexed chunk total.
 func (d *Documents) SetStatus(ctx context.Context, id, userID, status, errMsg string, chunkCount int) error {

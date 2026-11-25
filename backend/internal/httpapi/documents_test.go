@@ -65,6 +65,16 @@ func (f *fakeDocs) ListByProject(_ context.Context, projectID, userID string) ([
 	return out, nil
 }
 
+func (f *fakeDocs) ReadyIDsByProject(_ context.Context, projectID, userID string) ([]string, error) {
+	var out []string
+	for _, d := range f.rows {
+		if d.UserID == userID && d.ProjectID != nil && *d.ProjectID == projectID && d.Status == "ready" {
+			out = append(out, d.ID)
+		}
+	}
+	return out, nil
+}
+
 func (f *fakeDocs) SetStatus(_ context.Context, id, _ string, status, errMsg string, chunkCount int) error {
 	for i := range f.rows {
 		if f.rows[i].ID == id {
