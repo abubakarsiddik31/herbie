@@ -216,7 +216,7 @@ backfill, bot/fork titles, SetTitle overloading, quote composition) and 9 majors
 - [x] Idempotent sends (`clientMessageId` unique per conversation); run-status
       endpoint plus reconnect refetch/retry after a dropped SSE.
 - [x] Continue-after-stop (resume from the persisted partial answer as a new sibling branch).
-- [ ] Compare mode: one prompt → 2–4 models as sibling branches, per-answer usage,
+- [x] Compare mode: one prompt → 2–4 models as sibling branches, per-answer usage,
       pick-a-winner activates that branch.
 - [ ] Semantic conversation search over the embedding stack (opt-in, RAG-independent
       storage decision at build time).
