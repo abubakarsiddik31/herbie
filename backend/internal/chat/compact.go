@@ -107,6 +107,31 @@ func (c *Compactor) Compact(ctx context.Context, history []model.Message) (recen
 		keep = len(history)
 	}
 	stale, recent := history[:len(history)-keep], history[len(history)-keep:]
+	summary, usage, compacted = c.summarizeStale(ctx, stale)
+	if !compacted {
+		return history, "", usage, false, nil
+	}
+	return recent, summary, usage, true, nil
+}
+
+// SummarizeNow summarizes all but the last keepRecent messages regardless of
+// the automatic threshold (the manual "compact now" action).
+func (c *Compactor) SummarizeNow(ctx context.Context, history []model.Message, keepRecent int) (summary string, covered int, usage model.Usage, ok bool) {
+	if keepRecent <= 0 {
+		keepRecent = c.keepRecent
+	}
+	if len(history) <= keepRecent {
+		return "", 0, model.Usage{}, false
+	}
+	stale := history[:len(history)-keepRecent]
+	summary, usage, ok = c.summarizeStale(ctx, stale)
+	if !ok {
+		return "", 0, usage, false
+	}
+	return summary, len(stale), usage, true
+}
+
+func (c *Compactor) summarizeStale(ctx context.Context, stale []model.Message) (string, model.Usage, bool) {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("Summarize this conversation history in under %d tokens for continuity. Keep: user goals, decisions made, facts retrieved from documents (with document titles), and open questions. Reply with the summary only, no preamble.\n\n", c.summaryTokens))
 	used := 0
@@ -122,17 +147,15 @@ func (c *Compactor) Compact(ctx context.Context, history []model.Message) (recen
 		Messages: []model.Message{{Role: model.RoleUser, Content: sb.String()}},
 	})
 	if gerr != nil {
-		return history, "", resp.Usage, false, nil
+		return "", resp.Usage, false
 	}
 	out := strings.TrimSpace(resp.Message.Content)
 	if max := c.summaryTokens * 4; len(out) > max {
-		// Reserve room for the ellipsis so the capped summary stays
-		// within the token budget in bytes as well as tokens.
 		if max > 3 {
 			out = out[:max-3] + "…"
 		} else {
 			out = out[:max]
 		}
 	}
-	return recent, out, resp.Usage, true, nil
+	return out, resp.Usage, true
 }

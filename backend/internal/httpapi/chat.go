@@ -48,6 +48,9 @@ type ConvoStore interface {
 	SetArchived(ctx context.Context, id, userID string, archived bool) error
 	SetActiveLeaf(ctx context.Context, id, userID, leafID string) error
 	SetSettings(ctx context.Context, id, userID string, patch storage.ConversationPatch) error
+	Summary(ctx context.Context, id, userID string) (storage.ConversationSummary, error)
+	SetSummary(ctx context.Context, id, userID, text string, covers int) error
+	ClearSummary(ctx context.Context, id, userID string) error
 	Touch(ctx context.Context, id string) error
 	Delete(ctx context.Context, id, userID string) error
 	CountMessages(ctx context.Context, id, userID string) (int, error)
@@ -503,6 +506,16 @@ func (s *Server) buildDeps(userID, convID, projectID string, sources *[]rag.Scor
 // The third return tells callers whether a summary landed, so they can
 // announce it on the stream.
 func (s *Server) maybeCompact(ctx context.Context, userID, convID string, spec chat.RunSpec, history []model.Message) (chat.RunSpec, []model.Message, bool) {
+	// A persisted summary replaces the covered prefix of the active path.
+	if s.deps.Convos != nil {
+		if sum, err := s.deps.Convos.Summary(ctx, convID, userID); err == nil && sum.Text != "" && sum.Covers > 0 && sum.Covers <= len(history) {
+			history = append([]model.Message(nil), history[sum.Covers:]...)
+			if spec.SystemPrompt == "" {
+				spec.SystemPrompt = chat.DefaultSystemPrompt
+			}
+			spec.SystemPrompt += "\n\n[Persisted conversation summary — earlier turns]\n" + sum.Text
+		}
+	}
 	if s.deps.Compactor == nil {
 		return spec, history, false
 	}
@@ -514,16 +527,22 @@ func (s *Server) maybeCompact(ctx context.Context, userID, convID string, spec c
 		spec.SystemPrompt = chat.DefaultSystemPrompt
 	}
 	spec.SystemPrompt += "\n\n[Compacted earlier context — summarized, not verbatim]\n" + summary
-	if cusage.InputTokens+cusage.OutputTokens > 0 {
-		cm := s.deps.Compactor.ModelName()
-		ccost := s.deps.Rates.RatesFor(cm).ChatCostMicros(cusage.InputTokens, cusage.OutputTokens)
-		_ = s.deps.Usage.Add(ctx, storage.UsageEvent{
-			UserID: userID, Kind: "compaction", Model: cm, ConversationID: &convID,
-			InputTokens: cusage.InputTokens, OutputTokens: cusage.OutputTokens,
-			Estimated: false, CostMicros: ccost,
-		})
-	}
+	s.meterCompaction(ctx, userID, convID, cusage)
 	return spec, recent, true
+}
+
+// meterCompaction records summarizer spend as a priced usage event.
+func (s *Server) meterCompaction(ctx context.Context, userID, convID string, usage model.Usage) {
+	if s.deps.Usage == nil || s.deps.Compactor == nil || usage.InputTokens+usage.OutputTokens == 0 {
+		return
+	}
+	cm := s.deps.Compactor.ModelName()
+	cost := s.deps.Rates.RatesFor(cm).ChatCostMicros(usage.InputTokens, usage.OutputTokens)
+	_ = s.deps.Usage.Add(ctx, storage.UsageEvent{
+		UserID: userID, Kind: "compaction", Model: cm, ConversationID: &convID,
+		InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens,
+		Estimated: false, CostMicros: cost,
+	})
 }
 
 // emitSources tells the client which document chunks the run retrieved, so

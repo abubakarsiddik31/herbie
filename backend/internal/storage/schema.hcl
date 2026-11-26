@@ -310,6 +310,20 @@ table "conversations" {
     null    = false
     default = ""
   }
+  column "summary" {
+    type    = text
+    null    = false
+    default = ""
+  }
+  column "summary_updated_at" {
+    type = timestamptz
+    null = true
+  }
+  column "summary_covers" {
+    type    = integer
+    null    = false
+    default = 0
+  }
   column "model" {
     type    = text
     null    = false
