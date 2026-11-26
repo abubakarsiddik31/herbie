@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { useTheme } from "next-themes";
 import {
@@ -38,6 +38,7 @@ interface Props {
   onOpenSettings: () => void;
   onOpenShortcuts: () => void;
   onOpenPromptLibrary: () => void;
+  semanticAvailable?: boolean;
 }
 
 interface PaletteItem {
@@ -61,13 +62,15 @@ export function CommandPalette({
   onOpenSettings,
   onOpenShortcuts,
   onOpenPromptLibrary,
+  semanticAvailable = false,
 }: Props) {
   const [query, setQuery] = useState("");
+  const [semantic, setSemantic] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const navigate = useNavigate();
   const { theme, setTheme } = useTheme();
   const inputRef = useRef<HTMLInputElement>(null);
-  const { data: searchData, isFetching: searching } = useMessageSearch(query, open);
+  const { data: searchData, isFetching: searching } = useMessageSearch(query, open, semantic);
 
   // Jumping to an off-path hit activates its branch first; the conversation
   // page then scrolls to `?m=`. Activation failures (run active, bot scope,
@@ -244,9 +247,14 @@ export function CommandPalette({
     }
   }
 
+  useEffect(() => {
+    if (!semanticAvailable) setSemantic(false);
+  }, [semanticAvailable]);
+
   function handleOpenChange(nextOpen: boolean) {
     if (!nextOpen) {
       setQuery("");
+      setSemantic(false);
       setSelectedIndex(0);
     }
     onOpenChange(nextOpen);
@@ -270,9 +278,28 @@ export function CommandPalette({
             className="h-12 w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground"
             autoFocus
           />
+          {semanticAvailable && (
+            <label className="ml-2 flex shrink-0 items-center gap-1 text-[11px] text-muted-foreground">
+              <input
+                type="checkbox"
+                checked={semantic}
+                onChange={(e) => setSemantic(e.target.checked)}
+                aria-label="Semantic message rerank"
+                title="Reranks keyword matches (top candidates) by embedding similarity; it does not find messages lacking the keywords."
+              />
+              Semantic rerank
+            </label>
+          )}
         </div>
         {searching && query.trim().length >= 2 && (
-          <p className="border-b px-4 py-1.5 text-[11px] text-muted-foreground">Searching messages…</p>
+          <p className="border-b px-4 py-1.5 text-[11px] text-muted-foreground">
+            {semantic ? "Reranking keyword matches…" : "Searching messages…"}
+          </p>
+        )}
+        {semantic && !searching && searchData?.semantic === false && query.trim().length >= 2 && (
+          <p className="border-b px-4 py-1.5 text-[11px] text-muted-foreground">
+            Semantic rerank unavailable; showing keyword order.
+          </p>
         )}
         <ScrollArea className="max-h-80">
           <div className="p-2">

@@ -26,7 +26,8 @@ func (s *Server) handleListModels(w http.ResponseWriter, _ *http.Request) {
 		out = append(out, modelDTO{ID: m.ID, Label: m.Label, Provider: m.Provider, Capabilities: m.Capabilities})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"default": chat.DefaultModel(s.deps.ModelKeys).ID,
-		"models":  out,
+		"default":        chat.DefaultModel(s.deps.ModelKeys).ID,
+		"models":         out,
+		"semanticSearch": s.deps.SemanticEmbedder != nil,
 	})
 }

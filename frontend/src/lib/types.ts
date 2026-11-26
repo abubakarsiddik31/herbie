@@ -18,7 +18,7 @@ export interface ModelInfo {
   provider: string;
   capabilities?: Record<string, boolean>;
 }
-export interface ModelsResponse { default: string; models: ModelInfo[] }
+export interface ModelsResponse { default: string; models: ModelInfo[]; semanticSearch?: boolean }
 export interface ConversationSettings {
   model: string;
   temperature: number | null;
@@ -346,10 +346,12 @@ export interface MessageSearchHit {
   role: "user" | "assistant";
   snippet: string;
   createdAt: string;
+  score?: number;
 }
 export interface MessageSearchResponse {
   hits: MessageSearchHit[];
   nextOffset: number | null;
+  semantic?: boolean;
 }
 
 export interface Session {

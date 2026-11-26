@@ -37,7 +37,10 @@ type Config struct {
 	// AppURL is the public SPA origin used in emailed links (defaults to
 	// FrontendOrigin). EmailVerificationRequired gates password login on a
 	// proven email; EmailLogLinks lets the dev log mailer print the link.
-	AppURL                    string
+	AppURL string
+	// SemanticSearchEnabled turns on embedding-based reranking of message
+	// search; it needs a Gemini key and Weaviate is not involved.
+	SemanticSearchEnabled     bool
 	EmailVerificationRequired bool
 	EmailLogLinks             bool
 	// AuthRateLimit caps login/register/reset/verify attempts per window;
@@ -379,6 +382,7 @@ func Load() (Config, error) {
 		TitleModel:                os.Getenv("TITLE_MODEL"),
 		AllowUserProviderKeys:     envBool("ALLOW_USER_PROVIDER_KEYS", false),
 		AppURL:                    os.Getenv("APP_URL"),
+		SemanticSearchEnabled:     envBool("SEMANTIC_SEARCH_ENABLED", false),
 		EmailVerificationRequired: envBool("EMAIL_VERIFICATION_REQUIRED", false),
 		EmailLogLinks:             envBool("EMAIL_LOG_LINKS", false),
 		AuthRateLimitMax:          envIntOr("AUTH_RATE_LIMIT_MAX", 20),

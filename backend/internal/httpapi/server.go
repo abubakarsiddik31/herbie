@@ -81,6 +81,9 @@ type ServerDeps struct {
 	Objects    storage.ObjectStore
 	// Account handles data export and account deletion. Nil = feature off.
 	Account AccountStore
+	// SemanticEmbedder reranks message-search hits by embedding similarity.
+	// Nil = semantic search is reported unavailable and FTS is used.
+	SemanticEmbedder MessageEmbedder
 }
 
 // PromptStore bridges the saved-prompt library to storage.

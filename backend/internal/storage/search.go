@@ -31,6 +31,8 @@ type SearchHit struct {
 	Title          string
 	Role           string
 	Snippet        string // ts_headline output bracketed by SnippetHitStart/Stop
+	Content        string // truncated original text, for semantic reranking
+	Score          float64
 	CreatedAt      time.Time
 }
 
@@ -75,6 +77,7 @@ func (s *MessageSearch) Search(ctx context.Context, userID, rawQuery string, lim
 		`WITH q AS (SELECT to_tsquery('simple', $2) AS query)
 		 SELECT m.id::text, m.conversation_id::text, c.title, m.role,
 		        ts_headline('simple', left(m.content, $5), q.query, $6) AS snippet,
+		        left(m.content, 2000) AS content,
 		        m.created_at
 		 FROM messages m
 		 JOIN conversations c ON c.id = m.conversation_id
@@ -95,7 +98,7 @@ func (s *MessageSearch) Search(ctx context.Context, userID, rawQuery string, lim
 	for rows.Next() {
 		var hit SearchHit
 		if err := rows.Scan(&hit.MessageID, &hit.ConversationID, &hit.Title, &hit.Role,
-			&hit.Snippet, &hit.CreatedAt); err != nil {
+			&hit.Snippet, &hit.Content, &hit.CreatedAt); err != nil {
 			return nil, false, fmt.Errorf("scan search hit: %w", err)
 		}
 		out = append(out, hit)
