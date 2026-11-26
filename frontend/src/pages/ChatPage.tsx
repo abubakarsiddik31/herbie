@@ -16,6 +16,7 @@ import {
   Download,
   Eye,
   FileCode,
+  GitCompare,
   GitFork,
   Globe,
   HelpCircle,
@@ -26,6 +27,7 @@ import {
   PenLine,
   RefreshCw,
   Reply,
+  ScrollText,
   Search,
   Share2,
   ShieldCheck,
@@ -85,6 +87,8 @@ import { extractCitationsFromContent } from "@/features/chat/citations";
 import { ConversationSettingsDialog } from "@/features/chat/ConversationSettingsDialog";
 import { conversationFilename, downloadMarkdown, toMarkdown } from "@/features/chat/exportMarkdown";
 import { ShareDialog } from "@/features/chat/ShareDialog";
+import { SummaryDialog } from "@/features/chat/SummaryDialog";
+import { CompareDialog } from "@/features/chat/CompareDialog";
 import { ShortcutsDialog } from "@/features/chat/ShortcutsDialog";
 import { useChat } from "@/features/chat/useChat";
 import { useModels } from "@/features/chat/useModels";
@@ -181,6 +185,8 @@ export function ChatPage() {
   const [pendingMessageDelete, setPendingMessageDelete] = useState<string | null>(null);
   const [sharing, setSharing] = useState<Conversation | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [summaryOpen, setSummaryOpen] = useState(false);
+  const [compareOpen, setCompareOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [promptLibraryOpen, setPromptLibraryOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
@@ -360,7 +366,7 @@ export function ChatPage() {
     selectedIdRef.current = selectedId;
   }, [selectedId]);
 
-  const { messages, setMessages, status, send, edit, regenerate, resolve, stop, reset, trace, pending, contextStatus, setContextStatus } = useChat(() => {
+  const { messages, setMessages, status, send, retrySend, canRetry, edit, regenerate, continueRun, resolve, stop, reset, trace, pending, contextStatus, setContextStatus } = useChat(() => {
     void queryClient.invalidateQueries({ queryKey: ["conversations"] });
     const id = selectedIdRef.current;
     if (id !== null) void queryClient.invalidateQueries({ queryKey: ["conversation", id] });
@@ -1235,7 +1241,26 @@ export function ChatPage() {
                           })()}
                           {m.error && <p className="text-destructive text-sm">{m.error}</p>}
                           {m.truncated && (
-                            <Badge variant="outline" className="text-muted-foreground text-xs">stopped early</Badge>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <Badge variant="outline" className="text-muted-foreground text-xs">stopped early</Badge>
+                              {messages[messages.length - 1]?.id === m.id && (
+                                <Button
+                                  variant="outline"
+                                  size="xs"
+                                  disabled={blockInteraction || running}
+                                  onClick={() =>
+                                    selectedId &&
+                                    continueRun(selectedId).catch((err) =>
+                                      setSendError(
+                                        err instanceof ApiError ? err.message : "Failed to continue",
+                                      ),
+                                    )
+                                  }
+                                >
+                                  Continue
+                                </Button>
+                              )}
+                            </div>
                           )}
                           {!m.streaming && (
                             <div className="flex items-center gap-1.5 pt-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
@@ -1363,6 +1388,22 @@ export function ChatPage() {
       {/* ChatGPT / Codex style Floating Composer */}
       <div className="p-3 md:p-4 bg-gradient-to-t from-background via-background to-transparent shrink-0">
         <div className="mx-auto w-full max-w-3xl">
+          {canRetry && (
+            <div className="mb-2 flex items-center justify-between gap-2 rounded-xl border border-destructive/30 bg-destructive/5 px-3 py-1.5 text-xs">
+              <span className="text-destructive">Connection lost. Retry will reuse the same send.</span>
+              <Button
+                variant="outline"
+                size="xs"
+                onClick={() =>
+                  retrySend().catch((err) =>
+                    setSendError(err instanceof ApiError ? err.message : "Failed to retry"),
+                  )
+                }
+              >
+                Retry
+              </Button>
+            </div>
+          )}
           {sendError && <p className="mb-2 text-destructive text-xs">{sendError}</p>}
           {attachments.length > 0 && (
             <div className="mb-2 flex flex-wrap gap-2">
@@ -1523,6 +1564,19 @@ export function ChatPage() {
                   <span className="hidden sm:inline font-mono">{modelLabel(activeSettings.model)}</span>
                 </Button>
 
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  className="rounded-lg text-muted-foreground hover:text-foreground"
+                  onClick={() => setSummaryOpen(true)}
+                  disabled={!selectedId || running || pending.length > 0}
+                  aria-label="Conversation summary"
+                  title="Conversation summary"
+                >
+                  <ScrollText className="size-3.5" />
+                </Button>
+
                 <ContextStatusMeter
                   estimatedTokens={activeEstimatedTokens}
                   thresholdTokens={activeThresholdTokens}
@@ -1560,6 +1614,25 @@ export function ChatPage() {
                     {voice.listening ? <Square className="size-3" /> : <Mic className="size-3.5" />}
                   </Button>
                 )}
+
+                <Button
+                  size="icon-xs"
+                  variant="ghost"
+                  className="rounded-lg size-7 text-muted-foreground hover:text-foreground"
+                  onClick={() => setCompareOpen(true)}
+                  disabled={
+                    !input.trim() ||
+                    running ||
+                    pending.length > 0 ||
+                    !selectedId ||
+                    attachments.length > 0 ||
+                    replyingTo !== null
+                  }
+                  aria-label="Compare models"
+                  title="Compare models"
+                >
+                  <GitCompare className="size-3.5" />
+                </Button>
 
                 {running ? (
                   <Button
@@ -1604,6 +1677,21 @@ export function ChatPage() {
         settings={activeSettings}
         onApply={applySettings}
         saving={updateSettings.isPending}
+      />
+
+      <CompareDialog
+        open={compareOpen}
+        onOpenChange={setCompareOpen}
+        conversationId={selectedId ?? undefined}
+        models={models}
+        prompt={input}
+        onRan={() => setInput("")}
+      />
+
+      <SummaryDialog
+        open={summaryOpen}
+        onOpenChange={setSummaryOpen}
+        conversationId={selectedId ?? undefined}
       />
 
       <PromptLibraryDialog

@@ -48,6 +48,9 @@ type ConvoStore interface {
 	SetArchived(ctx context.Context, id, userID string, archived bool) error
 	SetActiveLeaf(ctx context.Context, id, userID, leafID string) error
 	SetSettings(ctx context.Context, id, userID string, patch storage.ConversationPatch) error
+	Summary(ctx context.Context, id, userID string) (storage.ConversationSummary, error)
+	SetSummary(ctx context.Context, id, userID, text string, throughID *string) error
+	ClearSummary(ctx context.Context, id, userID string) error
 	Touch(ctx context.Context, id string) error
 	Delete(ctx context.Context, id, userID string) error
 	CountMessages(ctx context.Context, id, userID string) (int, error)
@@ -60,6 +63,7 @@ type MsgStore interface {
 	ForConversation(ctx context.Context, convID, userID string) ([]storage.Message, error)
 	ByID(ctx context.Context, msgID, userID string) (storage.Message, error)
 	PathToLeaf(ctx context.Context, convID, userID, leafID string) ([]storage.Message, error)
+	ByClientMessageID(ctx context.Context, convID, userID, clientID string) (storage.Message, error)
 	LatestRowID(ctx context.Context, convID, userID string) (string, error)
 	DeleteBranch(ctx context.Context, convID, msgID, userID string) error
 	CopyPath(ctx context.Context, srcConvID, userID, newConvID string, path []storage.Message) (string, error)
@@ -200,13 +204,26 @@ func rowOnPath(path []storage.Message, rowID string) int {
 	return -1
 }
 
+// handleRunStatus reports whether a run currently holds this conversation's
+// slot, so a reconnecting client can refetch once it is safe.
+func (s *Server) handleRunStatus(w http.ResponseWriter, r *http.Request) {
+	userID, _ := userIDFrom(r.Context())
+	convID := r.PathValue("id")
+	if _, err := s.deps.Convos.ByID(r.Context(), convID, userID); err != nil {
+		writeError(w, http.StatusNotFound, "not_found", "conversation not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"active": s.runActive(convID)})
+}
+
 func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 	userID, _ := userIDFrom(r.Context())
 	convID := r.PathValue("id")
 	var req struct {
-		Content   string       `json:"content"`
-		Images    []imageInput `json:"images"`
-		ReplyToID string       `json:"replyToId"`
+		Content         string       `json:"content"`
+		Images          []imageInput `json:"images"`
+		ReplyToID       string       `json:"replyToId"`
+		ClientMessageID string       `json:"clientMessageId"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", "invalid request body")
@@ -225,6 +242,11 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "validation_error", err.Error())
 		return
 	}
+	req.ClientMessageID = strings.TrimSpace(storage.SanitizeText(req.ClientMessageID))
+	if strings.ContainsRune(req.ClientMessageID, 0) || len([]rune(req.ClientMessageID)) > 100 {
+		writeError(w, http.StatusBadRequest, "bad_request", "invalid clientMessageId")
+		return
+	}
 
 	ctx := r.Context()
 	conv, err := s.deps.Convos.ByID(ctx, convID, userID)
@@ -237,6 +259,23 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	spec := s.runSpecFor(ctx, conv)
+
+	// Retried sends carry the same client id: return the existing prompt
+	// instead of creating a duplicate turn. Checked before quote resolution
+	// so a deleted quote target does not mask the duplicate.
+	if req.ClientMessageID != "" {
+		if _, derr := s.deps.Msgs.ByClientMessageID(ctx, convID, userID, req.ClientMessageID); derr == nil {
+			if s.runActive(convID) {
+				writeError(w, http.StatusConflict, "run_active", "a run is in progress")
+				return
+			}
+			writeError(w, http.StatusConflict, "duplicate_send", "this message was already sent")
+			return
+		} else if !errors.Is(derr, storage.ErrNotFound) {
+			writeError(w, http.StatusInternalServerError, "internal", "could not check message")
+			return
+		}
+	}
 
 	// The quote snapshot comes from the stored target, never the client.
 	quoteText := ""
@@ -299,10 +338,15 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 	promptID, err := s.deps.Msgs.Add(ctx, storage.Message{
 		ConversationID: convID, UserID: userID, Role: string(model.RoleUser),
 		ParentID: leaf, ReplyToID: req.ReplyToID, QuoteText: quoteText,
-		Content: req.Content,
-		Data:    mustJSON(model.Message{Role: model.RoleUser, Content: modelContent, Parts: parts}),
+		ClientMessageID: req.ClientMessageID,
+		Content:         req.Content,
+		Data:            mustJSON(model.Message{Role: model.RoleUser, Content: modelContent, Parts: parts}),
 	})
 	if err != nil {
+		if errors.Is(err, storage.ErrDuplicate) {
+			writeError(w, http.StatusConflict, "duplicate_send", "this message was already sent")
+			return
+		}
 		s.deps.Log.Error("could not store message", "err", err, "conv_id", convID)
 		writeError(w, http.StatusInternalServerError, "internal", "could not store message")
 		return
@@ -503,10 +547,33 @@ func (s *Server) buildDeps(userID, convID, projectID string, sources *[]rag.Scor
 // The third return tells callers whether a summary landed, so they can
 // announce it on the stream.
 func (s *Server) maybeCompact(ctx context.Context, userID, convID string, spec chat.RunSpec, history []model.Message) (chat.RunSpec, []model.Message, bool) {
+	// A persisted summary replaces the active-path prefix up to its recorded
+	// boundary message. Apply it only when history is the full active path
+	// (not an approvals suffix) and the boundary still exists on that path,
+	// so branches and resumes never lose untouched turns.
+	if s.deps.Convos != nil {
+		if sum, err := s.deps.Convos.Summary(ctx, convID, userID); err == nil && sum.Text != "" && sum.ThroughID != nil {
+			if path, perr := s.pathRows(ctx, convID, userID); perr == nil {
+				// Send persists the prompt before this call, so path may be
+				// one row longer than the decoded history. Longer gaps are
+				// edits/regenerates/approvals suffixes and must not apply.
+				if diff := len(path) - len(history); (diff == 0 || diff == 1) && historyMatchesPrefix(path, history) {
+					if idx := rowOnPath(path, *sum.ThroughID); idx >= 0 && idx+1 <= len(history) {
+						history = append([]model.Message(nil), history[idx+1:]...)
+						if spec.SystemPrompt == "" {
+							spec.SystemPrompt = chat.DefaultSystemPrompt
+						}
+						spec.SystemPrompt += "\n\n[Persisted conversation summary — earlier turns]\n" + sum.Text
+					}
+				}
+			}
+		}
+	}
 	if s.deps.Compactor == nil {
 		return spec, history, false
 	}
 	recent, summary, cusage, did, _ := s.deps.Compactor.Compact(ctx, history)
+	s.meterCompaction(ctx, userID, convID, cusage)
 	if !did {
 		return spec, history, false
 	}
@@ -514,16 +581,41 @@ func (s *Server) maybeCompact(ctx context.Context, userID, convID string, spec c
 		spec.SystemPrompt = chat.DefaultSystemPrompt
 	}
 	spec.SystemPrompt += "\n\n[Compacted earlier context — summarized, not verbatim]\n" + summary
-	if cusage.InputTokens+cusage.OutputTokens > 0 {
-		cm := s.deps.Compactor.ModelName()
-		ccost := s.deps.Rates.RatesFor(cm).ChatCostMicros(cusage.InputTokens, cusage.OutputTokens)
-		_ = s.deps.Usage.Add(ctx, storage.UsageEvent{
-			UserID: userID, Kind: "compaction", Model: cm, ConversationID: &convID,
-			InputTokens: cusage.InputTokens, OutputTokens: cusage.OutputTokens,
-			Estimated: false, CostMicros: ccost,
-		})
-	}
 	return spec, recent, true
+}
+
+// historyMatchesPrefix reports whether the decoded history still corresponds
+// to the start of the stored path. This distinguishes a normal send (path has
+// one trailing prompt) from an edit/approval suffix that must not be sliced.
+func historyMatchesPrefix(path []storage.Message, history []model.Message) bool {
+	if len(history) > len(path) {
+		return false
+	}
+	for i := range history {
+		var decoded model.Message
+		if err := json.Unmarshal(path[i].Data, &decoded); err != nil {
+			return false
+		}
+		if decoded.Role != history[i].Role || decoded.Content != history[i].Content ||
+			len(decoded.Parts) != len(history[i].Parts) {
+			return false
+		}
+	}
+	return true
+}
+
+// meterCompaction records summarizer spend as a priced usage event.
+func (s *Server) meterCompaction(ctx context.Context, userID, convID string, usage model.Usage) {
+	if s.deps.Usage == nil || s.deps.Compactor == nil || usage.InputTokens+usage.OutputTokens == 0 {
+		return
+	}
+	cm := s.deps.Compactor.ModelName()
+	cost := s.deps.Rates.RatesFor(cm).ChatCostMicros(usage.InputTokens, usage.OutputTokens)
+	_ = s.deps.Usage.Add(ctx, storage.UsageEvent{
+		UserID: userID, Kind: "compaction", Model: cm, ConversationID: &convID,
+		InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens,
+		Estimated: false, CostMicros: cost,
+	})
 }
 
 // emitSources tells the client which document chunks the run retrieved, so
@@ -1387,6 +1479,10 @@ func (s *Server) pauseRun(ctx context.Context, userID, convID string, spec chat.
 // batches), which makes a positional boundary wrong.
 func (s *Server) persistFailure(ctx context.Context, userID, convID string, spec chat.RunSpec, startParentID string, skip map[string]bool, newFrom int, runErr error, sink *sseSink) {
 	clientGone := errors.Is(runErr, context.Canceled) || errors.Is(runErr, context.DeadlineExceeded)
+	// A user-initiated stop cancels the request context; persist the partial
+	// with a detached, bounded context so the interrupted answer survives.
+	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+	defer cancel()
 	var runError *golem.RunError
 	_ = errors.As(runErr, &runError)
 
@@ -1398,12 +1494,12 @@ func (s *Server) persistFailure(ctx context.Context, userID, convID string, spec
 		if newFrom < 0 {
 			newFrom = replayedPrefixLen(partial.Messages)
 		}
-		if _, err := s.persistRunMessages(ctx, userID, convID, spec.Model, partial.Messages, partial.Usage, partial.Requests, true, skip, newFrom, startParentID, nil); err != nil {
+		if _, err := s.persistRunMessages(persistCtx, userID, convID, spec.Model, partial.Messages, partial.Usage, partial.Requests, true, skip, newFrom, startParentID, nil); err != nil {
 			s.deps.Log.Error("persist partial", "err", err)
 		}
-		_ = s.deps.Usage.Add(ctx, usageEventFor(userID, convID, spec.Model, partial.Usage, partial.Requests, s.deps.Rates))
+		_ = s.deps.Usage.Add(persistCtx, usageEventFor(userID, convID, spec.Model, partial.Usage, partial.Requests, s.deps.Rates))
 	}
-	_ = s.deps.Convos.Touch(ctx, convID)
+	_ = s.deps.Convos.Touch(persistCtx, convID)
 	if clientGone {
 		return // client is gone; quiet stop for user-initiated cancels
 	}

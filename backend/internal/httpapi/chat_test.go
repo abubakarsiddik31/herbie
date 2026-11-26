@@ -88,12 +88,13 @@ func postMessage(t *testing.T, h http.Handler, token, convID, content string) *h
 }
 
 type fakeConvos struct {
-	convs map[string]storage.Conversation
-	msgs  *fakeMsgs
+	convs     map[string]storage.Conversation
+	msgs      *fakeMsgs
+	summaries map[string]storage.ConversationSummary
 }
 
 func newFakeConvos(msgs *fakeMsgs) *fakeConvos {
-	f := &fakeConvos{convs: map[string]storage.Conversation{}, msgs: msgs}
+	f := &fakeConvos{convs: map[string]storage.Conversation{}, msgs: msgs, summaries: map[string]storage.ConversationSummary{}}
 	msgs.convs = f
 	return f
 }
@@ -212,6 +213,31 @@ func (f *fakeConvos) LatestIDsByUser(_ context.Context, userID string) (map[stri
 func (f *fakeConvos) mustCreate(userID, title string) storage.Conversation {
 	conv, _ := f.Create(context.Background(), userID, title, storage.ConversationPatch{})
 	return conv
+}
+
+func (f *fakeConvos) Summary(_ context.Context, id, userID string) (storage.ConversationSummary, error) {
+	conv, ok := f.convs[id]
+	if !ok || conv.UserID != userID {
+		return storage.ConversationSummary{}, storage.ErrNotFound
+	}
+	return f.summaries[id], nil
+}
+
+func (f *fakeConvos) SetSummary(_ context.Context, id, userID, text string, throughID *string) error {
+	conv, ok := f.convs[id]
+	if !ok || conv.UserID != userID {
+		return storage.ErrNotFound
+	}
+	if text == "" {
+		throughID = nil
+	}
+	now := time.Now()
+	f.summaries[id] = storage.ConversationSummary{Text: text, ThroughID: throughID, UpdatedAt: &now}
+	return nil
+}
+
+func (f *fakeConvos) ClearSummary(ctx context.Context, id, userID string) error {
+	return f.SetSummary(ctx, id, userID, "", nil)
 }
 
 func (f *fakeConvos) SetSettings(_ context.Context, id, userID string, patch storage.ConversationPatch) error {
@@ -380,6 +406,15 @@ func (f *fakeMsgs) forConv(convID, userID string) []storage.Message {
 		}
 	}
 	return out
+}
+
+func (f *fakeMsgs) ByClientMessageID(_ context.Context, convID, userID, clientID string) (storage.Message, error) {
+	for _, m := range f.rows {
+		if m.ConversationID == convID && m.UserID == userID && m.ClientMessageID == clientID {
+			return m, nil
+		}
+	}
+	return storage.Message{}, storage.ErrNotFound
 }
 
 func (f *fakeMsgs) ByID(_ context.Context, msgID, userID string) (storage.Message, error) {

@@ -409,8 +409,9 @@ describe("ChatPage conversation actions", () => {
     await waitFor(() => expect(errorSpy).toHaveBeenCalledWith("Resolve the pending approval first"));
   });
 
-  it("surfaces a run_active send error without leaving a streaming placeholder", async () => {
+  it("surfaces an active run as a retryable error without a streaming placeholder", async () => {
     server.use(
+      http.get("*/api/conversations/c1/run", () => HttpResponse.json({ active: false })),
       http.get("*/api/conversations/c1", () =>
         HttpResponse.json(detail({ activeLeafId: "a1" }, [
           message({ id: "u1", role: "user", content: "hello" }),

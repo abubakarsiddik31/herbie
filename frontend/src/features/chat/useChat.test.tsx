@@ -2,7 +2,7 @@ import { act } from "react";
 import { renderHook } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { useChat } from "./useChat";
 import { useAuth } from "@/stores/auth";
 
@@ -119,8 +119,9 @@ describe("useChat send", () => {
     expect(result.current.trace).toContain("earlier history summarized");
   });
 
-  it("settles the assistant placeholder when a run is already active", async () => {
+  it("surfaces run_active as a retryable error", async () => {
     server.use(
+      http.get("*/api/conversations/c1/run", () => HttpResponse.json({ active: false })),
       http.post("*/api/conversations/c1/messages", () =>
         HttpResponse.json(
           { error: { code: "run_active", message: "A run is in progress" } },
@@ -128,13 +129,16 @@ describe("useChat send", () => {
         ),
       ),
     );
-    const { result } = renderHook(() => useChat());
+    const onDone = vi.fn();
+    const { result } = renderHook(() => useChat(onDone));
     await act(async () => {
       await expect(result.current.send("hi", "c1")).rejects.toThrow("A run is in progress");
     });
     const assistant = result.current.messages.find((m) => m.role === "assistant");
     expect(assistant).toMatchObject({ streaming: false, error: "A run is in progress" });
     expect(result.current.status).toBe("error");
+    expect(result.current.canRetry).toBe(true);
+    expect(onDone).toHaveBeenCalled();
   });
 
   it("tracks context status and compaction updates from stream frames", async () => {
@@ -163,6 +167,62 @@ describe("useChat send", () => {
       exact: false,
       breakdown: { totalTokens: 2415, exact: false, model: "gemini-3.5-flash" },
     });
+  });
+});
+
+describe("useChat continue", () => {
+  it("streams a continuation and replaces trailing assistant rows", async () => {
+    server.use(
+      http.post("*/api/conversations/c1/continue", () =>
+        new HttpResponse(
+          sseBody([
+            'event: delta\ndata: {"text":" more text"}\n\n',
+            'event: done\ndata: {"messageId":"a2","inputTokens":1,"outputTokens":1,"requests":1,"costUsd":0}\n\n',
+          ]),
+          { headers: { "Content-Type": "text/event-stream" } },
+        ),
+      ),
+    );
+    const { result } = renderHook(() => useChat());
+    act(() =>
+      result.current.setMessages([
+        { id: "u1", role: "user", content: "question", truncated: false, createdAt: "" },
+        { id: "a1", role: "assistant", content: "partial", truncated: true, createdAt: "" },
+      ]),
+    );
+    await act(async () => {
+      await result.current.continueRun("c1");
+    });
+    const assistant = result.current.messages[result.current.messages.length - 1];
+    expect(assistant.role).toBe("assistant");
+    expect(assistant.content).toContain("more text");
+    expect(result.current.messages.filter((m) => m.role === "user")).toHaveLength(1);
+    expect(result.current.messages.filter((m) => m.role === "assistant")).toHaveLength(2);
+    expect(result.current.messages[1].content).toBe("partial");
+  });
+});
+
+describe("useChat idempotent sends", () => {
+  it("sends a clientMessageId and treats duplicate_send as already stored", async () => {
+    const captured: { body: Record<string, unknown> | null } = { body: null };
+    server.use(
+      http.post("*/api/conversations/c1/messages", async ({ request }) => {
+        captured.body = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json(
+          { error: { code: "duplicate_send", message: "already sent" } },
+          { status: 409 },
+        );
+      }),
+    );
+    const onDone = vi.fn();
+    const { result } = renderHook(() => useChat(onDone));
+    await act(async () => {
+      await result.current.send("hi", "c1");
+    });
+    expect(captured.body?.clientMessageId).toEqual(expect.any(String));
+    expect(onDone).toHaveBeenCalled();
+    expect(result.current.status).toBe("idle");
+    expect(result.current.messages).toHaveLength(0);
   });
 });
 

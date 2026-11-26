@@ -802,6 +802,7 @@ func TestRunnerCompactsHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	parent := ""
 	for i := range 4 {
 		role := model.RoleUser
 		content := fmt.Sprintf("older question %d", i)
@@ -809,12 +810,14 @@ func TestRunnerCompactsHistory(t *testing.T) {
 			role = model.RoleAssistant
 			content = fmt.Sprintf("older answer %d", i)
 		}
-		if _, err := msgs.Add(context.Background(), storage.Message{
-			ConversationID: conv.ID, UserID: "u-1", Role: string(role),
+		id, err := msgs.Add(context.Background(), storage.Message{
+			ConversationID: conv.ID, UserID: "u-1", Role: string(role), ParentID: parent,
 			Content: content, Data: mustJSON(model.Message{Role: role, Content: content}),
-		}); err != nil {
+		})
+		if err != nil {
 			t.Fatal(err)
 		}
+		parent = id
 	}
 	run, err := runs.Create(context.Background(), storage.BotRun{
 		ConversationID: conv.ID, UserID: "u-1", Task: "check the inbox",

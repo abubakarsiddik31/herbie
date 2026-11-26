@@ -21,7 +21,8 @@ func (s *Server) handleEditMessage(w http.ResponseWriter, r *http.Request) {
 	convID := r.PathValue("id")
 	msgID := r.PathValue("messageId")
 	var req struct {
-		Content string `json:"content"`
+		Content         string `json:"content"`
+		ClientMessageID string `json:"clientMessageId"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", "invalid request body")
@@ -35,6 +36,11 @@ func (s *Server) handleEditMessage(w http.ResponseWriter, r *http.Request) {
 	if runes := []rune(req.Content); len(runes) > maxPromptChars {
 		req.Content = string(runes[:maxPromptChars]) + "\n\n[input auto-compacted: truncated at 1,000,000 characters]"
 	}
+	req.ClientMessageID = strings.TrimSpace(storage.SanitizeText(req.ClientMessageID))
+	if strings.ContainsRune(req.ClientMessageID, 0) || len([]rune(req.ClientMessageID)) > 100 {
+		writeError(w, http.StatusBadRequest, "bad_request", "invalid clientMessageId")
+		return
+	}
 
 	ctx := r.Context()
 	conv, err := s.deps.Convos.ByID(ctx, convID, userID)
@@ -47,6 +53,15 @@ func (s *Server) handleEditMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	spec := s.runSpecFor(ctx, conv)
+	if req.ClientMessageID != "" {
+		if _, derr := s.deps.Msgs.ByClientMessageID(ctx, convID, userID, req.ClientMessageID); derr == nil {
+			writeError(w, http.StatusConflict, "duplicate_send", "this edit was already sent")
+			return
+		} else if !errors.Is(derr, storage.ErrNotFound) {
+			writeError(w, http.StatusInternalServerError, "internal", "could not check message")
+			return
+		}
+	}
 	if s.blockedByPendingApproval(w, ctx, convID, userID) {
 		return
 	}
@@ -111,10 +126,15 @@ func (s *Server) handleEditMessage(w http.ResponseWriter, r *http.Request) {
 	siblingID, err := s.deps.Msgs.Add(ctx, storage.Message{
 		ConversationID: convID, UserID: userID, Role: string(model.RoleUser),
 		ParentID: target.ParentID, ReplyToID: target.ReplyToID, QuoteText: target.QuoteText,
-		Content: req.Content,
-		Data:    mustJSON(payload),
+		ClientMessageID: req.ClientMessageID,
+		Content:         req.Content,
+		Data:            mustJSON(payload),
 	})
 	if err != nil {
+		if errors.Is(err, storage.ErrDuplicate) {
+			writeError(w, http.StatusConflict, "duplicate_send", "this edit was already sent")
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "internal", "could not store message")
 		return
 	}

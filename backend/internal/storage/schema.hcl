@@ -310,6 +310,19 @@ table "conversations" {
     null    = false
     default = ""
   }
+  column "summary" {
+    type    = text
+    null    = false
+    default = ""
+  }
+  column "summary_updated_at" {
+    type = timestamptz
+    null = true
+  }
+  column "summary_through_message_id" {
+    type = uuid
+    null = true
+  }
   column "model" {
     type    = text
     null    = false
@@ -512,6 +525,10 @@ table "messages" {
     type = text
     null = true
   }
+  column "client_message_id" {
+    type = text
+    null = true
+  }
   # Maintained by the messages_search_vector trigger; truncated to 100,000
   # characters to keep the GIN entry bounded.
   column "search_vector" {
@@ -555,6 +572,11 @@ table "messages" {
   index "idx_messages_reply_to" {
     columns = [column.reply_to_id]
     where   = sql("reply_to_id IS NOT NULL")
+  }
+  index "idx_messages_client_id" {
+    unique  = true
+    columns = [column.conversation_id, column.client_message_id]
+    where   = sql("client_message_id IS NOT NULL")
   }
   index "idx_messages_search" {
     type    = GIN

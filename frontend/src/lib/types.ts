@@ -360,3 +360,27 @@ export interface Session {
   lastUsedAt: string;
   current: boolean;
 }
+
+export interface ConversationSummary {
+  summary: string;
+  updatedAt?: string;
+  coveredMessages: number;
+  totalMessages: number;
+  thresholdTokens: number;
+  keepRecent: number;
+}
+
+export interface CompareResult {
+  model: string;
+  messageId?: string;
+  content?: string;
+  inputTokens: number;
+  outputTokens: number;
+  costUsd: number;
+  error?: string;
+}
+
+export interface CompareResponse {
+  promptMessageId: string;
+  results: CompareResult[];
+}

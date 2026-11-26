@@ -1,10 +1,24 @@
 import { useCallback, useRef, useState } from "react";
-import { BASE, ApiError, tryRefresh } from "@/lib/api";
+import { BASE, ApiError, apiFetch, tryRefresh } from "@/lib/api";
 import { parseSSE } from "@/lib/sse";
 import { useAuth } from "@/stores/auth";
 import type { ChatMessage, PendingApproval, Source } from "@/lib/types";
 
 export type RunStatus = "idle" | "running" | "error";
+
+// waitForRunToSettle polls the in-process run registry so a reconnecting
+// client refetches only after the server has stopped writing the turn.
+async function waitForRunToSettle(conversationId: string): Promise<void> {
+  for (let i = 0; i < 12; i++) {
+    try {
+      const status = await apiFetch<{ active: boolean }>(`/api/conversations/${conversationId}/run`);
+      if (!status.active) return;
+    } catch {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+}
 
 export interface ContextBreakdown {
   systemTokens: number;
@@ -74,6 +88,7 @@ export function useChat(onDone?: () => void) {
   const [pending, setPending] = useState<PendingApproval[]>([]);
   const [status, setStatus] = useState<RunStatus>("idle");
   const [contextStatus, setContextStatus] = useState<ContextStatus | null>(null);
+  const [canRetry, setCanRetry] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
 
   const stop = useCallback(() => abortRef.current?.abort(), []);
@@ -86,6 +101,8 @@ export function useChat(onDone?: () => void) {
     setPending([]);
     setContextStatus(null);
     setStatus("idle");
+    lastSendRef.current = null;
+    setCanRetry(false);
   }, []);
 
   // consumeStream drains a chat SSE response (send-message or approvals),
@@ -204,11 +221,13 @@ export function useChat(onDone?: () => void) {
       if (res.status === 401) useAuth.getState().clear();
       // Surface API errors (e.g. 409 approval_pending) with their message.
       let message = `stream failed (${res.status})`;
+      let code = "error";
       try {
-        const errBody = (await res.json()) as { error?: { message: string } };
+        const errBody = (await res.json()) as { error?: { code?: string; message: string } };
         if (errBody.error?.message) message = errBody.error.message;
+        if (errBody.error?.code) code = errBody.error.code;
       } catch { /* non-JSON error body */ }
-      throw new ApiError(res.status, "error", message);
+      throw new ApiError(res.status, code, message);
     }
     return res;
   }, []);
@@ -228,16 +247,34 @@ export function useChat(onDone?: () => void) {
           setStatus("idle");
         }
       } else {
+        const conversationId = path.match(/\/conversations\/([^/]+)/)?.[1];
         if (abortRef.current === controller) {
           setMessages((m) => m.map((msg) => msg.id === assistantId
             ? { ...msg, streaming: false, error: (err as Error).message }
             : msg));
           setStatus("error");
         }
+        // A duplicate is already stored; the send path handles its refetch.
+        if (!(err instanceof ApiError && err.code === "duplicate_send")) {
+          if (conversationId) {
+            void waitForRunToSettle(conversationId).then(() => onDone?.());
+          } else {
+            onDone?.();
+          }
+        }
         throw err;
       }
     }
   }, [consumeStream, streamPOST]);
+
+  const lastSendRef = useRef<{
+    content: string;
+    conversationId: string;
+    images?: { mediaType: string; data: string }[];
+    replyToId?: string;
+    quoteText?: string;
+    clientMessageId: string;
+  } | null>(null);
 
   const send = useCallback(async (
     content: string,
@@ -245,8 +282,15 @@ export function useChat(onDone?: () => void) {
     images?: { mediaType: string; data: string }[],
     replyToId?: string,
     quoteText?: string,
+    clientMessageId?: string,
   ) => {
     const cleanContent = content.replace(/\0/g, "");
+    const idempotencyKey = clientMessageId ?? crypto.randomUUID();
+    setCanRetry(false);
+    lastSendRef.current = {
+      content: cleanContent, conversationId, images, replyToId, quoteText,
+      clientMessageId: idempotencyKey,
+    };
     const controller = new AbortController();
     abortRef.current = controller;
     const userMsg: ChatMessage = {
@@ -263,11 +307,33 @@ export function useChat(onDone?: () => void) {
     setTrace([]);
     setPending([]);
     setStatus("running");
-    const body: Record<string, unknown> = { content: cleanContent };
+    const body: Record<string, unknown> = { content: cleanContent, clientMessageId: idempotencyKey };
     if (images?.length) body.images = images;
     if (replyToId) body.replyToId = replyToId;
-    await start(`/api/conversations/${conversationId}/messages`, body, controller, assistantId);
-  }, [start]);
+    try {
+      await start(`/api/conversations/${conversationId}/messages`, body, controller, assistantId);
+    } catch (err) {
+      if (err instanceof ApiError && err.code === "duplicate_send") {
+        // The retry's prompt is already stored; drop the optimistic rows and
+        // let the refetch show the durable transcript.
+        lastSendRef.current = null;
+        setCanRetry(false);
+        setMessages((m) => m.filter((msg) => msg.id !== assistantId && msg.id !== userMsg.id));
+        setStatus("idle");
+        onDone?.();
+        return;
+      }
+      lastSendRef.current = null;
+      setCanRetry(true);
+      throw err;
+    }
+  }, [start, onDone]);
+
+  const retrySend = useCallback(async () => {
+    const last = lastSendRef.current;
+    if (!last) return;
+    await send(last.content, last.conversationId, last.images, last.replyToId, last.quoteText, last.clientMessageId);
+  }, [send]);
 
   // edit rewrites one user message and re-runs the conversation from it:
   // the local thread truncates to the edited message, then a fresh
@@ -289,7 +355,10 @@ export function useChat(onDone?: () => void) {
     setTrace([]);
     setPending([]);
     setStatus("running");
-    await start(`/api/conversations/${conversationId}/messages/${msgId}/edit`, { content: cleanContent }, controller, assistantId);
+    await start(`/api/conversations/${conversationId}/messages/${msgId}/edit`, {
+      content: cleanContent,
+      clientMessageId: crypto.randomUUID(),
+    }, controller, assistantId);
   }, [start]);
 
   // regenerate replaces the last assistant answer: trailing non-user
@@ -312,6 +381,25 @@ export function useChat(onDone?: () => void) {
     await start(`/api/conversations/${conversationId}/regenerate`, model ? { model } : {}, controller, assistantId);
   }, [start]);
 
+  // continueRun resumes an interrupted answer as a new assistant branch
+  // under the same user row; the partial answer stays off-path.
+  const continueRun = useCallback(async (conversationId: string) => {
+    const controller = new AbortController();
+    abortRef.current = controller;
+    const assistantId = crypto.randomUUID();
+    lastSendRef.current = null;
+    setCanRetry(false);
+    // Keep the partial answer visible; the continuation streams beneath it.
+    setMessages((m) => [
+      ...m,
+      { id: assistantId, role: "assistant", content: "", truncated: false, createdAt: new Date().toISOString(), streaming: true },
+    ]);
+    setTrace([]);
+    setPending([]);
+    setStatus("running");
+    await start(`/api/conversations/${conversationId}/continue`, {}, controller, assistantId);
+  }, [start]);
+
   const resolve = useCallback(async (conversationId: string, decisions: ApprovalDecision[]) => {
     const controller = new AbortController();
     abortRef.current = controller;
@@ -325,5 +413,8 @@ export function useChat(onDone?: () => void) {
     await start(`/api/conversations/${conversationId}/approvals`, { decisions }, controller, assistantId);
   }, [start]);
 
-  return { messages, setMessages, status, send, edit, regenerate, resolve, stop, reset, trace, pending, contextStatus, setContextStatus };
+  return {
+    messages, setMessages, status, send, retrySend, canRetry, edit, regenerate,
+    continueRun, resolve, stop, reset, trace, pending, contextStatus, setContextStatus,
+  };
 }

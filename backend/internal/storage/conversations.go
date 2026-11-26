@@ -397,3 +397,53 @@ func escapeLike(q string) string {
 	q = strings.ReplaceAll(q, `%`, `\%`)
 	return strings.ReplaceAll(q, `_`, `\_`)
 }
+
+// ConversationSummary is the persisted, editable conversation summary.
+// ThroughID is the last message (on the active path when compacted) the
+// summary replaces; nil means the summary is view-only.
+type ConversationSummary struct {
+	Text      string
+	UpdatedAt *time.Time
+	ThroughID *string
+}
+
+// Summary loads the conversation's stored summary.
+func (c *Conversations) Summary(ctx context.Context, id, userID string) (ConversationSummary, error) {
+	var out ConversationSummary
+	err := c.pool.QueryRow(ctx,
+		`SELECT summary, summary_updated_at, summary_through_message_id::text FROM conversations WHERE id = $1 AND user_id = $2`,
+		id, userID).Scan(&out.Text, &out.UpdatedAt, &out.ThroughID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ConversationSummary{}, ErrNotFound
+	}
+	if err != nil {
+		return ConversationSummary{}, fmt.Errorf("get conversation summary: %w", err)
+	}
+	return out, nil
+}
+
+// SetSummary stores an edited or freshly generated summary. An empty text
+// clears the applied boundary.
+func (c *Conversations) SetSummary(ctx context.Context, id, userID, text string, throughID *string) error {
+	if text == "" {
+		throughID = nil
+	}
+	tag, err := c.pool.Exec(ctx,
+		`UPDATE conversations
+		 SET summary = $3, summary_through_message_id = $4::uuid,
+		     summary_updated_at = CASE WHEN $3 = '' THEN NULL ELSE now() END
+		 WHERE id = $1 AND user_id = $2`,
+		id, userID, text, throughID)
+	if err != nil {
+		return fmt.Errorf("set conversation summary: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// ClearSummary removes the stored summary without touching messages.
+func (c *Conversations) ClearSummary(ctx context.Context, id, userID string) error {
+	return c.SetSummary(ctx, id, userID, "", nil)
+}
