@@ -363,7 +363,7 @@ export function ChatPage() {
     selectedIdRef.current = selectedId;
   }, [selectedId]);
 
-  const { messages, setMessages, status, send, edit, regenerate, resolve, stop, reset, trace, pending, contextStatus, setContextStatus } = useChat(() => {
+  const { messages, setMessages, status, send, retrySend, edit, regenerate, resolve, stop, reset, trace, pending, contextStatus, setContextStatus } = useChat(() => {
     void queryClient.invalidateQueries({ queryKey: ["conversations"] });
     const id = selectedIdRef.current;
     if (id !== null) void queryClient.invalidateQueries({ queryKey: ["conversation", id] });
@@ -1236,7 +1236,26 @@ export function ChatPage() {
                               </div>
                             );
                           })()}
-                          {m.error && <p className="text-destructive text-sm">{m.error}</p>}
+                          {m.error && (
+                            <div className="flex flex-wrap items-center gap-2">
+                              <p className="text-destructive text-sm">{m.error}</p>
+                              {status === "error" && (
+                                <Button
+                                  variant="outline"
+                                  size="xs"
+                                  onClick={() =>
+                                    retrySend().catch((err) =>
+                                      setSendError(
+                                        err instanceof ApiError ? err.message : "Failed to retry",
+                                      ),
+                                    )
+                                  }
+                                >
+                                  Retry
+                                </Button>
+                              )}
+                            </div>
+                          )}
                           {m.truncated && (
                             <Badge variant="outline" className="text-muted-foreground text-xs">stopped early</Badge>
                           )}

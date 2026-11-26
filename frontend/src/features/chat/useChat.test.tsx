@@ -2,7 +2,7 @@ import { act } from "react";
 import { renderHook } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { useChat } from "./useChat";
 import { useAuth } from "@/stores/auth";
 
@@ -163,6 +163,30 @@ describe("useChat send", () => {
       exact: false,
       breakdown: { totalTokens: 2415, exact: false, model: "gemini-3.5-flash" },
     });
+  });
+});
+
+describe("useChat idempotent sends", () => {
+  it("sends a clientMessageId and treats duplicate_send as already stored", async () => {
+    const captured: { body: Record<string, unknown> | null } = { body: null };
+    server.use(
+      http.post("*/api/conversations/c1/messages", async ({ request }) => {
+        captured.body = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json(
+          { error: { code: "duplicate_send", message: "already sent" } },
+          { status: 409 },
+        );
+      }),
+    );
+    const onDone = vi.fn();
+    const { result } = renderHook(() => useChat(onDone));
+    await act(async () => {
+      await result.current.send("hi", "c1");
+    });
+    expect(captured.body?.clientMessageId).toEqual(expect.any(String));
+    expect(onDone).toHaveBeenCalled();
+    expect(result.current.status).toBe("idle");
+    expect(result.current.messages).toHaveLength(0);
   });
 });
 

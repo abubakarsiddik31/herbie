@@ -204,11 +204,13 @@ export function useChat(onDone?: () => void) {
       if (res.status === 401) useAuth.getState().clear();
       // Surface API errors (e.g. 409 approval_pending) with their message.
       let message = `stream failed (${res.status})`;
+      let code = "error";
       try {
-        const errBody = (await res.json()) as { error?: { message: string } };
+        const errBody = (await res.json()) as { error?: { code?: string; message: string } };
         if (errBody.error?.message) message = errBody.error.message;
+        if (errBody.error?.code) code = errBody.error.code;
       } catch { /* non-JSON error body */ }
-      throw new ApiError(res.status, "error", message);
+      throw new ApiError(res.status, code, message);
     }
     return res;
   }, []);
@@ -234,10 +236,22 @@ export function useChat(onDone?: () => void) {
             : msg));
           setStatus("error");
         }
+        // The server may have persisted a prompt/partial before the stream
+        // dropped; refetch so the transcript reflects the durable state.
+        onDone?.();
         throw err;
       }
     }
   }, [consumeStream, streamPOST]);
+
+  const lastSendRef = useRef<{
+    content: string;
+    conversationId: string;
+    images?: { mediaType: string; data: string }[];
+    replyToId?: string;
+    quoteText?: string;
+    clientMessageId: string;
+  } | null>(null);
 
   const send = useCallback(async (
     content: string,
@@ -245,8 +259,14 @@ export function useChat(onDone?: () => void) {
     images?: { mediaType: string; data: string }[],
     replyToId?: string,
     quoteText?: string,
+    clientMessageId?: string,
   ) => {
     const cleanContent = content.replace(/\0/g, "");
+    const idempotencyKey = clientMessageId ?? crypto.randomUUID();
+    lastSendRef.current = {
+      content: cleanContent, conversationId, images, replyToId, quoteText,
+      clientMessageId: idempotencyKey,
+    };
     const controller = new AbortController();
     abortRef.current = controller;
     const userMsg: ChatMessage = {
@@ -263,11 +283,29 @@ export function useChat(onDone?: () => void) {
     setTrace([]);
     setPending([]);
     setStatus("running");
-    const body: Record<string, unknown> = { content: cleanContent };
+    const body: Record<string, unknown> = { content: cleanContent, clientMessageId: idempotencyKey };
     if (images?.length) body.images = images;
     if (replyToId) body.replyToId = replyToId;
-    await start(`/api/conversations/${conversationId}/messages`, body, controller, assistantId);
-  }, [start]);
+    try {
+      await start(`/api/conversations/${conversationId}/messages`, body, controller, assistantId);
+    } catch (err) {
+      if (err instanceof ApiError && err.code === "duplicate_send") {
+        // The retry's prompt is already stored; drop the optimistic rows and
+        // let the refetch show the durable transcript.
+        setMessages((m) => m.filter((msg) => msg.id !== assistantId && msg.id !== userMsg.id));
+        setStatus("idle");
+        onDone?.();
+        return;
+      }
+      throw err;
+    }
+  }, [start, onDone]);
+
+  const retrySend = useCallback(async () => {
+    const last = lastSendRef.current;
+    if (!last) return;
+    await send(last.content, last.conversationId, last.images, last.replyToId, last.quoteText, last.clientMessageId);
+  }, [send]);
 
   // edit rewrites one user message and re-runs the conversation from it:
   // the local thread truncates to the edited message, then a fresh
@@ -325,5 +363,8 @@ export function useChat(onDone?: () => void) {
     await start(`/api/conversations/${conversationId}/approvals`, { decisions }, controller, assistantId);
   }, [start]);
 
-  return { messages, setMessages, status, send, edit, regenerate, resolve, stop, reset, trace, pending, contextStatus, setContextStatus };
+  return {
+    messages, setMessages, status, send, retrySend, edit, regenerate, resolve,
+    stop, reset, trace, pending, contextStatus, setContextStatus,
+  };
 }
