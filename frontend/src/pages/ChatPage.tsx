@@ -1620,7 +1620,14 @@ export function ChatPage() {
                   variant="ghost"
                   className="rounded-lg size-7 text-muted-foreground hover:text-foreground"
                   onClick={() => setCompareOpen(true)}
-                  disabled={!input.trim() || running || pending.length > 0 || !selectedId}
+                  disabled={
+                    !input.trim() ||
+                    running ||
+                    pending.length > 0 ||
+                    !selectedId ||
+                    attachments.length > 0 ||
+                    replyingTo !== null
+                  }
                   aria-label="Compare models"
                   title="Compare models"
                 >

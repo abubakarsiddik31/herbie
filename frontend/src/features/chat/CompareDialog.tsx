@@ -27,12 +27,14 @@ export function CompareDialog({ open, onOpenChange, conversationId, models, prom
   const compare = useCompare(conversationId);
   const activate = useActivateBranch(conversationId ?? null);
   const [selected, setSelected] = useState<string[]>([]);
+  const [clientKey, setClientKey] = useState(() => crypto.randomUUID());
 
   const choices = (models?.models ?? []).filter((m) => m.id !== "auto");
 
   useEffect(() => {
     if (!open) return;
     compare.reset();
+    setClientKey(crypto.randomUUID());
     setSelected(choices.slice(0, 2).map((m) => m.id));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
@@ -73,7 +75,7 @@ export function CompareDialog({ open, onOpenChange, conversationId, models, prom
                     type="checkbox"
                     checked={selected.includes(m.id)}
                     onChange={() => toggle(m.id)}
-                    disabled={pending}
+                    disabled={pending || (!selected.includes(m.id) && selected.length >= 4)}
                   />
                   <span className="truncate">{m.label}</span>
                 </label>
@@ -143,14 +145,21 @@ export function CompareDialog({ open, onOpenChange, conversationId, models, prom
               disabled={pending || selected.length < 2 || selected.length > 4 || !prompt.trim()}
               onClick={() =>
                 compare.mutate(
-                  { content: prompt, models: selected },
+                  { content: prompt, models: selected, clientMessageId: clientKey },
                   {
                     onSuccess: () => {
                       onRan?.();
                       toast.success("Compare finished");
                     },
-                    onError: (err) =>
-                      toast.error(err instanceof ApiError ? err.message : "Compare failed"),
+                    onError: (err) => {
+                      if (err instanceof ApiError && err.code === "duplicate_send") {
+                        toast.info("This comparison was already started");
+                        onRan?.();
+                        onOpenChange(false);
+                        return;
+                      }
+                      toast.error(err instanceof ApiError ? err.message : "Compare failed");
+                    },
                   },
                 )
               }

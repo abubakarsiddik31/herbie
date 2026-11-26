@@ -5,7 +5,7 @@ import type { CompareResponse } from "@/lib/types";
 export function useCompare(conversationId?: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (input: { content: string; models: string[] }) =>
+    mutationFn: (input: { content: string; models: string[]; clientMessageId?: string }) =>
       apiFetch<CompareResponse>(`/api/conversations/${conversationId}/compare`, {
         method: "POST",
         json: input,

@@ -56,6 +56,10 @@ func TestCompareCreatesSiblingBranches(t *testing.T) {
 	if len(usage.events) != 2 {
 		t.Fatalf("usage events = %d", len(usage.events))
 	}
+	convAfter := convs.convs[conv.ID]
+	if convAfter.ActiveLeafID == nil || *convAfter.ActiveLeafID != body.PromptMessageID {
+		t.Fatalf("active leaf should stay on the prompt until a winner is picked: %+v", convAfter.ActiveLeafID)
+	}
 }
 
 func TestCompareValidatesModels(t *testing.T) {

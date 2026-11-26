@@ -119,7 +119,7 @@ describe("useChat send", () => {
     expect(result.current.trace).toContain("earlier history summarized");
   });
 
-  it("waits out an active run and refetches instead of erroring", async () => {
+  it("surfaces run_active as a retryable error", async () => {
     server.use(
       http.get("*/api/conversations/c1/run", () => HttpResponse.json({ active: false })),
       http.post("*/api/conversations/c1/messages", () =>
@@ -132,12 +132,12 @@ describe("useChat send", () => {
     const onDone = vi.fn();
     const { result } = renderHook(() => useChat(onDone));
     await act(async () => {
-      await result.current.send("hi", "c1");
+      await expect(result.current.send("hi", "c1")).rejects.toThrow("A run is in progress");
     });
     const assistant = result.current.messages.find((m) => m.role === "assistant");
-    expect(assistant).toMatchObject({ streaming: false });
-    expect(assistant?.error).toBeUndefined();
-    expect(result.current.status).toBe("idle");
+    expect(assistant).toMatchObject({ streaming: false, error: "A run is in progress" });
+    expect(result.current.status).toBe("error");
+    expect(result.current.canRetry).toBe(true);
     expect(onDone).toHaveBeenCalled();
   });
 

@@ -11,6 +11,7 @@ import (
 	"github.com/abubakarsiddik31/golem-chatbot/internal/rag"
 	"github.com/abubakarsiddik31/golem-chatbot/internal/storage"
 	"github.com/abubakarsiddik31/golem/model"
+	"github.com/abubakarsiddik31/golem/tool"
 )
 
 const (
@@ -65,9 +66,16 @@ func (s *Server) handleCompare(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "bad_request", "content is required")
 		return
 	}
+	if runes := []rune(req.Content); len(runes) > maxPromptChars {
+		req.Content = string(runes[:maxPromptChars]) + "\n\n[input auto-compacted: truncated at 1,000,000 characters]"
+	}
 	if len(req.Models) < minCompareModels || len(req.Models) > maxCompareModels {
 		writeError(w, http.StatusBadRequest, "bad_request", "choose 2–4 models to compare")
 		return
+	}
+	available := map[string]bool{}
+	for _, spec := range chat.Available(s.providerKeysFor(ctx, userID)) {
+		available[spec.ID] = true
 	}
 	seen := map[string]bool{}
 	for _, id := range req.Models {
@@ -77,6 +85,10 @@ func (s *Server) handleCompare(w http.ResponseWriter, r *http.Request) {
 		}
 		if _, ok := chat.FindModel(id); !ok {
 			writeError(w, http.StatusBadRequest, "bad_request", fmt.Sprintf("model %q cannot be compared", id))
+			return
+		}
+		if len(available) > 0 && !available[id] {
+			writeError(w, http.StatusBadRequest, "bad_request", fmt.Sprintf("model %q has no configured provider key", id))
 			return
 		}
 		if seen[id] {
@@ -148,10 +160,19 @@ func (s *Server) handleCompare(w http.ResponseWriter, r *http.Request) {
 	}
 	history := historyFrom(path, len(path))
 	spec, history, _ = s.maybeCompact(ctx, userID, convID, spec, history)
-	tools, err := s.userTools(ctx, userID, true, s.botFor(ctx, userID, conv.BotID))
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal", "could not load tools")
-		return
+	// Compare uses only read-only retrieval tools: side-effecting user tools,
+	// workflows, MCP, memory writes, and calendar actions must not run 2–4×.
+	var tools []tool.Tool[chat.Deps]
+	if s.deps.RagSearch != nil && spec.RagEnabled {
+		hasDocs := true
+		if s.deps.Docs != nil {
+			if docs, derr := s.deps.Docs.List(ctx, userID); derr == nil && len(docs) == 0 {
+				hasDocs = false
+			}
+		}
+		if hasDocs {
+			tools = append(tools, chat.SearchTool(), chat.ListDocumentsTool(), chat.ReadDocumentTool())
+		}
 	}
 	s.unarchiveForTurn(ctx, conv)
 	promptID, err := s.deps.Msgs.Add(ctx, storage.Message{
@@ -173,11 +194,12 @@ func (s *Server) handleCompare(w http.ResponseWriter, r *http.Request) {
 		s.deps.Log.Error("compare set active leaf", "err", err)
 	}
 	known := knownRows(path)
-	var sources []rag.Scored
-	var sourcesMu sync.Mutex
-	deps := s.buildDeps(userID, convID, projectScope(conv), &sources, &sourcesMu, nil)
 	out := compareResponse{PromptMessageID: promptID}
+	successes := 0
 	for _, modelID := range req.Models {
+		var sources []rag.Scored
+		var sourcesMu sync.Mutex
+		deps := s.buildDeps(userID, convID, projectScope(conv), &sources, &sourcesMu, nil)
 		runSpec := spec
 		runSpec.Model = modelID
 		outcome, runErr := s.agentFor(ctx, userID).Run(ctx, deps, history, req.Content, parts, discardSink{}, tools, runSpec)
@@ -193,20 +215,31 @@ func (s *Server) handleCompare(w http.ResponseWriter, r *http.Request) {
 			out.Results = append(out.Results, compareResult{Model: modelID, Error: "this model needs tool approval; retry it in a normal chat"})
 			continue
 		}
-		res, perr := s.persistRunMessages(ctx, userID, convID, modelID, outcome.Messages, outcome.Usage, outcome.Requests, false, known, replayedPrefixLen(outcome.Messages), promptID, nil)
+		res, perr := s.persistRunMessages(ctx, userID, convID, modelID, outcome.Messages, outcome.Usage, outcome.Requests, false, known, replayedPrefixLen(outcome.Messages), promptID, sourceJSON(sources))
 		if perr != nil {
 			out.Results = append(out.Results, compareResult{Model: modelID, Error: "could not save the answer"})
 			continue
 		}
 		_ = s.deps.Usage.Add(ctx, usageEventFor(userID, convID, modelID, outcome.Usage, outcome.Requests, s.deps.Rates))
 		cost := s.deps.Rates.ChatCostMicrosFor(modelID, outcome.Usage.InputTokens, outcome.Usage.OutputTokens)
+		successes++
 		out.Results = append(out.Results, compareResult{
 			Model: modelID, MessageID: res.LastAssistantID, Content: outcome.Output,
 			InputTokens: outcome.Usage.InputTokens, OutputTokens: outcome.Usage.OutputTokens,
 			CostUSD: float64(cost) / 1_000_000,
 		})
 	}
+	// Leave the prompt as the active leaf; the client explicitly picks a
+	// winner through /activate. Otherwise closing the dialog would silently
+	// select whichever model ran last.
+	if err := s.deps.Convos.SetActiveLeaf(ctx, convID, userID, promptID); err != nil {
+		s.deps.Log.Error("compare restore leaf", "err", err)
+	}
 	_ = s.deps.Convos.Touch(ctx, convID)
+	if successes == 0 {
+		writeError(w, http.StatusBadGateway, "comparison_failed", "every model failed")
+		return
+	}
 	s.maybeAutotitle(userID, convID)
 	writeJSON(w, http.StatusOK, out)
 }

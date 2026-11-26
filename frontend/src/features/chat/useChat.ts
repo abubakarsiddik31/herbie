@@ -248,15 +248,6 @@ export function useChat(onDone?: () => void) {
         }
       } else {
         const conversationId = path.match(/\/conversations\/([^/]+)/)?.[1];
-        if (err instanceof ApiError && err.code === "run_active" && conversationId) {
-          await waitForRunToSettle(conversationId);
-          if (abortRef.current === controller) {
-            setMessages((m) => m.map((msg) => msg.id === assistantId ? { ...msg, streaming: false } : msg));
-            setStatus("idle");
-          }
-          onDone?.();
-          return;
-        }
         if (abortRef.current === controller) {
           setMessages((m) => m.map((msg) => msg.id === assistantId
             ? { ...msg, streaming: false, error: (err as Error).message }

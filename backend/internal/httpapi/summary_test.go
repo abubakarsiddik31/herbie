@@ -37,7 +37,19 @@ func TestMaybeCompactAppliesPersistedSummaryOnlyOnFullPath(t *testing.T) {
 	msgs := newFakeMsgs()
 	convs := newFakeConvos(msgs)
 	conv := convs.mustCreate("u-1", "")
-	ids := addPathMessages(t, msgs, conv.ID, 3)
+	var ids []string
+	parent := ""
+	for _, content := range []string{"one", "two", "three"} {
+		id, err := msgs.Add(context.Background(), storage.Message{
+			ConversationID: conv.ID, UserID: "u-1", Role: "user", ParentID: parent,
+			Content: content, Data: mustJSON(model.Message{Role: model.RoleUser, Content: content}),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, id)
+		parent = id
+	}
 	convs.summaries[conv.ID] = storage.ConversationSummary{Text: "old decisions", ThroughID: &ids[1]}
 	srv := &Server{deps: ServerDeps{Convos: convs, Msgs: msgs}}
 

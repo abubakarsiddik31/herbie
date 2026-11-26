@@ -553,13 +553,18 @@ func (s *Server) maybeCompact(ctx context.Context, userID, convID string, spec c
 	// so branches and resumes never lose untouched turns.
 	if s.deps.Convos != nil {
 		if sum, err := s.deps.Convos.Summary(ctx, convID, userID); err == nil && sum.Text != "" && sum.ThroughID != nil {
-			if path, perr := s.pathRows(ctx, convID, userID); perr == nil && len(path) == len(history) {
-				if idx := rowOnPath(path, *sum.ThroughID); idx >= 0 && idx+1 <= len(history) {
-					history = append([]model.Message(nil), history[idx+1:]...)
-					if spec.SystemPrompt == "" {
-						spec.SystemPrompt = chat.DefaultSystemPrompt
+			if path, perr := s.pathRows(ctx, convID, userID); perr == nil {
+				// Send persists the prompt before this call, so path may be
+				// one row longer than the decoded history. Longer gaps are
+				// edits/regenerates/approvals suffixes and must not apply.
+				if diff := len(path) - len(history); (diff == 0 || diff == 1) && historyMatchesPrefix(path, history) {
+					if idx := rowOnPath(path, *sum.ThroughID); idx >= 0 && idx+1 <= len(history) {
+						history = append([]model.Message(nil), history[idx+1:]...)
+						if spec.SystemPrompt == "" {
+							spec.SystemPrompt = chat.DefaultSystemPrompt
+						}
+						spec.SystemPrompt += "\n\n[Persisted conversation summary — earlier turns]\n" + sum.Text
 					}
-					spec.SystemPrompt += "\n\n[Persisted conversation summary — earlier turns]\n" + sum.Text
 				}
 			}
 		}
@@ -577,6 +582,26 @@ func (s *Server) maybeCompact(ctx context.Context, userID, convID string, spec c
 	}
 	spec.SystemPrompt += "\n\n[Compacted earlier context — summarized, not verbatim]\n" + summary
 	return spec, recent, true
+}
+
+// historyMatchesPrefix reports whether the decoded history still corresponds
+// to the start of the stored path. This distinguishes a normal send (path has
+// one trailing prompt) from an edit/approval suffix that must not be sliced.
+func historyMatchesPrefix(path []storage.Message, history []model.Message) bool {
+	if len(history) > len(path) {
+		return false
+	}
+	for i := range history {
+		var decoded model.Message
+		if err := json.Unmarshal(path[i].Data, &decoded); err != nil {
+			return false
+		}
+		if decoded.Role != history[i].Role || decoded.Content != history[i].Content ||
+			len(decoded.Parts) != len(history[i].Parts) {
+			return false
+		}
+	}
+	return true
 }
 
 // meterCompaction records summarizer spend as a priced usage event.
