@@ -49,7 +49,7 @@ type ConvoStore interface {
 	SetActiveLeaf(ctx context.Context, id, userID, leafID string) error
 	SetSettings(ctx context.Context, id, userID string, patch storage.ConversationPatch) error
 	Summary(ctx context.Context, id, userID string) (storage.ConversationSummary, error)
-	SetSummary(ctx context.Context, id, userID, text string, covers int) error
+	SetSummary(ctx context.Context, id, userID, text string, throughID *string) error
 	ClearSummary(ctx context.Context, id, userID string) error
 	Touch(ctx context.Context, id string) error
 	Delete(ctx context.Context, id, userID string) error
@@ -506,20 +506,28 @@ func (s *Server) buildDeps(userID, convID, projectID string, sources *[]rag.Scor
 // The third return tells callers whether a summary landed, so they can
 // announce it on the stream.
 func (s *Server) maybeCompact(ctx context.Context, userID, convID string, spec chat.RunSpec, history []model.Message) (chat.RunSpec, []model.Message, bool) {
-	// A persisted summary replaces the covered prefix of the active path.
+	// A persisted summary replaces the active-path prefix up to its recorded
+	// boundary message. Apply it only when history is the full active path
+	// (not an approvals suffix) and the boundary still exists on that path,
+	// so branches and resumes never lose untouched turns.
 	if s.deps.Convos != nil {
-		if sum, err := s.deps.Convos.Summary(ctx, convID, userID); err == nil && sum.Text != "" && sum.Covers > 0 && sum.Covers <= len(history) {
-			history = append([]model.Message(nil), history[sum.Covers:]...)
-			if spec.SystemPrompt == "" {
-				spec.SystemPrompt = chat.DefaultSystemPrompt
+		if sum, err := s.deps.Convos.Summary(ctx, convID, userID); err == nil && sum.Text != "" && sum.ThroughID != nil {
+			if path, perr := s.pathRows(ctx, convID, userID); perr == nil && len(path) == len(history) {
+				if idx := rowOnPath(path, *sum.ThroughID); idx >= 0 && idx+1 <= len(history) {
+					history = append([]model.Message(nil), history[idx+1:]...)
+					if spec.SystemPrompt == "" {
+						spec.SystemPrompt = chat.DefaultSystemPrompt
+					}
+					spec.SystemPrompt += "\n\n[Persisted conversation summary — earlier turns]\n" + sum.Text
+				}
 			}
-			spec.SystemPrompt += "\n\n[Persisted conversation summary — earlier turns]\n" + sum.Text
 		}
 	}
 	if s.deps.Compactor == nil {
 		return spec, history, false
 	}
 	recent, summary, cusage, did, _ := s.deps.Compactor.Compact(ctx, history)
+	s.meterCompaction(ctx, userID, convID, cusage)
 	if !did {
 		return spec, history, false
 	}
@@ -527,7 +535,6 @@ func (s *Server) maybeCompact(ctx context.Context, userID, convID string, spec c
 		spec.SystemPrompt = chat.DefaultSystemPrompt
 	}
 	spec.SystemPrompt += "\n\n[Compacted earlier context — summarized, not verbatim]\n" + summary
-	s.meterCompaction(ctx, userID, convID, cusage)
 	return spec, recent, true
 }
 

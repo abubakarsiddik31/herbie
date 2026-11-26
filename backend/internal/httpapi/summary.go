@@ -4,10 +4,10 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/abubakarsiddik31/golem-chatbot/internal/storage"
-	"github.com/abubakarsiddik31/golem/model"
 )
 
 const maxSummaryChars = 8000
@@ -33,43 +33,63 @@ func (s *Server) summaryLimits() (threshold, keepRecent int) {
 	return threshold, keepRecent
 }
 
-// loadHistory loads the active path as model messages for summary operations.
-func (s *Server) loadHistory(ctx context.Context, convID, userID string) (storage.Conversation, []model.Message, error) {
+// pathRows loads the storage rows on the active path. Summary coverage is
+// keyed by a message ID so branches and resumes never apply a stale prefix.
+func (s *Server) pathRows(ctx context.Context, convID, userID string) ([]storage.Message, error) {
 	conv, err := s.deps.Convos.ByID(ctx, convID, userID)
 	if err != nil {
-		return storage.Conversation{}, nil, err
+		return nil, err
 	}
 	rows, err := s.deps.Msgs.ForConversation(ctx, convID, userID)
 	if err != nil {
-		return storage.Conversation{}, nil, err
+		return nil, err
 	}
 	leaf, err := s.resolveActiveLeaf(ctx, conv, rows)
 	if err != nil {
-		return storage.Conversation{}, nil, err
+		return nil, err
 	}
-	path, err := s.pathToLeaf(ctx, convID, userID, leaf)
-	if err != nil {
-		return storage.Conversation{}, nil, err
+	return s.pathToLeaf(ctx, convID, userID, leaf)
+}
+
+func coveredCount(path []storage.Message, throughID *string) int {
+	if throughID == nil {
+		return 0
 	}
-	return conv, historyFrom(path, len(path)), nil
+	idx := rowOnPath(path, *throughID)
+	if idx < 0 {
+		return 0
+	}
+	return idx + 1
+}
+
+func writeSummaryError(w http.ResponseWriter, err error, fallback string) {
+	if errors.Is(err, storage.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "not_found", "conversation not found")
+		return
+	}
+	writeError(w, http.StatusInternalServerError, "internal", fallback)
 }
 
 func (s *Server) handleGetSummary(w http.ResponseWriter, r *http.Request) {
 	userID, _ := userIDFrom(r.Context())
 	convID := r.PathValue("id")
-	_, history, err := s.loadHistory(r.Context(), convID, userID)
+	path, err := s.pathRows(r.Context(), convID, userID)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "not_found", "conversation not found")
+		writeSummaryError(w, err, "could not load conversation")
 		return
 	}
 	sum, err := s.deps.Convos.Summary(r.Context(), convID, userID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal", "could not load summary")
+		writeSummaryError(w, err, "could not load summary")
 		return
+	}
+	covered := coveredCount(path, sum.ThroughID)
+	if covered > len(path) {
+		covered = len(path)
 	}
 	threshold, keep := s.summaryLimits()
 	resp := summaryResponse{
-		Summary: sum.Text, CoveredMessages: sum.Covers, TotalMessages: len(history),
+		Summary: sum.Text, CoveredMessages: covered, TotalMessages: len(path),
 		ThresholdTokens: threshold, KeepRecent: keep,
 	}
 	if sum.UpdatedAt != nil {
@@ -88,25 +108,22 @@ func (s *Server) handlePutSummary(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
 	}
-	if len([]rune(req.Summary)) > maxSummaryChars {
+	text := storage.SanitizeText(req.Summary)
+	if strings.ContainsRune(text, 0) {
+		writeError(w, http.StatusBadRequest, "bad_request", "summary contains invalid characters")
+		return
+	}
+	if len([]rune(text)) > maxSummaryChars {
 		writeError(w, http.StatusBadRequest, "too_long", "summary is too long")
 		return
 	}
 	existing, err := s.deps.Convos.Summary(r.Context(), convID, userID)
 	if err != nil {
-		if errors.Is(err, storage.ErrNotFound) {
-			writeError(w, http.StatusNotFound, "not_found", "conversation not found")
-			return
-		}
-		writeError(w, http.StatusInternalServerError, "internal", "could not load summary")
+		writeSummaryError(w, err, "could not load summary")
 		return
 	}
-	covers := existing.Covers
-	if req.Summary == "" {
-		covers = 0
-	}
-	if err := s.deps.Convos.SetSummary(r.Context(), convID, userID, req.Summary, covers); err != nil {
-		writeError(w, http.StatusInternalServerError, "internal", "could not save summary")
+	if err := s.deps.Convos.SetSummary(r.Context(), convID, userID, text, existing.ThroughID); err != nil {
+		writeSummaryError(w, err, "could not save summary")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -116,11 +133,7 @@ func (s *Server) handleClearSummary(w http.ResponseWriter, r *http.Request) {
 	userID, _ := userIDFrom(r.Context())
 	convID := r.PathValue("id")
 	if err := s.deps.Convos.ClearSummary(r.Context(), convID, userID); err != nil {
-		if errors.Is(err, storage.ErrNotFound) {
-			writeError(w, http.StatusNotFound, "not_found", "conversation not found")
-			return
-		}
-		writeError(w, http.StatusInternalServerError, "internal", "could not clear summary")
+		writeSummaryError(w, err, "could not clear summary")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -133,36 +146,44 @@ func (s *Server) handleCompactNow(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotImplemented, "not_implemented", "compaction not configured")
 		return
 	}
-	if s.runActive(convID) {
+	if !s.allowAuth(w, r, "compact", userID) {
+		return
+	}
+	// Hold the run slot so a send/edit/approval cannot start mid-compaction.
+	release, ok := s.beginRun(convID)
+	if !ok {
 		writeError(w, http.StatusConflict, "run_active", "finish the active run before compacting")
 		return
 	}
+	defer release()
 	if s.deps.Pending != nil {
 		if pending, err := s.deps.Pending.ForConversation(r.Context(), convID, userID); err == nil && len(pending) > 0 {
 			writeError(w, http.StatusConflict, "approval_pending", "resolve pending approvals before compacting")
 			return
 		}
 	}
-	_, history, err := s.loadHistory(r.Context(), convID, userID)
+	path, err := s.pathRows(r.Context(), convID, userID)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "not_found", "conversation not found")
+		writeSummaryError(w, err, "could not load conversation")
 		return
 	}
+	history := historyFrom(path, len(path))
 	_, keep := s.summaryLimits()
 	if len(history) <= keep {
 		writeError(w, http.StatusBadRequest, "not_enough_history", "not enough history to summarize")
 		return
 	}
 	summary, covered, usage, ok := s.deps.Compactor.SummarizeNow(r.Context(), history, keep)
-	if !ok {
+	s.meterCompaction(r.Context(), userID, convID, usage)
+	if !ok || summary == "" || covered <= 0 || covered > len(path) {
 		writeError(w, http.StatusBadGateway, "summarize_failed", "could not summarize this conversation")
 		return
 	}
-	if err := s.deps.Convos.SetSummary(r.Context(), convID, userID, summary, covered); err != nil {
-		writeError(w, http.StatusInternalServerError, "internal", "could not save summary")
+	throughID := path[covered-1].ID
+	if err := s.deps.Convos.SetSummary(r.Context(), convID, userID, summary, &throughID); err != nil {
+		writeSummaryError(w, err, "could not save summary")
 		return
 	}
-	s.meterCompaction(r.Context(), userID, convID, usage)
 	threshold, _ := s.summaryLimits()
 	writeJSON(w, http.StatusOK, summaryResponse{
 		Summary: summary, CoveredMessages: covered, TotalMessages: len(history),

@@ -15,16 +15,35 @@ import (
 	"github.com/abubakarsiddik31/golem/testmodel"
 )
 
-func TestMaybeCompactAppliesPersistedSummary(t *testing.T) {
+func addPathMessages(t *testing.T, msgs *fakeMsgs, convID string, n int) []string {
+	t.Helper()
+	var ids []string
+	parent := ""
+	for i := 0; i < n; i++ {
+		payload, _ := json.Marshal(model.Message{Role: model.RoleUser, Content: "message"})
+		id, err := msgs.Add(context.Background(), storage.Message{
+			ConversationID: convID, UserID: "u-1", Role: "user", Content: "message", Data: payload, ParentID: parent,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, id)
+		parent = id
+	}
+	return ids
+}
+
+func TestMaybeCompactAppliesPersistedSummaryOnlyOnFullPath(t *testing.T) {
 	msgs := newFakeMsgs()
 	convs := newFakeConvos(msgs)
 	conv := convs.mustCreate("u-1", "")
-	convs.summaries[conv.ID] = storage.ConversationSummary{Text: "old decisions", Covers: 2}
-	srv := &Server{deps: ServerDeps{Convos: convs}}
+	ids := addPathMessages(t, msgs, conv.ID, 3)
+	convs.summaries[conv.ID] = storage.ConversationSummary{Text: "old decisions", ThroughID: &ids[1]}
+	srv := &Server{deps: ServerDeps{Convos: convs, Msgs: msgs}}
 
 	history := []model.Message{
 		{Role: model.RoleUser, Content: "one"},
-		{Role: model.RoleAssistant, Content: "two"},
+		{Role: model.RoleUser, Content: "two"},
 		{Role: model.RoleUser, Content: "three"},
 	}
 	spec, recent, compacted := srv.maybeCompact(context.Background(), "u-1", conv.ID, chat.RunSpec{}, history)
@@ -37,6 +56,20 @@ func TestMaybeCompactAppliesPersistedSummary(t *testing.T) {
 	if !strings.Contains(spec.SystemPrompt, "old decisions") {
 		t.Fatalf("summary not injected: %q", spec.SystemPrompt)
 	}
+
+	// An approvals/suffix history that is not the full path must not apply.
+	spec, recent, _ = srv.maybeCompact(context.Background(), "u-1", conv.ID, chat.RunSpec{}, history[1:])
+	if len(recent) != 2 || strings.Contains(spec.SystemPrompt, "old decisions") {
+		t.Fatalf("suffix applied summary: %+v %q", recent, spec.SystemPrompt)
+	}
+
+	// A boundary that is no longer on the active path is ignored.
+	gone := "00000000-0000-0000-0000-000000000099"
+	convs.summaries[conv.ID] = storage.ConversationSummary{Text: "stale", ThroughID: &gone}
+	spec, recent, _ = srv.maybeCompact(context.Background(), "u-1", conv.ID, chat.RunSpec{}, history)
+	if len(recent) != 3 || strings.Contains(spec.SystemPrompt, "stale") {
+		t.Fatalf("stale boundary applied: %+v %q", recent, spec.SystemPrompt)
+	}
 }
 
 func TestSummaryEndpoints(t *testing.T) {
@@ -48,12 +81,12 @@ func TestSummaryEndpoints(t *testing.T) {
 	}), "test-summary-model", 40000, 2, 100)
 	srv := &Server{deps: ServerDeps{Convos: convs, Msgs: msgs, Compactor: comp}}
 
-	call := func(method, path, body string) *httptest.ResponseRecorder {
+	call := func(method, body string) *httptest.ResponseRecorder {
 		var r *http.Request
 		if body == "" {
-			r = httptest.NewRequest(method, path, nil)
+			r = httptest.NewRequest(method, "/", nil)
 		} else {
-			r = httptest.NewRequest(method, path, bytes.NewReader([]byte(body)))
+			r = httptest.NewRequest(method, "/", bytes.NewReader([]byte(body)))
 		}
 		r.SetPathValue("id", conv.ID)
 		r = r.WithContext(withUser(r.Context(), "u-1", "user"))
@@ -71,40 +104,29 @@ func TestSummaryEndpoints(t *testing.T) {
 		return w
 	}
 
-	// Manually edit a summary; covers stays 0 until compacted.
-	if rec := call(http.MethodPut, "/api/conversations/"+conv.ID+"/summary", `{"summary":"my notes"}`); rec.Code != http.StatusNoContent {
+	if rec := call(http.MethodPut, `{"summary":"my notes"}`); rec.Code != http.StatusNoContent {
 		t.Fatalf("put: %d %s", rec.Code, rec.Body.String())
 	}
 	if convs.summaries[conv.ID].Text != "my notes" {
 		t.Fatalf("summary not stored: %+v", convs.summaries[conv.ID])
 	}
-	if rec := call(http.MethodGet, "/api/conversations/"+conv.ID+"/summary", ""); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "my notes") {
+	if rec := call(http.MethodGet, ""); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "my notes") {
 		t.Fatalf("get: %d %s", rec.Code, rec.Body.String())
 	}
-	if rec := call(http.MethodDelete, "/api/conversations/"+conv.ID+"/summary", ""); rec.Code != http.StatusNoContent {
+	if rec := call(http.MethodDelete, ""); rec.Code != http.StatusNoContent {
 		t.Fatalf("delete: %d", rec.Code)
 	}
-	if convs.summaries[conv.ID].Text != "" {
-		t.Fatal("summary not cleared")
-	}
 
-	// Seed a conversation long enough to summarize.
-	parent := ""
-	for i := 0; i < 5; i++ {
-		payload, _ := json.Marshal(model.Message{Role: model.RoleUser, Content: "message"})
-		id, err := msgs.Add(context.Background(), storage.Message{
-			ConversationID: conv.ID, UserID: "u-1", Role: "user", Content: "message", Data: payload, ParentID: parent,
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		parent = id
-	}
-	rec := call(http.MethodPost, "/api/conversations/"+conv.ID+"/compact", "")
+	ids := addPathMessages(t, msgs, conv.ID, 5)
+	rec := call(http.MethodPost, "")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("compact: %d %s", rec.Code, rec.Body.String())
 	}
-	if convs.summaries[conv.ID].Text != "generated summary" || convs.summaries[conv.ID].Covers != 3 {
-		t.Fatalf("compacted summary: %+v", convs.summaries[conv.ID])
+	sum := convs.summaries[conv.ID]
+	if sum.Text != "generated summary" || sum.ThroughID == nil || *sum.ThroughID != ids[2] {
+		t.Fatalf("compacted summary: %+v (want boundary %s)", sum, ids[2])
+	}
+	if rec := call(http.MethodGet, ""); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"coveredMessages":3`) {
+		t.Fatalf("get after compact: %d %s", rec.Code, rec.Body.String())
 	}
 }

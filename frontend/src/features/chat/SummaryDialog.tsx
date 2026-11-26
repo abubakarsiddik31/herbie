@@ -24,15 +24,22 @@ interface Props {
 }
 
 export function SummaryDialog({ open, onOpenChange, conversationId }: Props) {
-  const { data, isLoading } = useConversationSummary(open ? conversationId : undefined);
+  const { data, isLoading, isError } = useConversationSummary(open ? conversationId : undefined);
   const save = useSaveSummary(conversationId);
   const clear = useClearSummary(conversationId);
   const compact = useCompactNow(conversationId);
   const [draft, setDraft] = useState("");
 
+  // Reset first so switching conversations never saves a stale draft.
+  useEffect(() => {
+    if (open) setDraft("");
+  }, [open, conversationId]);
+
   useEffect(() => {
     if (open && data) setDraft(data.summary);
   }, [open, data]);
+
+  const ready = Boolean(data) && !isLoading && !isError;
 
   const pending = save.isPending || clear.isPending || compact.isPending;
   const errorMessage = (err: unknown, fallback: string) =>
@@ -48,7 +55,9 @@ export function SummaryDialog({ open, onOpenChange, conversationId }: Props) {
           </DialogDescription>
         </DialogHeader>
 
-        {isLoading ? (
+        {isError ? (
+          <p className="text-sm text-destructive">Could not load this summary.</p>
+        ) : isLoading ? (
           <p className="text-sm text-muted-foreground">Loading…</p>
         ) : (
           <div className="space-y-3">
@@ -86,7 +95,7 @@ export function SummaryDialog({ open, onOpenChange, conversationId }: Props) {
             <Button
               variant="outline"
               size="sm"
-              disabled={pending || !conversationId}
+              disabled={pending || !ready}
               onClick={() =>
                 compact.mutate(undefined, {
                   onSuccess: (res) => {
@@ -102,7 +111,7 @@ export function SummaryDialog({ open, onOpenChange, conversationId }: Props) {
             <Button
               variant="ghost"
               size="sm"
-              disabled={pending || !data?.summary}
+              disabled={pending || !ready || !data?.summary}
               onClick={() =>
                 clear.mutate(undefined, {
                   onSuccess: () => {
@@ -123,7 +132,7 @@ export function SummaryDialog({ open, onOpenChange, conversationId }: Props) {
             <Button
               variant="brand"
               size="sm"
-              disabled={pending || !conversationId}
+              disabled={pending || !ready}
               onClick={() =>
                 save.mutate(draft, {
                   onSuccess: () => toast.success("Summary saved"),

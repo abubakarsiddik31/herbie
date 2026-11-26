@@ -1532,6 +1532,7 @@ export function ChatPage() {
                   size="icon-xs"
                   className="rounded-lg text-muted-foreground hover:text-foreground"
                   onClick={() => setSummaryOpen(true)}
+                  disabled={!selectedId || running || pending.length > 0}
                   aria-label="Conversation summary"
                   title="Conversation summary"
                 >

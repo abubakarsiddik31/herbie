@@ -223,21 +223,21 @@ func (f *fakeConvos) Summary(_ context.Context, id, userID string) (storage.Conv
 	return f.summaries[id], nil
 }
 
-func (f *fakeConvos) SetSummary(_ context.Context, id, userID, text string, covers int) error {
+func (f *fakeConvos) SetSummary(_ context.Context, id, userID, text string, throughID *string) error {
 	conv, ok := f.convs[id]
 	if !ok || conv.UserID != userID {
 		return storage.ErrNotFound
 	}
 	if text == "" {
-		covers = 0
+		throughID = nil
 	}
 	now := time.Now()
-	f.summaries[id] = storage.ConversationSummary{Text: text, Covers: covers, UpdatedAt: &now}
+	f.summaries[id] = storage.ConversationSummary{Text: text, ThroughID: throughID, UpdatedAt: &now}
 	return nil
 }
 
 func (f *fakeConvos) ClearSummary(ctx context.Context, id, userID string) error {
-	return f.SetSummary(ctx, id, userID, "", 0)
+	return f.SetSummary(ctx, id, userID, "", nil)
 }
 
 func (f *fakeConvos) SetSettings(_ context.Context, id, userID string, patch storage.ConversationPatch) error {

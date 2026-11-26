@@ -96,8 +96,9 @@ func EstimateStorageTokens(msgs []storage.Message) int {
 }
 
 // Compact returns history unchanged under threshold; over threshold it
-// summarizes all but the last keepRecent messages. Model failure is
-// fail-open (history unchanged, compacted=false, nil error).
+// summarizes as much of the stale prefix as fits the summarizer input cap,
+// keeping at least the last keepRecent messages. Model failure is fail-open
+// (history unchanged, compacted=false, nil error).
 func (c *Compactor) Compact(ctx context.Context, history []model.Message) (recent []model.Message, summary string, usage model.Usage, compacted bool, err error) {
 	if EstimateHistoryTokens(history) <= c.threshold || len(history) == 0 {
 		return history, "", model.Usage{}, false, nil
@@ -106,16 +107,16 @@ func (c *Compactor) Compact(ctx context.Context, history []model.Message) (recen
 	if keep > len(history) {
 		keep = len(history)
 	}
-	stale, recent := history[:len(history)-keep], history[len(history)-keep:]
-	summary, usage, compacted = c.summarizeStale(ctx, stale)
-	if !compacted {
+	summary, included, usage, ok := c.summarizeOldest(ctx, history[:len(history)-keep])
+	if !ok {
 		return history, "", usage, false, nil
 	}
-	return recent, summary, usage, true, nil
+	return history[included:], summary, usage, true, nil
 }
 
-// SummarizeNow summarizes all but the last keepRecent messages regardless of
-// the automatic threshold (the manual "compact now" action).
+// SummarizeNow summarizes the oldest messages that fit the input cap while
+// leaving keepRecent newest messages, regardless of the automatic threshold.
+// It returns how many leading messages the summary covers.
 func (c *Compactor) SummarizeNow(ctx context.Context, history []model.Message, keepRecent int) (summary string, covered int, usage model.Usage, ok bool) {
 	if keepRecent <= 0 {
 		keepRecent = c.keepRecent
@@ -123,18 +124,16 @@ func (c *Compactor) SummarizeNow(ctx context.Context, history []model.Message, k
 	if len(history) <= keepRecent {
 		return "", 0, model.Usage{}, false
 	}
-	stale := history[:len(history)-keepRecent]
-	summary, usage, ok = c.summarizeStale(ctx, stale)
-	if !ok {
-		return "", 0, usage, false
-	}
-	return summary, len(stale), usage, true
+	return c.summarizeOldest(ctx, history[:len(history)-keepRecent])
 }
 
-func (c *Compactor) summarizeStale(ctx context.Context, stale []model.Message) (string, model.Usage, bool) {
+// summarizeOldest summarizes the longest prefix of stale that fits the input
+// cap, returning the number of messages actually covered.
+func (c *Compactor) summarizeOldest(ctx context.Context, stale []model.Message) (string, int, model.Usage, bool) {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("Summarize this conversation history in under %d tokens for continuity. Keep: user goals, decisions made, facts retrieved from documents (with document titles), and open questions. Reply with the summary only, no preamble.\n\n", c.summaryTokens))
 	used := 0
+	included := 0
 	for _, m := range stale {
 		line := fmt.Sprintf("[%s] %s\n", m.Role, m.Content)
 		if used+len(line) > historyInputCap {
@@ -142,20 +141,28 @@ func (c *Compactor) summarizeStale(ctx context.Context, stale []model.Message) (
 		}
 		sb.WriteString(line)
 		used += len(line)
+		included++
+	}
+	if included == 0 {
+		return "", 0, model.Usage{}, false
 	}
 	resp, gerr := c.model.Generate(ctx, model.Request{
 		Messages: []model.Message{{Role: model.RoleUser, Content: sb.String()}},
 	})
 	if gerr != nil {
-		return "", resp.Usage, false
+		return "", 0, resp.Usage, false
 	}
 	out := strings.TrimSpace(resp.Message.Content)
+	if out == "" {
+		return "", 0, resp.Usage, false
+	}
 	if max := c.summaryTokens * 4; len(out) > max {
-		if max > 3 {
-			out = out[:max-3] + "…"
-		} else {
-			out = out[:max]
+		runes := []rune(out)
+		if max > 3 && len(runes) > max {
+			out = string(runes[:max-3]) + "…"
+		} else if len(runes) > max {
+			out = string(runes[:max])
 		}
 	}
-	return out, resp.Usage, true
+	return out, included, resp.Usage, true
 }

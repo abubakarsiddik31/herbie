@@ -319,10 +319,9 @@ table "conversations" {
     type = timestamptz
     null = true
   }
-  column "summary_covers" {
-    type    = integer
-    null    = false
-    default = 0
+  column "summary_through_message_id" {
+    type = uuid
+    null = true
   }
   column "model" {
     type    = text
