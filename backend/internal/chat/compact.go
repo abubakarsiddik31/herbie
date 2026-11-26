@@ -65,6 +65,9 @@ func EstimateHistoryTokens(msgs []model.Message) int {
 	return total
 }
 
+// EstimateTextTokens approximates one text blob at 4 chars/token.
+func EstimateTextTokens(text string) int { return (len(text) + 3) / 4 }
+
 // EstimateStorageTokens approximates Σ content tokens for persisted database messages.
 func EstimateStorageTokens(msgs []storage.Message) int {
 	total := 0

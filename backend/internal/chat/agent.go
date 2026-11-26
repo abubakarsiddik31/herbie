@@ -72,6 +72,28 @@ func New(registry *ModelRegistry, usageLimit golem.UsageLimit, env ToolEnv) (*Ag
 	return &Agent{registry: registry, limit: usageLimit, env: env}, nil
 }
 
+// CountInputTokens prices a would-be request using the provider counter when
+// available. ErrNoTokenCounter (or a provider error) means the caller should
+// use an estimate.
+func (a *Agent) CountInputTokens(ctx context.Context, spec RunSpec, messages []model.Message, toolSpecs []model.ToolSpec) (int, error) {
+	return a.registry.CountInputTokens(ctx, spec, messages, toolSpecs)
+}
+
+// PromptFor exposes the assembled run instructions (base prompt plus the
+// retrieval/web guidance for the registered tools) for context accounting.
+func PromptFor(spec RunSpec, tools []tool.Tool[Deps]) string {
+	return promptFor(spec, tools)
+}
+
+// ToolSpecs converts the run's tools to the provider-neutral counting shape.
+func ToolSpecs(tools []tool.Tool[Deps]) []model.ToolSpec {
+	out := make([]model.ToolSpec, len(tools))
+	for i, t := range tools {
+		out[i] = model.ToolSpec{Name: t.Name, Description: t.Description, Schema: t.Schema}
+	}
+	return out
+}
+
 // build assembles the golem agent for one run (or resume) against the
 // conversation's chosen model and system prompt.
 func (a *Agent) build(spec RunSpec, tools []tool.Tool[Deps]) (*golem.Agent[Deps, string], model.StreamingModel, error) {

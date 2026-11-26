@@ -2,6 +2,7 @@ package chat
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -11,6 +12,7 @@ import (
 	golemanthropic "github.com/abubakarsiddik31/golem/providers/anthropic"
 	golemgemini "github.com/abubakarsiddik31/golem/providers/gemini"
 	golemopenai "github.com/abubakarsiddik31/golem/providers/openai"
+	"github.com/abubakarsiddik31/golem/tokens"
 )
 
 // RunSpec is one run's model selection, resolved from the conversation row
@@ -54,10 +56,19 @@ type ModelRegistry struct {
 	keys    ProviderKeys
 	new     clientFactory
 	newOpts clientOptionsFactory
+	counter CounterFactory
 
 	mu    sync.Mutex
 	cache map[string]model.StreamingModel
 }
+
+// CounterFactory builds a provider token counter for a model. It is a test
+// seam; production uses the golem provider counters.
+type CounterFactory func(provider, model string) (tokens.Counter, error)
+
+// ErrNoTokenCounter means the provider has no exact counting endpoint for
+// this model; callers fall back to an estimate.
+var ErrNoTokenCounter = errors.New("input-token counting unavailable for this model")
 
 func NewModelRegistry(keys ProviderKeys) *ModelRegistry {
 	return &ModelRegistry{keys: keys, cache: map[string]model.StreamingModel{}}
@@ -72,6 +83,54 @@ func NewModelRegistryWithFactory(keys ProviderKeys, f clientFactory) *ModelRegis
 // NewModelRegistryWithOptionsFactory is the options-aware test seam.
 func NewModelRegistryWithOptionsFactory(keys ProviderKeys, f clientOptionsFactory) *ModelRegistry {
 	return &ModelRegistry{keys: keys, newOpts: f, cache: map[string]model.StreamingModel{}}
+}
+
+// NewModelRegistryWithCounterFactory swaps the provider counters for an
+// injected factory (offline tests).
+func NewModelRegistryWithCounterFactory(keys ProviderKeys, f CounterFactory) *ModelRegistry {
+	return &ModelRegistry{keys: keys, counter: f, cache: map[string]model.StreamingModel{}}
+}
+
+// CountInputTokens prices a would-be request exactly when the provider offers
+// a counting endpoint (Gemini/Anthropic); callers fall back to estimates on
+// ErrNoTokenCounter or any provider error.
+func (r *ModelRegistry) CountInputTokens(ctx context.Context, spec RunSpec, messages []model.Message, toolSpecs []model.ToolSpec) (int, error) {
+	if spec.Model == AutoModelID {
+		return 0, ErrNoTokenCounter
+	}
+	target, ok := FindModel(spec.Model)
+	if !ok {
+		return 0, ErrNoTokenCounter
+	}
+	factory := r.counter
+	if factory == nil {
+		factory = r.productionCounter
+	}
+	counter, err := factory(target.Provider, target.ID)
+	if err != nil {
+		return 0, err
+	}
+	return counter.CountTokens(ctx, tokens.CountInput{Messages: messages, Tools: toolSpecs})
+}
+
+func (r *ModelRegistry) productionCounter(provider, model string) (tokens.Counter, error) {
+	switch provider {
+	case "gemini":
+		if r.keys.Gemini == "" {
+			return nil, ErrNoTokenCounter
+		}
+		return golemgemini.NewCounter(golemgemini.Config{
+			APIKey: r.keys.Gemini, Model: model, BaseURL: r.keys.GeminiBaseURL,
+		})
+	case "anthropic":
+		if r.keys.Anthropic == "" {
+			return nil, ErrNoTokenCounter
+		}
+		return golemanthropic.NewCounter(golemanthropic.Config{
+			APIKey: r.keys.Anthropic, Model: model, BaseURL: r.keys.AnthropicBaseURL,
+		})
+	}
+	return nil, ErrNoTokenCounter
 }
 
 // Resolve returns the client for spec's (provider, model, temperature),
