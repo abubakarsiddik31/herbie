@@ -57,6 +57,9 @@ Answer clearly and concisely in markdown.`
 // compacted run never silently drops the persona.
 const DefaultSystemPrompt = systemPrompt
 
+// maxHistoryMessages mirrors the TrimHistory budget applied to every run.
+const maxHistoryMessages = 40
+
 // Agent builds a golem agent per run. Golem fixes the model client, the
 // system instructions, and the tool set at construction, so a per-request
 // build is how a run's conversation-scoped model (RunSpec) and user runtime
@@ -70,6 +73,50 @@ type Agent struct {
 
 func New(registry *ModelRegistry, usageLimit golem.UsageLimit, env ToolEnv) (*Agent, error) {
 	return &Agent{registry: registry, limit: usageLimit, env: env}, nil
+}
+
+// CountInputTokens prices a would-be request using the provider counter when
+// available. ErrNoTokenCounter (or a provider error) means the caller should
+// use an estimate.
+func (a *Agent) CountInputTokens(ctx context.Context, spec RunSpec, messages []model.Message, toolSpecs []model.ToolSpec) (int, error) {
+	return a.registry.CountInputTokens(ctx, spec, messages, toolSpecs)
+}
+
+// RequestMessages builds the ordered request the agent sends for exact token
+// counting: trimmed history, repaired tool pairing, no history system
+// messages, the run instructions, then the new prompt.
+func RequestMessages(ctx context.Context, instructions string, history []model.Message, prompt string, parts []model.Part) ([]model.Message, error) {
+	trimmed, err := golem.TrimHistory(maxHistoryMessages)(ctx, history)
+	if err != nil {
+		return nil, err
+	}
+	repaired, _ := golem.NormalizeHistory(trimmed)
+	messages := make([]model.Message, 0, len(repaired)+2)
+	if instructions != "" {
+		messages = append(messages, model.Message{Role: model.RoleSystem, Content: instructions})
+	}
+	for _, m := range repaired {
+		if m.Role == model.RoleSystem {
+			continue
+		}
+		messages = append(messages, m)
+	}
+	return append(messages, model.Message{Role: model.RoleUser, Content: prompt, Parts: parts}), nil
+}
+
+// PromptFor exposes the assembled run instructions (base prompt plus the
+// retrieval/web guidance for the registered tools) for context accounting.
+func PromptFor(spec RunSpec, tools []tool.Tool[Deps]) string {
+	return promptFor(spec, tools)
+}
+
+// ToolSpecs converts the run's tools to the provider-neutral counting shape.
+func ToolSpecs(tools []tool.Tool[Deps]) []model.ToolSpec {
+	out := make([]model.ToolSpec, len(tools))
+	for i, t := range tools {
+		out[i] = model.ToolSpec{Name: t.Name, Description: t.Description, Schema: t.Schema}
+	}
+	return out
 }
 
 // build assembles the golem agent for one run (or resume) against the
@@ -93,7 +140,7 @@ func (a *Agent) build(spec RunSpec, tools []tool.Tool[Deps]) (*golem.Agent[Deps,
 	}
 	opts := []golem.Option[Deps, string]{
 		golem.WithInstructions[Deps, string](promptFor(spec, tools)),
-		golem.WithHistoryProcessor[Deps, string](golem.TrimHistory(40)),
+		golem.WithHistoryProcessor[Deps, string](golem.TrimHistory(maxHistoryMessages)),
 		golem.WithMaxAttempts[Deps, string](2),
 		golem.WithUsageLimit[Deps, string](a.limit),
 		golem.WithMaxIterations[Deps, string](maxIter),

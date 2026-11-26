@@ -1526,6 +1526,8 @@ export function ChatPage() {
                 <ContextStatusMeter
                   estimatedTokens={activeEstimatedTokens}
                   thresholdTokens={activeThresholdTokens}
+                  breakdown={contextStatus?.breakdown}
+                  exact={contextStatus?.exact}
                   keepRecent={activeKeepRecent}
                   compacted={isCompacted}
                 />

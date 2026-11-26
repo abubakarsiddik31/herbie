@@ -425,11 +425,14 @@ func (s *Server) runTurn(ctx context.Context, userID, convID, projectID string, 
 		compKeepRecent = s.deps.Cfg.RAG.CompactionKeepRecent
 	}
 
+	breakdown := s.contextBreakdown(ctx, userID, spec, history, prompt, parts, tools)
 	_ = sink.event("meta", map[string]any{
 		"type":            "context",
-		"estimatedTokens": chat.EstimateHistoryTokens(history),
+		"estimatedTokens": breakdown.TotalTokens,
 		"thresholdTokens": compThreshold,
 		"keepRecent":      compKeepRecent,
+		"breakdown":       breakdown,
+		"exact":           breakdown.Exact,
 	})
 
 	if compacted {

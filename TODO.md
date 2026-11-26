@@ -210,8 +210,8 @@ backfill, bot/fork titles, SetTitle overloading, quote composition) and 9 majors
 
 ### Phase 3 — context, resilience, compare (features: `feat/context-2`, `feat/compare`)
 
-- [ ] Exact input-token counting via `tokens.Counter` (Gemini/Anthropic/Bedrock),
-      estimate fallback; context breakdown (system/memory/history/attachments).
+- [x] Exact input-token counting via `tokens.Counter` (Gemini/Anthropic),
+      estimate fallback; context breakdown (system/memory/history/prompt/attachments).
 - [ ] Persisted editable conversation summary; manual "compact now"; summary view.
 - [ ] Idempotent sends (`clientMessageId` unique per conversation); reconnect after a
       dropped SSE (refetch + run status); continue-after-stop.

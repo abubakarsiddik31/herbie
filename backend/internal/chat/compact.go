@@ -65,6 +65,23 @@ func EstimateHistoryTokens(msgs []model.Message) int {
 	return total
 }
 
+// EstimateHistoryTextTokens estimates text and tool-call tokens only,
+// excluding attachment bytes (counted separately by the context meter).
+func EstimateHistoryTextTokens(msgs []model.Message) int {
+	total := 0
+	for _, m := range msgs {
+		n := len(m.Content)
+		for _, tc := range m.ToolCalls {
+			n += len(tc.Name) + len(tc.Args)
+		}
+		total += n/4 + 40
+	}
+	return total
+}
+
+// EstimateTextTokens approximates one text blob at 4 chars/token.
+func EstimateTextTokens(text string) int { return (len(text) + 3) / 4 }
+
 // EstimateStorageTokens approximates Σ content tokens for persisted database messages.
 func EstimateStorageTokens(msgs []storage.Message) int {
 	total := 0

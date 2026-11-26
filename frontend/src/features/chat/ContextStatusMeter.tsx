@@ -3,12 +3,15 @@ import { Gauge, CheckCircle2, AlertTriangle, Sparkles, Layers } from "lucide-rea
 import { Tooltip as TooltipPrimitive } from "radix-ui";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
+import type { ContextBreakdown } from "./useChat";
 
 export interface ContextStatusMeterProps {
   estimatedTokens: number;
   thresholdTokens?: number;
   keepRecent?: number;
   compacted?: boolean;
+  breakdown?: ContextBreakdown;
+  exact?: boolean;
   className?: string;
 }
 
@@ -29,9 +32,12 @@ export function ContextStatusMeter({
   thresholdTokens = 40_000,
   keepRecent = 10,
   compacted = false,
+  breakdown,
+  exact = false,
   className,
 }: ContextStatusMeterProps) {
   const [open, setOpen] = useState(false);
+  const isExact = exact ?? breakdown?.exact ?? false;
   const threshold = thresholdTokens > 0 ? thresholdTokens : 40_000;
   const pct = Math.min(100, Math.max(0, Math.round((estimatedTokens / threshold) * 100)));
 
@@ -106,9 +112,16 @@ export function ContextStatusMeter({
                 <Layers className="size-3.5 text-primary" />
                 <span>Context & Compaction</span>
               </div>
-              <Badge variant={statusBadgeVariant} className="text-[10px] h-5 px-1.5 font-normal">
-                {statusLabel}
-              </Badge>
+              <div className="flex items-center gap-1">
+                <Badge variant={statusBadgeVariant} className="text-[10px] h-5 px-1.5 font-normal">
+                  {statusLabel}
+                </Badge>
+                {breakdown && (
+                  <Badge variant="outline" className="text-[10px] h-5 px-1.5 font-normal">
+                    {isExact ? "exact" : "estimated"}
+                  </Badge>
+                )}
+              </div>
             </div>
 
             {/* Meter Bar */}
@@ -129,6 +142,30 @@ export function ContextStatusMeter({
                 />
               </div>
             </div>
+
+            {breakdown && (
+              <div className="mt-3 space-y-1 border-b border-border/30 pb-2 text-[11px]">
+                <div className="mb-1 flex items-center justify-between font-semibold text-foreground">
+                  <span>Token breakdown</span>
+                  <span className="font-mono">{breakdown.model}</span>
+                </div>
+                {[
+                  ["System prompt", breakdown.systemTokens],
+                  ["· of which memory", breakdown.memoryTokens],
+                  ["· of which preferences", breakdown.instructionsTokens],
+                  ["History", breakdown.historyTokens],
+                  ["New prompt", breakdown.promptTokens],
+                  ["Attachments", breakdown.attachmentTokens],
+                ].map(([label, value]) => (
+                  <div key={String(label)} className="flex justify-between">
+                    <span className="text-muted-foreground">{label}</span>
+                    <span className="font-mono text-foreground">
+                      {Number(value ?? 0).toLocaleString()}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
 
             {/* Compaction Details */}
             <div className="mt-3 space-y-1.5 text-[11px] text-muted-foreground leading-relaxed">

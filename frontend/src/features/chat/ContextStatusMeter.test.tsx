@@ -14,6 +14,33 @@ describe("ContextStatusMeter", () => {
     expect(screen.getByText("compacted")).toBeInTheDocument();
   });
 
+  it("shows the exact token breakdown", async () => {
+    const user = userEvent.setup();
+    render(
+      <ContextStatusMeter
+        estimatedTokens={2400}
+        thresholdTokens={40000}
+        exact={true}
+        breakdown={{
+          systemTokens: 800,
+          memoryTokens: 100,
+          instructionsTokens: 50,
+          historyTokens: 1500,
+          promptTokens: 60,
+          attachmentTokens: 0,
+          totalTokens: 2400,
+          exact: true,
+          model: "gemini-3.5-flash",
+        }}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: /Context status:/i }));
+    expect(await screen.findByText("Token breakdown")).toBeInTheDocument();
+    expect(screen.getByText("exact")).toBeInTheDocument();
+    expect(screen.getByText("System prompt")).toBeInTheDocument();
+    expect(screen.getByText("1,500")).toBeInTheDocument();
+  });
+
   it("opens tooltip with details on click", async () => {
     const user = userEvent.setup();
     render(

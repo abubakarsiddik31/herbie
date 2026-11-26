@@ -142,7 +142,7 @@ describe("useChat send", () => {
       http.post("*/api/conversations/c1/messages", () =>
         new HttpResponse(
           sseBody([
-            'event: meta\ndata: {"type":"context","estimatedTokens":2400,"thresholdTokens":40000,"keepRecent":10}\n\n',
+            'event: meta\ndata: {"type":"context","estimatedTokens":2400,"thresholdTokens":40000,"keepRecent":10,"exact":true,"breakdown":{"systemTokens":800,"memoryTokens":100,"instructionsTokens":50,"historyTokens":1500,"promptTokens":60,"attachmentTokens":0,"totalTokens":2400,"exact":true,"model":"gemini-3.5-flash"}}\n\n',
             'event: meta\ndata: {"type":"compacted","thresholdTokens":40000,"keepRecent":10}\n\n',
             'event: delta\ndata: {"text":"hello"}\n\n',
             'event: done\ndata: {"messageId":"m1","inputTokens":10,"outputTokens":5,"requests":1,"costUsd":0.00001,"contextTokens":2415,"thresholdTokens":40000,"keepRecent":10}\n\n',
@@ -155,11 +155,13 @@ describe("useChat send", () => {
     await act(async () => {
       await result.current.send("hi", "c1");
     });
-    expect(result.current.contextStatus).toEqual({
+    expect(result.current.contextStatus).toMatchObject({
       estimatedTokens: 2415,
       thresholdTokens: 40000,
       keepRecent: 10,
       compacted: true,
+      exact: false,
+      breakdown: { totalTokens: 2415, exact: false, model: "gemini-3.5-flash" },
     });
   });
 });
