@@ -369,3 +369,18 @@ export interface ConversationSummary {
   thresholdTokens: number;
   keepRecent: number;
 }
+
+export interface CompareResult {
+  model: string;
+  messageId?: string;
+  content?: string;
+  inputTokens: number;
+  outputTokens: number;
+  costUsd: number;
+  error?: string;
+}
+
+export interface CompareResponse {
+  promptMessageId: string;
+  results: CompareResult[];
+}

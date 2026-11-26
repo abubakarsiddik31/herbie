@@ -16,6 +16,7 @@ import {
   Download,
   Eye,
   FileCode,
+  GitCompare,
   GitFork,
   Globe,
   HelpCircle,
@@ -87,6 +88,7 @@ import { ConversationSettingsDialog } from "@/features/chat/ConversationSettings
 import { conversationFilename, downloadMarkdown, toMarkdown } from "@/features/chat/exportMarkdown";
 import { ShareDialog } from "@/features/chat/ShareDialog";
 import { SummaryDialog } from "@/features/chat/SummaryDialog";
+import { CompareDialog } from "@/features/chat/CompareDialog";
 import { ShortcutsDialog } from "@/features/chat/ShortcutsDialog";
 import { useChat } from "@/features/chat/useChat";
 import { useModels } from "@/features/chat/useModels";
@@ -184,6 +186,7 @@ export function ChatPage() {
   const [sharing, setSharing] = useState<Conversation | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [summaryOpen, setSummaryOpen] = useState(false);
+  const [compareOpen, setCompareOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [promptLibraryOpen, setPromptLibraryOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
@@ -1612,6 +1615,18 @@ export function ChatPage() {
                   </Button>
                 )}
 
+                <Button
+                  size="icon-xs"
+                  variant="ghost"
+                  className="rounded-lg size-7 text-muted-foreground hover:text-foreground"
+                  onClick={() => setCompareOpen(true)}
+                  disabled={!input.trim() || running || pending.length > 0 || !selectedId}
+                  aria-label="Compare models"
+                  title="Compare models"
+                >
+                  <GitCompare className="size-3.5" />
+                </Button>
+
                 {running ? (
                   <Button
                     size="icon-xs"
@@ -1655,6 +1670,15 @@ export function ChatPage() {
         settings={activeSettings}
         onApply={applySettings}
         saving={updateSettings.isPending}
+      />
+
+      <CompareDialog
+        open={compareOpen}
+        onOpenChange={setCompareOpen}
+        conversationId={selectedId ?? undefined}
+        models={models}
+        prompt={input}
+        onRan={() => setInput("")}
       />
 
       <SummaryDialog
