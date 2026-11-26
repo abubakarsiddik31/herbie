@@ -242,9 +242,9 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "validation_error", err.Error())
 		return
 	}
-	req.ClientMessageID = strings.TrimSpace(req.ClientMessageID)
-	if len(req.ClientMessageID) > 100 {
-		writeError(w, http.StatusBadRequest, "bad_request", "clientMessageId is too long")
+	req.ClientMessageID = strings.TrimSpace(storage.SanitizeText(req.ClientMessageID))
+	if strings.ContainsRune(req.ClientMessageID, 0) || len([]rune(req.ClientMessageID)) > 100 {
+		writeError(w, http.StatusBadRequest, "bad_request", "invalid clientMessageId")
 		return
 	}
 
@@ -259,6 +259,19 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	spec := s.runSpecFor(ctx, conv)
+
+	// Retried sends carry the same client id: return the existing prompt
+	// instead of creating a duplicate turn. Checked before quote resolution
+	// so a deleted quote target does not mask the duplicate.
+	if req.ClientMessageID != "" {
+		if _, derr := s.deps.Msgs.ByClientMessageID(ctx, convID, userID, req.ClientMessageID); derr == nil {
+			writeError(w, http.StatusConflict, "duplicate_send", "this message was already sent")
+			return
+		} else if !errors.Is(derr, storage.ErrNotFound) {
+			writeError(w, http.StatusInternalServerError, "internal", "could not check message")
+			return
+		}
+	}
 
 	// The quote snapshot comes from the stored target, never the client.
 	quoteText := ""
@@ -281,17 +294,6 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 	// A paused conversation must be resolved before new turns.
 	if s.blockedByPendingApproval(w, ctx, convID, userID) {
 		return
-	}
-	// Retried sends carry the same client id: return the existing prompt
-	// instead of creating a duplicate turn.
-	if req.ClientMessageID != "" {
-		if _, derr := s.deps.Msgs.ByClientMessageID(ctx, convID, userID, req.ClientMessageID); derr == nil {
-			writeError(w, http.StatusConflict, "duplicate_send", "this message was already sent")
-			return
-		} else if !errors.Is(derr, storage.ErrNotFound) {
-			writeError(w, http.StatusInternalServerError, "internal", "could not check message")
-			return
-		}
 	}
 	// Hold the run slot from before the prompt row is written so a
 	// concurrent mutation cannot race the new branch.

@@ -409,8 +409,9 @@ describe("ChatPage conversation actions", () => {
     await waitFor(() => expect(errorSpy).toHaveBeenCalledWith("Resolve the pending approval first"));
   });
 
-  it("surfaces a run_active send error without leaving a streaming placeholder", async () => {
+  it("waits out an active run without leaving a streaming placeholder", async () => {
     server.use(
+      http.get("*/api/conversations/c1/run", () => HttpResponse.json({ active: false })),
       http.get("*/api/conversations/c1", () =>
         HttpResponse.json(detail({ activeLeafId: "a1" }, [
           message({ id: "u1", role: "user", content: "hello" }),
@@ -429,7 +430,9 @@ describe("ChatPage conversation actions", () => {
 
     await userEvent.type(screen.getByPlaceholderText(/Message Herbie/), "another question");
     await userEvent.click(screen.getByRole("button", { name: "Send message" }));
-    expect((await screen.findAllByText("A run is in progress")).length).toBeGreaterThan(0);
+    await waitFor(() =>
+      expect(screen.queryByText("A run is in progress")).not.toBeInTheDocument(),
+    );
     expect(screen.queryByRole("button", { name: "Stop generating" })).not.toBeInTheDocument();
   });
 

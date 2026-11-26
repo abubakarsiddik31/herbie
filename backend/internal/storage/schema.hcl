@@ -573,6 +573,11 @@ table "messages" {
     columns = [column.reply_to_id]
     where   = sql("reply_to_id IS NOT NULL")
   }
+  index "idx_messages_client_id" {
+    unique  = true
+    columns = [column.conversation_id, column.client_message_id]
+    where   = sql("client_message_id IS NOT NULL")
+  }
   index "idx_messages_search" {
     type    = GIN
     columns = [column.search_vector]

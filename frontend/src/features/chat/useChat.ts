@@ -1,10 +1,24 @@
 import { useCallback, useRef, useState } from "react";
-import { BASE, ApiError, tryRefresh } from "@/lib/api";
+import { BASE, ApiError, apiFetch, tryRefresh } from "@/lib/api";
 import { parseSSE } from "@/lib/sse";
 import { useAuth } from "@/stores/auth";
 import type { ChatMessage, PendingApproval, Source } from "@/lib/types";
 
 export type RunStatus = "idle" | "running" | "error";
+
+// waitForRunToSettle polls the in-process run registry so a reconnecting
+// client refetches only after the server has stopped writing the turn.
+async function waitForRunToSettle(conversationId: string): Promise<void> {
+  for (let i = 0; i < 12; i++) {
+    try {
+      const status = await apiFetch<{ active: boolean }>(`/api/conversations/${conversationId}/run`);
+      if (!status.active) return;
+    } catch {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+}
 
 export interface ContextBreakdown {
   systemTokens: number;
@@ -74,6 +88,7 @@ export function useChat(onDone?: () => void) {
   const [pending, setPending] = useState<PendingApproval[]>([]);
   const [status, setStatus] = useState<RunStatus>("idle");
   const [contextStatus, setContextStatus] = useState<ContextStatus | null>(null);
+  const [canRetry, setCanRetry] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
 
   const stop = useCallback(() => abortRef.current?.abort(), []);
@@ -86,6 +101,8 @@ export function useChat(onDone?: () => void) {
     setPending([]);
     setContextStatus(null);
     setStatus("idle");
+    lastSendRef.current = null;
+    setCanRetry(false);
   }, []);
 
   // consumeStream drains a chat SSE response (send-message or approvals),
@@ -230,15 +247,30 @@ export function useChat(onDone?: () => void) {
           setStatus("idle");
         }
       } else {
+        const conversationId = path.match(/\/conversations\/([^/]+)/)?.[1];
+        if (err instanceof ApiError && err.code === "run_active" && conversationId) {
+          await waitForRunToSettle(conversationId);
+          if (abortRef.current === controller) {
+            setMessages((m) => m.map((msg) => msg.id === assistantId ? { ...msg, streaming: false } : msg));
+            setStatus("idle");
+          }
+          onDone?.();
+          return;
+        }
         if (abortRef.current === controller) {
           setMessages((m) => m.map((msg) => msg.id === assistantId
             ? { ...msg, streaming: false, error: (err as Error).message }
             : msg));
           setStatus("error");
         }
-        // The server may have persisted a prompt/partial before the stream
-        // dropped; refetch so the transcript reflects the durable state.
-        onDone?.();
+        // A duplicate is already stored; the send path handles its refetch.
+        if (!(err instanceof ApiError && err.code === "duplicate_send")) {
+          if (conversationId) {
+            void waitForRunToSettle(conversationId).then(() => onDone?.());
+          } else {
+            onDone?.();
+          }
+        }
         throw err;
       }
     }
@@ -263,6 +295,7 @@ export function useChat(onDone?: () => void) {
   ) => {
     const cleanContent = content.replace(/\0/g, "");
     const idempotencyKey = clientMessageId ?? crypto.randomUUID();
+    setCanRetry(false);
     lastSendRef.current = {
       content: cleanContent, conversationId, images, replyToId, quoteText,
       clientMessageId: idempotencyKey,
@@ -292,11 +325,15 @@ export function useChat(onDone?: () => void) {
       if (err instanceof ApiError && err.code === "duplicate_send") {
         // The retry's prompt is already stored; drop the optimistic rows and
         // let the refetch show the durable transcript.
+        lastSendRef.current = null;
+        setCanRetry(false);
         setMessages((m) => m.filter((msg) => msg.id !== assistantId && msg.id !== userMsg.id));
         setStatus("idle");
         onDone?.();
         return;
       }
+      lastSendRef.current = null;
+      setCanRetry(true);
       throw err;
     }
   }, [start, onDone]);
@@ -327,7 +364,10 @@ export function useChat(onDone?: () => void) {
     setTrace([]);
     setPending([]);
     setStatus("running");
-    await start(`/api/conversations/${conversationId}/messages/${msgId}/edit`, { content: cleanContent }, controller, assistantId);
+    await start(`/api/conversations/${conversationId}/messages/${msgId}/edit`, {
+      content: cleanContent,
+      clientMessageId: crypto.randomUUID(),
+    }, controller, assistantId);
   }, [start]);
 
   // regenerate replaces the last assistant answer: trailing non-user
@@ -364,7 +404,7 @@ export function useChat(onDone?: () => void) {
   }, [start]);
 
   return {
-    messages, setMessages, status, send, retrySend, edit, regenerate, resolve,
-    stop, reset, trace, pending, contextStatus, setContextStatus,
+    messages, setMessages, status, send, retrySend, canRetry, edit, regenerate,
+    resolve, stop, reset, trace, pending, contextStatus, setContextStatus,
   };
 }

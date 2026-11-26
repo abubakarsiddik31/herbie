@@ -363,7 +363,7 @@ export function ChatPage() {
     selectedIdRef.current = selectedId;
   }, [selectedId]);
 
-  const { messages, setMessages, status, send, retrySend, edit, regenerate, resolve, stop, reset, trace, pending, contextStatus, setContextStatus } = useChat(() => {
+  const { messages, setMessages, status, send, retrySend, canRetry, edit, regenerate, resolve, stop, reset, trace, pending, contextStatus, setContextStatus } = useChat(() => {
     void queryClient.invalidateQueries({ queryKey: ["conversations"] });
     const id = selectedIdRef.current;
     if (id !== null) void queryClient.invalidateQueries({ queryKey: ["conversation", id] });
@@ -1236,26 +1236,7 @@ export function ChatPage() {
                               </div>
                             );
                           })()}
-                          {m.error && (
-                            <div className="flex flex-wrap items-center gap-2">
-                              <p className="text-destructive text-sm">{m.error}</p>
-                              {status === "error" && (
-                                <Button
-                                  variant="outline"
-                                  size="xs"
-                                  onClick={() =>
-                                    retrySend().catch((err) =>
-                                      setSendError(
-                                        err instanceof ApiError ? err.message : "Failed to retry",
-                                      ),
-                                    )
-                                  }
-                                >
-                                  Retry
-                                </Button>
-                              )}
-                            </div>
-                          )}
+                          {m.error && <p className="text-destructive text-sm">{m.error}</p>}
                           {m.truncated && (
                             <Badge variant="outline" className="text-muted-foreground text-xs">stopped early</Badge>
                           )}
@@ -1385,6 +1366,22 @@ export function ChatPage() {
       {/* ChatGPT / Codex style Floating Composer */}
       <div className="p-3 md:p-4 bg-gradient-to-t from-background via-background to-transparent shrink-0">
         <div className="mx-auto w-full max-w-3xl">
+          {canRetry && (
+            <div className="mb-2 flex items-center justify-between gap-2 rounded-xl border border-destructive/30 bg-destructive/5 px-3 py-1.5 text-xs">
+              <span className="text-destructive">Connection lost. Retry will reuse the same send.</span>
+              <Button
+                variant="outline"
+                size="xs"
+                onClick={() =>
+                  retrySend().catch((err) =>
+                    setSendError(err instanceof ApiError ? err.message : "Failed to retry"),
+                  )
+                }
+              >
+                Retry
+              </Button>
+            </div>
+          )}
           {sendError && <p className="mb-2 text-destructive text-xs">{sendError}</p>}
           {attachments.length > 0 && (
             <div className="mb-2 flex flex-wrap gap-2">

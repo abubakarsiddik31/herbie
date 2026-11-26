@@ -119,8 +119,9 @@ describe("useChat send", () => {
     expect(result.current.trace).toContain("earlier history summarized");
   });
 
-  it("settles the assistant placeholder when a run is already active", async () => {
+  it("waits out an active run and refetches instead of erroring", async () => {
     server.use(
+      http.get("*/api/conversations/c1/run", () => HttpResponse.json({ active: false })),
       http.post("*/api/conversations/c1/messages", () =>
         HttpResponse.json(
           { error: { code: "run_active", message: "A run is in progress" } },
@@ -128,13 +129,16 @@ describe("useChat send", () => {
         ),
       ),
     );
-    const { result } = renderHook(() => useChat());
+    const onDone = vi.fn();
+    const { result } = renderHook(() => useChat(onDone));
     await act(async () => {
-      await expect(result.current.send("hi", "c1")).rejects.toThrow("A run is in progress");
+      await result.current.send("hi", "c1");
     });
     const assistant = result.current.messages.find((m) => m.role === "assistant");
-    expect(assistant).toMatchObject({ streaming: false, error: "A run is in progress" });
-    expect(result.current.status).toBe("error");
+    expect(assistant).toMatchObject({ streaming: false });
+    expect(assistant?.error).toBeUndefined();
+    expect(result.current.status).toBe("idle");
+    expect(onDone).toHaveBeenCalled();
   });
 
   it("tracks context status and compaction updates from stream frames", async () => {
