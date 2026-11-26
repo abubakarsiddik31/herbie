@@ -197,6 +197,8 @@ describe("useChat continue", () => {
     expect(assistant.role).toBe("assistant");
     expect(assistant.content).toContain("more text");
     expect(result.current.messages.filter((m) => m.role === "user")).toHaveLength(1);
+    expect(result.current.messages.filter((m) => m.role === "assistant")).toHaveLength(2);
+    expect(result.current.messages[1].content).toBe("partial");
   });
 });
 

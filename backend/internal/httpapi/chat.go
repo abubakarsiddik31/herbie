@@ -265,6 +265,10 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 	// so a deleted quote target does not mask the duplicate.
 	if req.ClientMessageID != "" {
 		if _, derr := s.deps.Msgs.ByClientMessageID(ctx, convID, userID, req.ClientMessageID); derr == nil {
+			if s.runActive(convID) {
+				writeError(w, http.StatusConflict, "run_active", "a run is in progress")
+				return
+			}
 			writeError(w, http.StatusConflict, "duplicate_send", "this message was already sent")
 			return
 		} else if !errors.Is(derr, storage.ErrNotFound) {
@@ -1450,6 +1454,10 @@ func (s *Server) pauseRun(ctx context.Context, userID, convID string, spec chat.
 // batches), which makes a positional boundary wrong.
 func (s *Server) persistFailure(ctx context.Context, userID, convID string, spec chat.RunSpec, startParentID string, skip map[string]bool, newFrom int, runErr error, sink *sseSink) {
 	clientGone := errors.Is(runErr, context.Canceled) || errors.Is(runErr, context.DeadlineExceeded)
+	// A user-initiated stop cancels the request context; persist the partial
+	// with a detached, bounded context so the interrupted answer survives.
+	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+	defer cancel()
 	var runError *golem.RunError
 	_ = errors.As(runErr, &runError)
 
@@ -1461,12 +1469,12 @@ func (s *Server) persistFailure(ctx context.Context, userID, convID string, spec
 		if newFrom < 0 {
 			newFrom = replayedPrefixLen(partial.Messages)
 		}
-		if _, err := s.persistRunMessages(ctx, userID, convID, spec.Model, partial.Messages, partial.Usage, partial.Requests, true, skip, newFrom, startParentID, nil); err != nil {
+		if _, err := s.persistRunMessages(persistCtx, userID, convID, spec.Model, partial.Messages, partial.Usage, partial.Requests, true, skip, newFrom, startParentID, nil); err != nil {
 			s.deps.Log.Error("persist partial", "err", err)
 		}
-		_ = s.deps.Usage.Add(ctx, usageEventFor(userID, convID, spec.Model, partial.Usage, partial.Requests, s.deps.Rates))
+		_ = s.deps.Usage.Add(persistCtx, usageEventFor(userID, convID, spec.Model, partial.Usage, partial.Requests, s.deps.Rates))
 	}
-	_ = s.deps.Convos.Touch(ctx, convID)
+	_ = s.deps.Convos.Touch(persistCtx, convID)
 	if clientGone {
 		return // client is gone; quiet stop for user-initiated cancels
 	}

@@ -9,9 +9,9 @@ import (
 	"github.com/abubakarsiddik31/golem/model"
 )
 
-// handleContinue resumes an interrupted answer: the partial assistant text is
-// folded into the run instructions and a new assistant branch is created
-// under the same user row, leaving the partial off-path.
+// handleContinue resumes an interrupted answer: the partial assistant row is
+// kept as history and the continuation lands beneath it as a new assistant
+// row. The partial is never promoted to instructions.
 func (s *Server) handleContinue(w http.ResponseWriter, r *http.Request) {
 	userID, _ := userIDFrom(r.Context())
 	convID := r.PathValue("id")
@@ -63,21 +63,14 @@ func (s *Server) handleContinue(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "nothing_to_continue", "there is no interrupted answer to continue")
 		return
 	}
-	var partial strings.Builder
-	for _, m := range path[lastUser+1:] {
-		if m.Role == string(model.RoleAssistant) && strings.TrimSpace(m.Content) != "" {
-			partial.WriteString(m.Content)
-		}
-	}
-	if partial.Len() == 0 {
-		writeError(w, http.StatusBadRequest, "nothing_to_continue", "there is no interrupted answer to continue")
+	partial := path[len(path)-1]
+	if partial.Role != string(model.RoleAssistant) || !partial.Truncated || strings.TrimSpace(partial.Content) == "" {
+		writeError(w, http.StatusBadRequest, "nothing_to_continue", "the last answer is not an interrupted response")
 		return
 	}
 	spec := s.runSpecFor(ctx, conv)
-	spec.SystemPrompt += "\n\n[Interrupted answer to continue]\n" + partial.String() +
-		"\n\nContinue from the exact stopping point. Output only the continuation; do not repeat the text above or add a preamble."
 	s.unarchiveForTurn(ctx, conv)
 	s.runTurn(ctx, userID, convID, projectScope(conv), spec, conv.BotID,
-		historyFrom(path, lastUser+1), "Continue the interrupted answer from where it stopped.",
-		nil, knownRows(path), path[lastUser].ID, w)
+		historyFrom(path, len(path)), "Continue the interrupted answer from where it stopped. Output only the continuation.",
+		nil, knownRows(path), partial.ID, w)
 }

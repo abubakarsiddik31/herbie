@@ -396,14 +396,13 @@ export function useChat(onDone?: () => void) {
     const controller = new AbortController();
     abortRef.current = controller;
     const assistantId = crypto.randomUUID();
-    setMessages((m) => {
-      const lastUser = m.map((msg) => msg.role).lastIndexOf("user");
-      if (lastUser < 0) return m;
-      return [
-        ...m.slice(0, lastUser + 1),
-        { id: assistantId, role: "assistant", content: "", truncated: false, createdAt: new Date().toISOString(), streaming: true },
-      ];
-    });
+    lastSendRef.current = null;
+    setCanRetry(false);
+    // Keep the partial answer visible; the continuation streams beneath it.
+    setMessages((m) => [
+      ...m,
+      { id: assistantId, role: "assistant", content: "", truncated: false, createdAt: new Date().toISOString(), streaming: true },
+    ]);
     setTrace([]);
     setPending([]);
     setStatus("running");
