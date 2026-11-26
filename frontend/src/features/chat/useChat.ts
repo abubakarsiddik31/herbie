@@ -6,11 +6,25 @@ import type { ChatMessage, PendingApproval, Source } from "@/lib/types";
 
 export type RunStatus = "idle" | "running" | "error";
 
+export interface ContextBreakdown {
+  systemTokens: number;
+  memoryTokens: number;
+  instructionsTokens: number;
+  historyTokens: number;
+  promptTokens: number;
+  attachmentTokens: number;
+  totalTokens: number;
+  exact: boolean;
+  model: string;
+}
+
 export interface ContextStatus {
   estimatedTokens: number;
   thresholdTokens: number;
   keepRecent?: number;
   compacted?: boolean;
+  breakdown?: ContextBreakdown;
+  exact?: boolean;
 }
 
 interface DonePayload {
@@ -34,6 +48,8 @@ interface MetaPayload {
   estimatedTokens?: number;
   thresholdTokens?: number;
   keepRecent?: number;
+  breakdown?: ContextBreakdown;
+  exact?: boolean;
   requested?: string;
   used?: string;
 }
@@ -92,6 +108,8 @@ export function useChat(onDone?: () => void) {
             thresholdTokens: meta.thresholdTokens ?? 40000,
             keepRecent: meta.keepRecent ?? 10,
             compacted: false,
+            breakdown: meta.breakdown,
+            exact: meta.exact ?? false,
           });
         } else if (meta.type === "compacted") {
           setTrace((t) => [...t, "earlier history summarized"]);
@@ -100,6 +118,8 @@ export function useChat(onDone?: () => void) {
             thresholdTokens: meta.thresholdTokens ?? prev?.thresholdTokens ?? 40000,
             keepRecent: meta.keepRecent ?? prev?.keepRecent ?? 10,
             compacted: true,
+            breakdown: prev?.breakdown,
+            exact: prev?.exact ?? false,
           }));
         } else if (meta.type === "tool_start") {
           setTrace((t) => [...t, `${toolLabel(meta.name)}…`]);
@@ -122,6 +142,8 @@ export function useChat(onDone?: () => void) {
             thresholdTokens: done.thresholdTokens ?? prev?.thresholdTokens ?? 40000,
             keepRecent: done.keepRecent ?? prev?.keepRecent ?? 10,
             compacted: prev?.compacted ?? false,
+            breakdown: prev?.breakdown,
+            exact: prev?.exact ?? false,
           }));
         }
         setMessages((m) => m.map((msg) => msg.id === assistantId
