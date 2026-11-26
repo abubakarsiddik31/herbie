@@ -26,6 +26,7 @@ import {
   PenLine,
   RefreshCw,
   Reply,
+  ScrollText,
   Search,
   Share2,
   ShieldCheck,
@@ -85,6 +86,7 @@ import { extractCitationsFromContent } from "@/features/chat/citations";
 import { ConversationSettingsDialog } from "@/features/chat/ConversationSettingsDialog";
 import { conversationFilename, downloadMarkdown, toMarkdown } from "@/features/chat/exportMarkdown";
 import { ShareDialog } from "@/features/chat/ShareDialog";
+import { SummaryDialog } from "@/features/chat/SummaryDialog";
 import { ShortcutsDialog } from "@/features/chat/ShortcutsDialog";
 import { useChat } from "@/features/chat/useChat";
 import { useModels } from "@/features/chat/useModels";
@@ -181,6 +183,7 @@ export function ChatPage() {
   const [pendingMessageDelete, setPendingMessageDelete] = useState<string | null>(null);
   const [sharing, setSharing] = useState<Conversation | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [summaryOpen, setSummaryOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [promptLibraryOpen, setPromptLibraryOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
@@ -1523,6 +1526,18 @@ export function ChatPage() {
                   <span className="hidden sm:inline font-mono">{modelLabel(activeSettings.model)}</span>
                 </Button>
 
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  className="rounded-lg text-muted-foreground hover:text-foreground"
+                  onClick={() => setSummaryOpen(true)}
+                  aria-label="Conversation summary"
+                  title="Conversation summary"
+                >
+                  <ScrollText className="size-3.5" />
+                </Button>
+
                 <ContextStatusMeter
                   estimatedTokens={activeEstimatedTokens}
                   thresholdTokens={activeThresholdTokens}
@@ -1604,6 +1619,12 @@ export function ChatPage() {
         settings={activeSettings}
         onApply={applySettings}
         saving={updateSettings.isPending}
+      />
+
+      <SummaryDialog
+        open={summaryOpen}
+        onOpenChange={setSummaryOpen}
+        conversationId={selectedId ?? undefined}
       />
 
       <PromptLibraryDialog

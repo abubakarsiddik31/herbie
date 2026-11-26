@@ -360,3 +360,12 @@ export interface Session {
   lastUsedAt: string;
   current: boolean;
 }
+
+export interface ConversationSummary {
+  summary: string;
+  updatedAt?: string;
+  coveredMessages: number;
+  totalMessages: number;
+  thresholdTokens: number;
+  keepRecent: number;
+}
