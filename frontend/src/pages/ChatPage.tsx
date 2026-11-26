@@ -363,7 +363,7 @@ export function ChatPage() {
     selectedIdRef.current = selectedId;
   }, [selectedId]);
 
-  const { messages, setMessages, status, send, retrySend, canRetry, edit, regenerate, resolve, stop, reset, trace, pending, contextStatus, setContextStatus } = useChat(() => {
+  const { messages, setMessages, status, send, retrySend, canRetry, edit, regenerate, continueRun, resolve, stop, reset, trace, pending, contextStatus, setContextStatus } = useChat(() => {
     void queryClient.invalidateQueries({ queryKey: ["conversations"] });
     const id = selectedIdRef.current;
     if (id !== null) void queryClient.invalidateQueries({ queryKey: ["conversation", id] });
@@ -1238,7 +1238,26 @@ export function ChatPage() {
                           })()}
                           {m.error && <p className="text-destructive text-sm">{m.error}</p>}
                           {m.truncated && (
-                            <Badge variant="outline" className="text-muted-foreground text-xs">stopped early</Badge>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <Badge variant="outline" className="text-muted-foreground text-xs">stopped early</Badge>
+                              {messages[messages.length - 1]?.id === m.id && (
+                                <Button
+                                  variant="outline"
+                                  size="xs"
+                                  disabled={blockInteraction || running}
+                                  onClick={() =>
+                                    selectedId &&
+                                    continueRun(selectedId).catch((err) =>
+                                      setSendError(
+                                        err instanceof ApiError ? err.message : "Failed to continue",
+                                      ),
+                                    )
+                                  }
+                                >
+                                  Continue
+                                </Button>
+                              )}
+                            </div>
                           )}
                           {!m.streaming && (
                             <div className="flex items-center gap-1.5 pt-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">

@@ -170,6 +170,36 @@ describe("useChat send", () => {
   });
 });
 
+describe("useChat continue", () => {
+  it("streams a continuation and replaces trailing assistant rows", async () => {
+    server.use(
+      http.post("*/api/conversations/c1/continue", () =>
+        new HttpResponse(
+          sseBody([
+            'event: delta\ndata: {"text":" more text"}\n\n',
+            'event: done\ndata: {"messageId":"a2","inputTokens":1,"outputTokens":1,"requests":1,"costUsd":0}\n\n',
+          ]),
+          { headers: { "Content-Type": "text/event-stream" } },
+        ),
+      ),
+    );
+    const { result } = renderHook(() => useChat());
+    act(() =>
+      result.current.setMessages([
+        { id: "u1", role: "user", content: "question", truncated: false, createdAt: "" },
+        { id: "a1", role: "assistant", content: "partial", truncated: true, createdAt: "" },
+      ]),
+    );
+    await act(async () => {
+      await result.current.continueRun("c1");
+    });
+    const assistant = result.current.messages[result.current.messages.length - 1];
+    expect(assistant.role).toBe("assistant");
+    expect(assistant.content).toContain("more text");
+    expect(result.current.messages.filter((m) => m.role === "user")).toHaveLength(1);
+  });
+});
+
 describe("useChat idempotent sends", () => {
   it("sends a clientMessageId and treats duplicate_send as already stored", async () => {
     const captured: { body: Record<string, unknown> | null } = { body: null };

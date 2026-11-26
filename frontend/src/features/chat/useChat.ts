@@ -390,6 +390,26 @@ export function useChat(onDone?: () => void) {
     await start(`/api/conversations/${conversationId}/regenerate`, model ? { model } : {}, controller, assistantId);
   }, [start]);
 
+  // continueRun resumes an interrupted answer as a new assistant branch
+  // under the same user row; the partial answer stays off-path.
+  const continueRun = useCallback(async (conversationId: string) => {
+    const controller = new AbortController();
+    abortRef.current = controller;
+    const assistantId = crypto.randomUUID();
+    setMessages((m) => {
+      const lastUser = m.map((msg) => msg.role).lastIndexOf("user");
+      if (lastUser < 0) return m;
+      return [
+        ...m.slice(0, lastUser + 1),
+        { id: assistantId, role: "assistant", content: "", truncated: false, createdAt: new Date().toISOString(), streaming: true },
+      ];
+    });
+    setTrace([]);
+    setPending([]);
+    setStatus("running");
+    await start(`/api/conversations/${conversationId}/continue`, {}, controller, assistantId);
+  }, [start]);
+
   const resolve = useCallback(async (conversationId: string, decisions: ApprovalDecision[]) => {
     const controller = new AbortController();
     abortRef.current = controller;
@@ -405,6 +425,6 @@ export function useChat(onDone?: () => void) {
 
   return {
     messages, setMessages, status, send, retrySend, canRetry, edit, regenerate,
-    resolve, stop, reset, trace, pending, contextStatus, setContextStatus,
+    continueRun, resolve, stop, reset, trace, pending, contextStatus, setContextStatus,
   };
 }
