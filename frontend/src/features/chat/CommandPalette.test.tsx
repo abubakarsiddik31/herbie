@@ -150,4 +150,18 @@ describe("CommandPalette", () => {
     await userEvent.keyboard("{Enter}");
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });
+
+  it("requests semantic reranking when the toggle is on", async () => {
+    let semanticParam: string | null = null;
+    server.use(
+      http.get("*/api/search/messages", ({ request }) => {
+        semanticParam = new URL(request.url).searchParams.get("semantic");
+        return HttpResponse.json({ hits: [], nextOffset: null, semantic: true });
+      }),
+    );
+    renderPalette({ semanticAvailable: true });
+    await userEvent.type(screen.getByPlaceholderText(/type a command/i), "moon");
+    await userEvent.click(screen.getByLabelText("Semantic message search"));
+    await waitFor(() => expect(semanticParam).toBe("1"));
+  });
 });

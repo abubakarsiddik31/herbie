@@ -1734,6 +1734,7 @@ export function ChatPage() {
         onOpenSettings={() => setSettingsOpen(true)}
         onOpenShortcuts={() => setShortcutsOpen(true)}
         onOpenPromptLibrary={() => setPromptLibraryOpen(true)}
+        semanticAvailable={Boolean(models?.semanticSearch)}
       />
 
       <ShortcutsDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} />

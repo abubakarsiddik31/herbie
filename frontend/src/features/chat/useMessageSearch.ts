@@ -7,12 +7,15 @@ const MIN_QUERY_CHARS = 2;
 
 // Message search is server-side FTS; debounce typing and only issue a
 // request once the query has at least two characters.
-export function useMessageSearch(rawQuery: string, enabled: boolean) {
+export function useMessageSearch(rawQuery: string, enabled: boolean, semantic = false) {
   const query = useDebouncedValue(rawQuery.trim(), 250);
   return useQuery({
-    queryKey: ["message-search", query],
-    queryFn: () =>
-      apiFetch<MessageSearchResponse>(`/api/search/messages?q=${encodeURIComponent(query)}`),
+    queryKey: ["message-search", query, semantic],
+    queryFn: () => {
+      const params = new URLSearchParams({ q: query });
+      if (semantic) params.set("semantic", "1");
+      return apiFetch<MessageSearchResponse>(`/api/search/messages?${params.toString()}`);
+    },
     enabled: enabled && query.length >= MIN_QUERY_CHARS,
     retry: false,
     staleTime: 30_000,
