@@ -2,6 +2,8 @@ package httpapi
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"math"
 	"net/http"
 	"sort"
@@ -30,7 +32,6 @@ type MessageEmbedder interface {
 const (
 	defaultSearchLimit = 20
 	maxSearchLimit     = 50
-	rerankTextLimit    = 2000
 )
 
 type searchHitDTO struct {
@@ -80,27 +81,36 @@ func (s *Server) handleSearchMessages(w http.ResponseWriter, r *http.Request) {
 	}
 	semantic := r.URL.Query().Get("semantic") == "1" && s.deps.SemanticEmbedder != nil
 
-	searchLimit := limit
+	var hits []storage.SearchHit
+	var hasMore bool
+	var err error
 	if semantic {
-		searchLimit = maxSearchLimit
-		offset = 0
+		// Over-fetch a bounded candidate pool for reranking; never more than
+		// twice the requested page (capped) to keep embedding cost sane.
+		candidateLimit := limit * 2
+		if candidateLimit > maxSearchLimit {
+			candidateLimit = maxSearchLimit
+		}
+		hits, _, err = s.deps.MessageSearch.Search(r.Context(), userID, q, candidateLimit, 0)
+		if err == nil {
+			reranked, rerr := s.rerankSearch(r.Context(), userID, q, hits)
+			if rerr != nil {
+				if s.deps.Log != nil {
+					s.deps.Log.Warn("semantic search failed; using full-text order", "err", rerr)
+				}
+				semantic = false
+				hits, hasMore, err = s.deps.MessageSearch.Search(r.Context(), userID, q, limit, offset)
+			} else {
+				hits = reranked
+				hasMore = false
+			}
+		}
+	} else {
+		hits, hasMore, err = s.deps.MessageSearch.Search(r.Context(), userID, q, limit, offset)
 	}
-	hits, hasMore, err := s.deps.MessageSearch.Search(r.Context(), userID, q, searchLimit, offset)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal", "could not search messages")
 		return
-	}
-	if semantic {
-		reranked, rerr := s.rerankSearch(r.Context(), userID, q, hits)
-		if rerr != nil {
-			if s.deps.Log != nil {
-				s.deps.Log.Warn("semantic search failed; using full-text order", "err", rerr)
-			}
-			semantic = false
-		} else {
-			hits = reranked
-			hasMore = false
-		}
 	}
 	if len(hits) > limit {
 		hits = hits[:limit]
@@ -133,14 +143,12 @@ func (s *Server) rerankSearch(ctx context.Context, userID, query string, hits []
 		return nil, err
 	}
 	if len(qres.Vectors) == 0 || len(qres.Vectors[0]) == 0 {
-		return hits, nil
+		return nil, errors.New("embed query returned an empty vector")
 	}
+	s.meterEmbedding(ctx, userID, qres.Usage)
 	texts := make([]string, len(hits))
 	for i, h := range hits {
 		text := h.Content
-		if len(text) > rerankTextLimit {
-			text = text[:rerankTextLimit]
-		}
 		if strings.TrimSpace(text) == "" {
 			text = strings.ReplaceAll(strings.ReplaceAll(h.Snippet, storage.SnippetHitStart, ""), storage.SnippetHitStop, "")
 		}
@@ -151,14 +159,13 @@ func (s *Server) rerankSearch(ctx context.Context, userID, query string, hits []
 		return nil, err
 	}
 	if len(dres.Vectors) != len(hits) {
-		return nil, nil
+		return nil, fmt.Errorf("embed documents returned %d vectors for %d texts", len(dres.Vectors), len(hits))
 	}
 	queryVec := qres.Vectors[0]
 	for i := range hits {
 		hits[i].Score = cosine(queryVec, dres.Vectors[i])
 	}
 	sort.SliceStable(hits, func(i, j int) bool { return hits[i].Score > hits[j].Score })
-	s.meterEmbedding(ctx, userID, qres.Usage)
 	s.meterEmbedding(ctx, userID, dres.Usage)
 	return hits, nil
 }

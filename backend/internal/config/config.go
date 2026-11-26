@@ -382,6 +382,7 @@ func Load() (Config, error) {
 		TitleModel:                os.Getenv("TITLE_MODEL"),
 		AllowUserProviderKeys:     envBool("ALLOW_USER_PROVIDER_KEYS", false),
 		AppURL:                    os.Getenv("APP_URL"),
+		SemanticSearchEnabled:     envBool("SEMANTIC_SEARCH_ENABLED", false),
 		EmailVerificationRequired: envBool("EMAIL_VERIFICATION_REQUIRED", false),
 		EmailLogLinks:             envBool("EMAIL_LOG_LINKS", false),
 		AuthRateLimitMax:          envIntOr("AUTH_RATE_LIMIT_MAX", 20),

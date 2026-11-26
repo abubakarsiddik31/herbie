@@ -304,3 +304,17 @@ func TestWigoloConfig(t *testing.T) {
 		t.Errorf("BinPath = %q, want %q", cfg.WebSearch.BinPath, "/path/to/dist/index.js")
 	}
 }
+
+func TestSemanticSearchFlag(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://x")
+	t.Setenv("JWT_SECRET", "0123456789abcdef0123456789abcdef")
+	t.Setenv("GEMINI_API_KEY", "k")
+	if cfg, err := Load(); err != nil || cfg.SemanticSearchEnabled {
+		t.Fatalf("default semantic search = %v %v", cfg.SemanticSearchEnabled, err)
+	}
+	t.Setenv("SEMANTIC_SEARCH_ENABLED", "true")
+	cfg, err := Load()
+	if err != nil || !cfg.SemanticSearchEnabled {
+		t.Fatalf("enabled semantic search = %v %v", cfg.SemanticSearchEnabled, err)
+	}
+}

@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { useTheme } from "next-themes";
 import {
@@ -247,9 +247,14 @@ export function CommandPalette({
     }
   }
 
+  useEffect(() => {
+    if (!semanticAvailable) setSemantic(false);
+  }, [semanticAvailable]);
+
   function handleOpenChange(nextOpen: boolean) {
     if (!nextOpen) {
       setQuery("");
+      setSemantic(false);
       setSelectedIndex(0);
     }
     onOpenChange(nextOpen);
@@ -279,15 +284,21 @@ export function CommandPalette({
                 type="checkbox"
                 checked={semantic}
                 onChange={(e) => setSemantic(e.target.checked)}
-                aria-label="Semantic message search"
+                aria-label="Semantic message rerank"
+                title="Reranks keyword matches (top candidates) by embedding similarity; it does not find messages lacking the keywords."
               />
-              Semantic
+              Semantic rerank
             </label>
           )}
         </div>
         {searching && query.trim().length >= 2 && (
           <p className="border-b px-4 py-1.5 text-[11px] text-muted-foreground">
-            {semantic ? "Searching messages semantically…" : "Searching messages…"}
+            {semantic ? "Reranking keyword matches…" : "Searching messages…"}
+          </p>
+        )}
+        {semantic && !searching && searchData?.semantic === false && query.trim().length >= 2 && (
+          <p className="border-b px-4 py-1.5 text-[11px] text-muted-foreground">
+            Semantic rerank unavailable; showing keyword order.
           </p>
         )}
         <ScrollArea className="max-h-80">

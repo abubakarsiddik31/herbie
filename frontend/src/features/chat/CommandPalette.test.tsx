@@ -161,7 +161,7 @@ describe("CommandPalette", () => {
     );
     renderPalette({ semanticAvailable: true });
     await userEvent.type(screen.getByPlaceholderText(/type a command/i), "moon");
-    await userEvent.click(screen.getByLabelText("Semantic message search"));
+    await userEvent.click(screen.getByLabelText("Semantic message rerank"));
     await waitFor(() => expect(semanticParam).toBe("1"));
   });
 });

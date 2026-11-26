@@ -229,3 +229,19 @@ func TestCosine(t *testing.T) {
 		t.Fatalf("orthogonal = %v", got)
 	}
 }
+
+func TestSemanticSearchVectorMismatchFallsBack(t *testing.T) {
+	fake := &fakeSearch{hits: []storage.SearchHit{
+		{MessageID: "m-1", ConversationID: "c-1", Title: "One", Role: "assistant", Content: "a", CreatedAt: time.Now()},
+		{MessageID: "m-2", ConversationID: "c-2", Title: "Two", Role: "user", Content: "b", CreatedAt: time.Now()},
+	}}
+	emb := &fakeEmbedder{
+		query: embedding.Result{Vectors: [][]float32{{1, 0}}},
+		docs:  embedding.Result{Vectors: [][]float32{{1, 0}}},
+	}
+	h, token := newSemanticSearchServer(t, fake, emb)
+	rec := searchRequest(t, h, token, "?q=capital&semantic=1")
+	if rec.Code != http.StatusOK || strings.Contains(rec.Body.String(), `"semantic":true`) {
+		t.Fatalf("mismatch fallback: %d %s", rec.Code, rec.Body.String())
+	}
+}

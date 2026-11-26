@@ -212,7 +212,7 @@ func main() {
 	for _, m := range chat.Catalog() {
 		byModel[m.ID] = cost.Rates{ChatInputPerM: m.InputPerM, ChatOutputPerM: m.OutputPerM}
 	}
-	if cfg.RAG.Enabled {
+	if cfg.RAG.Enabled || cfg.SemanticSearchEnabled {
 		byModel[cfg.RAG.EmbeddingModel] = cost.Rates{ChatInputPerM: cfg.RAG.EmbeddingInputRate}
 	}
 	rates := cost.Table{
