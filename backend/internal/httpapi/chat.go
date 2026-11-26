@@ -63,6 +63,7 @@ type MsgStore interface {
 	ForConversation(ctx context.Context, convID, userID string) ([]storage.Message, error)
 	ByID(ctx context.Context, msgID, userID string) (storage.Message, error)
 	PathToLeaf(ctx context.Context, convID, userID, leafID string) ([]storage.Message, error)
+	ByClientMessageID(ctx context.Context, convID, userID, clientID string) (storage.Message, error)
 	LatestRowID(ctx context.Context, convID, userID string) (string, error)
 	DeleteBranch(ctx context.Context, convID, msgID, userID string) error
 	CopyPath(ctx context.Context, srcConvID, userID, newConvID string, path []storage.Message) (string, error)
@@ -203,13 +204,26 @@ func rowOnPath(path []storage.Message, rowID string) int {
 	return -1
 }
 
+// handleRunStatus reports whether a run currently holds this conversation's
+// slot, so a reconnecting client can refetch once it is safe.
+func (s *Server) handleRunStatus(w http.ResponseWriter, r *http.Request) {
+	userID, _ := userIDFrom(r.Context())
+	convID := r.PathValue("id")
+	if _, err := s.deps.Convos.ByID(r.Context(), convID, userID); err != nil {
+		writeError(w, http.StatusNotFound, "not_found", "conversation not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"active": s.runActive(convID)})
+}
+
 func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 	userID, _ := userIDFrom(r.Context())
 	convID := r.PathValue("id")
 	var req struct {
-		Content   string       `json:"content"`
-		Images    []imageInput `json:"images"`
-		ReplyToID string       `json:"replyToId"`
+		Content         string       `json:"content"`
+		Images          []imageInput `json:"images"`
+		ReplyToID       string       `json:"replyToId"`
+		ClientMessageID string       `json:"clientMessageId"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", "invalid request body")
@@ -226,6 +240,11 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 	parts, err := decodeImages(req.Images)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "validation_error", err.Error())
+		return
+	}
+	req.ClientMessageID = strings.TrimSpace(req.ClientMessageID)
+	if len(req.ClientMessageID) > 100 {
+		writeError(w, http.StatusBadRequest, "bad_request", "clientMessageId is too long")
 		return
 	}
 
@@ -262,6 +281,17 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 	// A paused conversation must be resolved before new turns.
 	if s.blockedByPendingApproval(w, ctx, convID, userID) {
 		return
+	}
+	// Retried sends carry the same client id: return the existing prompt
+	// instead of creating a duplicate turn.
+	if req.ClientMessageID != "" {
+		if _, derr := s.deps.Msgs.ByClientMessageID(ctx, convID, userID, req.ClientMessageID); derr == nil {
+			writeError(w, http.StatusConflict, "duplicate_send", "this message was already sent")
+			return
+		} else if !errors.Is(derr, storage.ErrNotFound) {
+			writeError(w, http.StatusInternalServerError, "internal", "could not check message")
+			return
+		}
 	}
 	// Hold the run slot from before the prompt row is written so a
 	// concurrent mutation cannot race the new branch.
@@ -302,10 +332,15 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 	promptID, err := s.deps.Msgs.Add(ctx, storage.Message{
 		ConversationID: convID, UserID: userID, Role: string(model.RoleUser),
 		ParentID: leaf, ReplyToID: req.ReplyToID, QuoteText: quoteText,
-		Content: req.Content,
-		Data:    mustJSON(model.Message{Role: model.RoleUser, Content: modelContent, Parts: parts}),
+		ClientMessageID: req.ClientMessageID,
+		Content:         req.Content,
+		Data:            mustJSON(model.Message{Role: model.RoleUser, Content: modelContent, Parts: parts}),
 	})
 	if err != nil {
+		if errors.Is(err, storage.ErrDuplicate) {
+			writeError(w, http.StatusConflict, "duplicate_send", "this message was already sent")
+			return
+		}
 		s.deps.Log.Error("could not store message", "err", err, "conv_id", convID)
 		writeError(w, http.StatusInternalServerError, "internal", "could not store message")
 		return

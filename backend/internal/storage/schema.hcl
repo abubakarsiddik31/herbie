@@ -525,6 +525,10 @@ table "messages" {
     type = text
     null = true
   }
+  column "client_message_id" {
+    type = text
+    null = true
+  }
   # Maintained by the messages_search_vector trigger; truncated to 100,000
   # characters to keep the GIN entry bounded.
   column "search_vector" {

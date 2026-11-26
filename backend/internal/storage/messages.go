@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -21,19 +22,21 @@ type Message struct {
 	// ReplyToID links a user row to the message it quotes; empty = no quote.
 	// The FK clears it when the quoted row is deleted, while QuoteText keeps
 	// the server-side snapshot the model saw.
-	ReplyToID    string
-	QuoteText    string
-	Role         string
-	Content      string
-	Data         []byte // golem model.Message JSON (durable additive-only)
-	Sources      []byte // cited chunks as the sources SSE rows ([] when the run never searched)
-	InputTokens  int
-	OutputTokens int
-	Requests     int
-	CostMicros   int64
-	Truncated    bool
-	Model        string // answering model, stamped on the last assistant row
-	CreatedAt    time.Time
+	ReplyToID string
+	QuoteText string
+	// ClientMessageID is the client's idempotency key for a user prompt.
+	ClientMessageID string
+	Role            string
+	Content         string
+	Data            []byte // golem model.Message JSON (durable additive-only)
+	Sources         []byte // cited chunks as the sources SSE rows ([] when the run never searched)
+	InputTokens     int
+	OutputTokens    int
+	Requests        int
+	CostMicros      int64
+	Truncated       bool
+	Model           string // answering model, stamped on the last assistant row
+	CreatedAt       time.Time
 }
 
 type Messages struct{ pool *pgxpool.Pool }
@@ -51,7 +54,7 @@ func (m *Messages) Add(ctx context.Context, msg Message) (string, error) {
 	msg.Data = SanitizeJSONBytes(msg.Data)
 	msg.Sources = SanitizeJSONBytes(msg.Sources)
 	msg.QuoteText = SanitizeText(msg.QuoteText)
-	var parent, replyTo, quote any
+	var parent, replyTo, quote, clientID any
 	if msg.ParentID != "" {
 		parent = msg.ParentID
 	}
@@ -61,15 +64,22 @@ func (m *Messages) Add(ctx context.Context, msg Message) (string, error) {
 	if msg.QuoteText != "" {
 		quote = msg.QuoteText
 	}
+	if msg.ClientMessageID != "" {
+		clientID = msg.ClientMessageID
+	}
 	var id string
 	err := m.pool.QueryRow(ctx,
 		`INSERT INTO messages
-		 (conversation_id, user_id, role, content, data, sources, input_tokens, output_tokens, requests, cost_micro_usd, truncated, model, parent_id, reply_to_id, quote_text)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+		 (conversation_id, user_id, role, content, data, sources, input_tokens, output_tokens, requests, cost_micro_usd, truncated, model, parent_id, reply_to_id, quote_text, client_message_id)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
 		 RETURNING id`,
 		msg.ConversationID, msg.UserID, msg.Role, msg.Content, msg.Data, msg.Sources,
-		msg.InputTokens, msg.OutputTokens, msg.Requests, msg.CostMicros, msg.Truncated, msg.Model, parent, replyTo, quote).Scan(&id)
+		msg.InputTokens, msg.OutputTokens, msg.Requests, msg.CostMicros, msg.Truncated, msg.Model, parent, replyTo, quote, clientID).Scan(&id)
 	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "idx_messages_client_id" {
+			return "", ErrDuplicate
+		}
 		return "", fmt.Errorf("add message: %w", err)
 	}
 	return id, nil
@@ -78,7 +88,7 @@ func (m *Messages) Add(ctx context.Context, msg Message) (string, error) {
 // messageTreeColumns is the recursive walk's explicit column list. The final
 // SELECT still casts the ids for scanning; the CTE keeps parent/reply ids as
 // uuid so the join and UNION type-check.
-const messageTreeColumns = `id, conversation_id, user_id, parent_id, reply_to_id, quote_text, role, content, data, sources, input_tokens, output_tokens, requests, cost_micro_usd, truncated, model, created_at`
+const messageTreeColumns = `id, conversation_id, user_id, parent_id, reply_to_id, quote_text, client_message_id, role, content, data, sources, input_tokens, output_tokens, requests, cost_micro_usd, truncated, model, created_at`
 
 // prefixed qualifies every comma-separated column in cols with prefix.
 func prefixed(prefix, cols string) string {
@@ -91,13 +101,14 @@ func prefixed(prefix, cols string) string {
 
 const messageColumns = `id, conversation_id::text, user_id::text, COALESCE(parent_id::text, '') AS parent_id,
 		       COALESCE(reply_to_id::text, '') AS reply_to_id, COALESCE(quote_text, '') AS quote_text,
+		       COALESCE(client_message_id, '') AS client_message_id,
 		       role, content, data, sources,
 		       input_tokens, output_tokens, requests, cost_micro_usd, truncated, model, created_at`
 
 func scanMessage(row pgx.Row) (Message, error) {
 	var msg Message
 	err := row.Scan(&msg.ID, &msg.ConversationID, &msg.UserID, &msg.ParentID, &msg.ReplyToID, &msg.QuoteText,
-		&msg.Role, &msg.Content, &msg.Data, &msg.Sources, &msg.InputTokens, &msg.OutputTokens, &msg.Requests, &msg.CostMicros,
+		&msg.ClientMessageID, &msg.Role, &msg.Content, &msg.Data, &msg.Sources, &msg.InputTokens, &msg.OutputTokens, &msg.Requests, &msg.CostMicros,
 		&msg.Truncated, &msg.Model, &msg.CreatedAt)
 	return msg, err
 }
@@ -131,6 +142,24 @@ func (m *Messages) ByID(ctx context.Context, msgID, userID string) (Message, err
 			return Message{}, ErrNotFound
 		}
 		return Message{}, fmt.Errorf("message by id: %w", err)
+	}
+	return msg, nil
+}
+
+// ByClientMessageID finds a user prompt by its idempotency key.
+func (m *Messages) ByClientMessageID(ctx context.Context, convID, userID, clientID string) (Message, error) {
+	if clientID == "" {
+		return Message{}, ErrNotFound
+	}
+	msg, err := scanMessage(m.pool.QueryRow(ctx,
+		`SELECT `+messageColumns+` FROM messages
+		 WHERE conversation_id = $1 AND user_id = $2 AND client_message_id = $3`,
+		convID, userID, clientID))
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return Message{}, ErrNotFound
+		}
+		return Message{}, fmt.Errorf("message by client id: %w", err)
 	}
 	return msg, nil
 }

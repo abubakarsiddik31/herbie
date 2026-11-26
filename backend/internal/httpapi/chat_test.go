@@ -408,6 +408,15 @@ func (f *fakeMsgs) forConv(convID, userID string) []storage.Message {
 	return out
 }
 
+func (f *fakeMsgs) ByClientMessageID(_ context.Context, convID, userID, clientID string) (storage.Message, error) {
+	for _, m := range f.rows {
+		if m.ConversationID == convID && m.UserID == userID && m.ClientMessageID == clientID {
+			return m, nil
+		}
+	}
+	return storage.Message{}, storage.ErrNotFound
+}
+
 func (f *fakeMsgs) ByID(_ context.Context, msgID, userID string) (storage.Message, error) {
 	for _, m := range f.rows {
 		if m.ID == msgID && m.UserID == userID {
