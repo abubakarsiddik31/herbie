@@ -142,8 +142,14 @@ export function useChat(onDone?: () => void) {
             thresholdTokens: done.thresholdTokens ?? prev?.thresholdTokens ?? 40000,
             keepRecent: done.keepRecent ?? prev?.keepRecent ?? 10,
             compacted: prev?.compacted ?? false,
-            breakdown: prev?.breakdown,
-            exact: prev?.exact ?? false,
+            breakdown: prev?.breakdown
+              ? {
+                  ...prev.breakdown,
+                  totalTokens: done.contextTokens ?? prev.breakdown.totalTokens,
+                  exact: false,
+                }
+              : undefined,
+            exact: false,
           }));
         }
         setMessages((m) => m.map((msg) => msg.id === assistantId

@@ -57,6 +57,9 @@ Answer clearly and concisely in markdown.`
 // compacted run never silently drops the persona.
 const DefaultSystemPrompt = systemPrompt
 
+// maxHistoryMessages mirrors the TrimHistory budget applied to every run.
+const maxHistoryMessages = 40
+
 // Agent builds a golem agent per run. Golem fixes the model client, the
 // system instructions, and the tool set at construction, so a per-request
 // build is how a run's conversation-scoped model (RunSpec) and user runtime
@@ -77,6 +80,28 @@ func New(registry *ModelRegistry, usageLimit golem.UsageLimit, env ToolEnv) (*Ag
 // use an estimate.
 func (a *Agent) CountInputTokens(ctx context.Context, spec RunSpec, messages []model.Message, toolSpecs []model.ToolSpec) (int, error) {
 	return a.registry.CountInputTokens(ctx, spec, messages, toolSpecs)
+}
+
+// RequestMessages builds the ordered request the agent sends for exact token
+// counting: trimmed history, repaired tool pairing, no history system
+// messages, the run instructions, then the new prompt.
+func RequestMessages(ctx context.Context, instructions string, history []model.Message, prompt string, parts []model.Part) ([]model.Message, error) {
+	trimmed, err := golem.TrimHistory(maxHistoryMessages)(ctx, history)
+	if err != nil {
+		return nil, err
+	}
+	repaired, _ := golem.NormalizeHistory(trimmed)
+	messages := make([]model.Message, 0, len(repaired)+2)
+	if instructions != "" {
+		messages = append(messages, model.Message{Role: model.RoleSystem, Content: instructions})
+	}
+	for _, m := range repaired {
+		if m.Role == model.RoleSystem {
+			continue
+		}
+		messages = append(messages, m)
+	}
+	return append(messages, model.Message{Role: model.RoleUser, Content: prompt, Parts: parts}), nil
 }
 
 // PromptFor exposes the assembled run instructions (base prompt plus the
@@ -115,7 +140,7 @@ func (a *Agent) build(spec RunSpec, tools []tool.Tool[Deps]) (*golem.Agent[Deps,
 	}
 	opts := []golem.Option[Deps, string]{
 		golem.WithInstructions[Deps, string](promptFor(spec, tools)),
-		golem.WithHistoryProcessor[Deps, string](golem.TrimHistory(40)),
+		golem.WithHistoryProcessor[Deps, string](golem.TrimHistory(maxHistoryMessages)),
 		golem.WithMaxAttempts[Deps, string](2),
 		golem.WithUsageLimit[Deps, string](a.limit),
 		golem.WithMaxIterations[Deps, string](maxIter),

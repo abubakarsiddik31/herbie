@@ -160,8 +160,8 @@ describe("useChat send", () => {
       thresholdTokens: 40000,
       keepRecent: 10,
       compacted: true,
-      exact: true,
-      breakdown: { totalTokens: 2400, exact: true, model: "gemini-3.5-flash" },
+      exact: false,
+      breakdown: { totalTokens: 2415, exact: false, model: "gemini-3.5-flash" },
     });
   });
 });

@@ -37,6 +37,7 @@ export function ContextStatusMeter({
   className,
 }: ContextStatusMeterProps) {
   const [open, setOpen] = useState(false);
+  const isExact = exact ?? breakdown?.exact ?? false;
   const threshold = thresholdTokens > 0 ? thresholdTokens : 40_000;
   const pct = Math.min(100, Math.max(0, Math.round((estimatedTokens / threshold) * 100)));
 
@@ -117,7 +118,7 @@ export function ContextStatusMeter({
                 </Badge>
                 {breakdown && (
                   <Badge variant="outline" className="text-[10px] h-5 px-1.5 font-normal">
-                    {exact ? "exact" : "estimated"}
+                    {isExact ? "exact" : "estimated"}
                   </Badge>
                 )}
               </div>
@@ -149,16 +150,18 @@ export function ContextStatusMeter({
                   <span className="font-mono">{breakdown.model}</span>
                 </div>
                 {[
-                  ["System (incl. memory)", breakdown.systemTokens],
-                  ["Memory", breakdown.memoryTokens],
-                  ["Preferences", breakdown.instructionsTokens],
+                  ["System prompt", breakdown.systemTokens],
+                  ["· of which memory", breakdown.memoryTokens],
+                  ["· of which preferences", breakdown.instructionsTokens],
                   ["History", breakdown.historyTokens],
                   ["New prompt", breakdown.promptTokens],
                   ["Attachments", breakdown.attachmentTokens],
                 ].map(([label, value]) => (
                   <div key={String(label)} className="flex justify-between">
                     <span className="text-muted-foreground">{label}</span>
-                    <span className="font-mono text-foreground">{Number(value).toLocaleString()}</span>
+                    <span className="font-mono text-foreground">
+                      {Number(value ?? 0).toLocaleString()}
+                    </span>
                   </div>
                 ))}
               </div>

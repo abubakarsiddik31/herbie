@@ -58,8 +58,9 @@ type ModelRegistry struct {
 	newOpts clientOptionsFactory
 	counter CounterFactory
 
-	mu    sync.Mutex
-	cache map[string]model.StreamingModel
+	mu       sync.Mutex
+	cache    map[string]model.StreamingModel
+	counters map[string]tokens.Counter
 }
 
 // CounterFactory builds a provider token counter for a model. It is a test
@@ -102,13 +103,26 @@ func (r *ModelRegistry) CountInputTokens(ctx context.Context, spec RunSpec, mess
 	if !ok {
 		return 0, ErrNoTokenCounter
 	}
-	factory := r.counter
-	if factory == nil {
-		factory = r.productionCounter
-	}
-	counter, err := factory(target.Provider, target.ID)
-	if err != nil {
-		return 0, err
+	key := target.Provider + "|" + target.ID
+	r.mu.Lock()
+	counter := r.counters[key]
+	r.mu.Unlock()
+	if counter == nil {
+		factory := r.counter
+		if factory == nil {
+			factory = r.productionCounter
+		}
+		built, err := factory(target.Provider, target.ID)
+		if err != nil {
+			return 0, err
+		}
+		r.mu.Lock()
+		if r.counters == nil {
+			r.counters = map[string]tokens.Counter{}
+		}
+		r.counters[key] = built
+		r.mu.Unlock()
+		counter = built
 	}
 	return counter.CountTokens(ctx, tokens.CountInput{Messages: messages, Tools: toolSpecs})
 }

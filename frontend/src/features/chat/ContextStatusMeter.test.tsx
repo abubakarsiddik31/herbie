@@ -37,7 +37,7 @@ describe("ContextStatusMeter", () => {
     await user.click(screen.getByRole("button", { name: /Context status:/i }));
     expect(await screen.findByText("Token breakdown")).toBeInTheDocument();
     expect(screen.getByText("exact")).toBeInTheDocument();
-    expect(screen.getByText("System (incl. memory)")).toBeInTheDocument();
+    expect(screen.getByText("System prompt")).toBeInTheDocument();
     expect(screen.getByText("1,500")).toBeInTheDocument();
   });
 

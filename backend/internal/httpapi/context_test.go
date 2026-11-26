@@ -42,6 +42,48 @@ func TestContextBreakdownExact(t *testing.T) {
 	}
 }
 
+func TestContextBreakdownTrimsHistoryLikeTheRun(t *testing.T) {
+	saw := 0
+	srv := contextTestServer(t, func(string, string) (tokens.Counter, error) {
+		return testmodel.CountFunc(func(_ context.Context, in tokens.CountInput) (int, error) {
+			saw = len(in.Messages)
+			return 1, nil
+		}), nil
+	})
+	history := make([]model.Message, 50)
+	for i := range history {
+		history[i] = model.Message{Role: model.RoleUser, Content: "hello"}
+	}
+	bd := srv.contextBreakdown(context.Background(), "u-1",
+		chat.RunSpec{Model: "gemini-3.5-flash", SystemPrompt: "system"},
+		history, "next", nil, nil)
+	if !bd.Exact {
+		t.Fatalf("expected exact count: %+v", bd)
+	}
+	if saw != 42 { // 40 trimmed + system + prompt
+		t.Fatalf("counter saw %d messages, want 42", saw)
+	}
+}
+
+func TestContextBreakdownCountsAttachmentsOnce(t *testing.T) {
+	srv := contextTestServer(t, func(string, string) (tokens.Counter, error) {
+		return nil, chat.ErrNoTokenCounter
+	})
+	history := []model.Message{{
+		Role: model.RoleUser, Content: "hello",
+		Parts: []model.Part{model.ImageData("image/png", make([]byte, 1<<20))},
+	}}
+	bd := srv.contextBreakdown(context.Background(), "u-1",
+		chat.RunSpec{Model: "gemini-3.5-flash", SystemPrompt: "system"},
+		history, "next", nil, nil)
+	if bd.AttachmentTokens != 1000 {
+		t.Fatalf("attachment tokens = %d", bd.AttachmentTokens)
+	}
+	if bd.TotalTokens > 5000 {
+		t.Fatalf("attachment bytes were double counted: %+v", bd)
+	}
+}
+
 func TestContextBreakdownFallsBackToEstimate(t *testing.T) {
 	srv := contextTestServer(t, func(string, string) (tokens.Counter, error) {
 		return nil, chat.ErrNoTokenCounter
@@ -53,7 +95,7 @@ func TestContextBreakdownFallsBackToEstimate(t *testing.T) {
 	if bd.Exact {
 		t.Fatalf("unexpected exact count: %+v", bd)
 	}
-	want := chat.EstimateTextTokens("system") + chat.EstimateHistoryTokens(history) + chat.EstimateTextTokens("next")
+	want := chat.EstimateTextTokens("system") + chat.EstimateHistoryTextTokens(history) + chat.EstimateTextTokens("next")
 	if bd.TotalTokens != want {
 		t.Fatalf("total = %d, want %d (%+v)", bd.TotalTokens, want, bd)
 	}

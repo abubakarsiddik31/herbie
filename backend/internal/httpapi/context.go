@@ -12,7 +12,8 @@ import (
 
 // contextBreakdown is the token accounting shown in the context meter. The
 // total is exact when the provider offers a counting endpoint, otherwise it
-// is the sum of the estimates.
+// is the sum of the estimates. Memory and instruction rows are "of which"
+// views of the assembled system prompt, not additional tokens.
 type contextBreakdown struct {
 	SystemTokens       int    `json:"systemTokens"`
 	MemoryTokens       int    `json:"memoryTokens"`
@@ -25,26 +26,43 @@ type contextBreakdown struct {
 	Model              string `json:"model"`
 }
 
-const estimatePerAttachment = 1000
-
-func countAttachments(history []model.Message, parts []model.Part) int {
-	n := len(parts)
-	for _, m := range history {
-		n += len(m.Parts)
+func estimateAttachment(part model.Part) int {
+	switch part.Kind {
+	case model.PartImage:
+		return 1000
+	case model.PartAudio:
+		return 1500
+	case model.PartVideo, model.PartDocument:
+		return 2000
+	default:
+		return 1000
 	}
-	return n
+}
+
+func estimateAttachments(history []model.Message, parts []model.Part) int {
+	total := 0
+	for _, m := range history {
+		for _, p := range m.Parts {
+			total += estimateAttachment(p)
+		}
+	}
+	for _, p := range parts {
+		total += estimateAttachment(p)
+	}
+	return total
 }
 
 // contextBreakdown prices the request runTurn is about to send: the assembled
-// system prompt (including memory and user preferences), history, the new
+// instructions (including memory and user preferences), history, the new
 // prompt, and attachments. Exact provider counting is attempted with a short
 // timeout; any failure falls back to the 4-chars/token estimate.
 func (s *Server) contextBreakdown(ctx context.Context, userID string, spec chat.RunSpec, history []model.Message, prompt string, parts []model.Part, tools []tool.Tool[chat.Deps]) contextBreakdown {
+	instructions := chat.PromptFor(spec, tools)
 	b := contextBreakdown{
-		SystemTokens:     chat.EstimateTextTokens(spec.SystemPrompt),
-		HistoryTokens:    chat.EstimateHistoryTokens(history),
+		SystemTokens:     chat.EstimateTextTokens(instructions),
+		HistoryTokens:    chat.EstimateHistoryTextTokens(history),
 		PromptTokens:     chat.EstimateTextTokens(prompt),
-		AttachmentTokens: countAttachments(history, parts) * estimatePerAttachment,
+		AttachmentTokens: estimateAttachments(history, parts),
 		Model:            spec.Model,
 	}
 	if s.deps.Memories != nil {
@@ -69,15 +87,20 @@ func (s *Server) contextBreakdown(ctx context.Context, userID string, spec chat.
 	if agent == nil {
 		return b
 	}
-	messages := make([]model.Message, 0, len(history)+2)
-	messages = append(messages, model.Message{Role: model.RoleSystem, Content: chat.PromptFor(spec, tools)})
-	messages = append(messages, history...)
-	messages = append(messages, model.Message{Role: model.RoleUser, Content: prompt, Parts: parts})
-	countCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	messages, err := chat.RequestMessages(ctx, instructions, history, prompt, parts)
+	if err != nil {
+		if s.deps.Log != nil {
+			s.deps.Log.Debug("exact token count unavailable", "model", spec.Model, "err", err)
+		}
+		return b
+	}
+	countCtx, cancel := context.WithTimeout(ctx, 1500*time.Millisecond)
 	defer cancel()
 	if n, err := agent.CountInputTokens(countCtx, spec, messages, chat.ToolSpecs(tools)); err == nil && n > 0 {
 		b.TotalTokens = n
 		b.Exact = true
+	} else if err != nil && s.deps.Log != nil {
+		s.deps.Log.Debug("exact token count failed; using estimate", "model", spec.Model, "err", err)
 	}
 	return b
 }
