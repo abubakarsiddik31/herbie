@@ -37,7 +37,10 @@ type Config struct {
 	// AppURL is the public SPA origin used in emailed links (defaults to
 	// FrontendOrigin). EmailVerificationRequired gates password login on a
 	// proven email; EmailLogLinks lets the dev log mailer print the link.
-	AppURL                    string
+	AppURL string
+	// SemanticSearchEnabled turns on embedding-based reranking of message
+	// search; it needs a Gemini key and Weaviate is not involved.
+	SemanticSearchEnabled     bool
 	EmailVerificationRequired bool
 	EmailLogLinks             bool
 	// AuthRateLimit caps login/register/reset/verify attempts per window;

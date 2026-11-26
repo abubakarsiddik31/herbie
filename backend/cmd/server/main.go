@@ -112,6 +112,7 @@ func main() {
 	// store, and object store all need the rag compose profile running.
 	var ragSearch httpapi.RagSearchFunc
 	var ragRunner httpapi.RagRunner
+	var ragEmbedder *rag.Embedder
 	// Build the external stores even when RAG serving is off: account
 	// deletion must still be able to remove originals and vectors from a
 	// previously enabled deployment. Connections are lazy.
@@ -137,6 +138,7 @@ func main() {
 			log.Error("rag embedder", "err", err)
 			os.Exit(1)
 		}
+		ragEmbedder = embedder
 		if err := vs.EnsureCollection(ctx); err != nil {
 			log.Error("rag weaviate", "err", err)
 			os.Exit(1)
@@ -164,6 +166,26 @@ func main() {
 		}
 		ragRunner = svc
 		log.Info("rag enabled", "model", cfg.RAG.EmbeddingModel, "weaviate", cfg.RAG.WeaviateURL, "minio", cfg.RAG.MinIOEndpoint)
+	}
+
+	var semanticEmbedder httpapi.MessageEmbedder
+	if cfg.SemanticSearchEnabled {
+		if cfg.GeminiAPIKey == "" {
+			log.Warn("semantic search disabled: GEMINI_API_KEY is required")
+		} else {
+			if ragEmbedder == nil {
+				built, err := rag.NewEmbedder(cfg.GeminiAPIKey, cfg.RAG.EmbeddingModel, cfg.RAG.EmbeddingDims, cfg.RAG.EmbedBatchSize)
+				if err != nil {
+					log.Warn("semantic search disabled: embedder unavailable", "err", err)
+				} else {
+					ragEmbedder = built
+				}
+			}
+			if ragEmbedder != nil {
+				semanticEmbedder = ragEmbedder
+				log.Info("semantic message search enabled", "model", cfg.RAG.EmbeddingModel)
+			}
+		}
 	}
 
 	// Compaction benefits every long thread, not just RAG runs, so the
@@ -244,6 +266,7 @@ func main() {
 		Vectors:          vectors,
 		Objects:          objects,
 		Account:          storage.NewAccounts(pool),
+		SemanticEmbedder: semanticEmbedder,
 	})
 	srv := &http.Server{Addr: ":" + cfg.Port, Handler: handler, ReadHeaderTimeout: 10 * time.Second}
 	errCh := make(chan error, 1)
